@@ -8,3 +8,4 @@ icaro.yaml
 coverage.out
 /internal/ui/dist/
 /ui/node_modules/
+.DS_Store
