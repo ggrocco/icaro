@@ -96,13 +96,14 @@ Scope: the workflow engine **orchestrates sessions** (ADR 0002). It is not a gen
 
 A workflow is a DAG validated by JSON Schema plus semantic validations: unique names, acyclicity, valid references, retry/timeout policies, repository dependencies, and permissions. **Data flow is part of the contract:** steps declare `outputs`, later steps reference them via a defined interpolation syntax, and `env` is explicit. A workflow without defined data flow is incomplete (see `docs/schemas/workflow.schema.json`).
 
-MVP step types:
+Step model: a step has no built-in kind — it **runs a container image** (`image` + `command`). One primitive covers every case:
 
-1. `agent`: runs a CLI in the container.
-2. `shell`: runs a Bash command in the container, or on the host only with an explicit flag.
-3. `javascript`: runs a JS runtime in a sandboxed container.
-4. `notify`: Slack/email/webhook.
-5. `condition`: a simple declarative gate.
+- An **agent** step runs the agent base image (`ghcr.io/icaro-dev/agent-base:<version>`, §5) with the agent CLI as its command.
+- A **shell** or **JS** step is just an image with the right runtime (e.g. a Bash or Node image); host execution requires an explicit flag.
+- A **notification** is an image whose command renders/sends a templated message (Slack/email/webhook) — not a special step type.
+- **Conditional execution** is expressed with a step's `when` expression rather than a dedicated condition step.
+
+Images are free to choose; the engine never bakes credentials into them — creds remain brokered (§5, ADR 0003).
 
 Executor:
 

@@ -46,17 +46,17 @@
     },
     "step": {
       "type": "object",
-      "required": ["id", "type"],
+      "description": "A step runs a container image. There are no built-in step kinds: an agent, a shell command, a JS runtime, or a notification are all just different images. Conditional execution is expressed with `when` rather than a dedicated step type.",
+      "required": ["id", "image"],
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "type": {"enum": ["agent", "shell", "javascript", "notify", "condition"]},
+        "image": {"type": "string", "description": "Container image reference to run for this step (e.g. ghcr.io/icaro-dev/agent-base:<version> for an agent, or any image for shell/js/notify work). The single execution primitive.", "minLength": 1, "maxLength": 512},
         "needs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
         "repository": {"$ref": "#/$defs/repositoryRef"},
         "timeout": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
         "retry": {"type": "integer", "minimum": 0, "maximum": 5},
-        "command": {"type": "string", "maxLength": 20000},
-        "agent": {"type": "string", "description": "For type=agent: which agent CLI profile to run."},
+        "command": {"type": "string", "description": "Command run inside the image. For an agent image this is the agent CLI invocation; for a notify image it renders/sends a templated message.", "maxLength": 20000},
         "env": {
           "type": "object",
           "description": "Step-level environment, merged over workflow env. Supports interpolation.",
@@ -73,7 +73,7 @@
         },
         "when": {
           "type": "string",
-          "description": "For type=condition (and optional gating on any step): a boolean expression over interpolated values. The expression grammar is defined separately and validated semantically.",
+          "description": "Optional gating on any step: a boolean expression over interpolated values that must hold for the step to run. This replaces a dedicated condition step type. The expression grammar is defined separately and validated semantically.",
           "maxLength": 2000
         }
       }

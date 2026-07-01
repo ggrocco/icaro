@@ -1,6 +1,6 @@
 # ADR 0003 — Credentials are brokered, not mounted
 
-**Status:** Accepted
+**Status:** Superseded by [ADR 0005](0005-persistent-home-egress.md) — the broker is downgraded from MVP-default to future hardening for untrusted profiles. The MVP default is a persistent per-profile home bounded by a mandatory egress allowlist.
 
 ## Context
 

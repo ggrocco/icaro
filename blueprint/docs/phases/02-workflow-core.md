@@ -12,7 +12,7 @@ Can start in parallel with Phase 1 once the config contract is in place.
 
 - [ ] Version the JSON Schema and validate it in the CLI/API.
 - [ ] Add semantic validation for cycles, dependencies, and timeouts.
-- [ ] Implement **data flow**: step `outputs`, `env`, and `${{ steps.<id>.outputs.<key> }}` interpolation, with a defined `condition`/`when` expression grammar.
+- [ ] Implement **data flow**: step `outputs`, `env`, and `${{ steps.<id>.outputs.<key> }}` interpolation, with a defined `when` expression grammar for step gating.
 - [ ] Implement a DAG planner and an executor with channels; the unit of work a step drives is a **session** (ADR 0002), not a generic job.
 - [ ] Persist run/step state and indexed logs.
 - [ ] Implement cancellation, retry, and recovery after restart.

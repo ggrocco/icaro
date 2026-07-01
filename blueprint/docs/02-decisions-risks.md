@@ -25,7 +25,7 @@
 5. No advanced visual editor before the JSON Schema and executor are stable.
 6. Previews cover **compose-based projects with a declared port** only; host-run dev servers (Vite/Next on the host) are out of MVP scope.
 7. The native macOS app is **deferred until the session spine works end-to-end**; the web UI served by the daemon is the MVP surface (the native app is polish, not the wedge).
-8. Workflows orchestrate sessions only; no general-purpose CI step library beyond the five MVP step types.
+8. Workflows orchestrate sessions only; a step is a container image (`image` + `command`) — agent, shell, JS, and notify are just images, conditions are `when` expressions — not a general-purpose CI step library.
 
 ## Risks needing a spike before extensive build
 

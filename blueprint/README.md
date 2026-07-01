@@ -27,8 +27,9 @@ The MVP wedge is the parallel-isolated-agents experience built on this spine. Pr
 - [Architecture](docs/01-architecture.md)
 - [Decisions & risks](docs/02-decisions-risks.md)
 - [Operational model & security](docs/03-security.md)
+- [Risks & feasibility gate](docs/08-risks-feasibility.md)
 - [Workflow contract](docs/schemas/workflow.schema.json)
 - [Phased roadmap](docs/phases/)
-- ADRs: [0001 single daemon](docs/adr/0001-single-daemon.md) · [0002 session spine](docs/adr/0002-session-spine.md) · [0003 credential broker](docs/adr/0003-credential-broker.md) · [0004 memory over MCP](docs/adr/0004-memory-mcp.md)
+- ADRs: [0001 single daemon](docs/adr/0001-single-daemon.md) · [0002 session spine](docs/adr/0002-session-spine.md) · [0003 credential broker](docs/adr/0003-credential-broker.md) · [0004 memory over MCP](docs/adr/0004-memory-mcp.md) · [0005 persistent home + egress](docs/adr/0005-persistent-home-egress.md) · [0006 session persistence](docs/adr/0006-session-persistence-recovery.md)
 
 ![Ícaro AI development overview](assets/icaro-overview-en.png)

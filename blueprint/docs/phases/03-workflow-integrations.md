@@ -14,7 +14,7 @@ Depends on Phase 2; the git integration can be prepared alongside Phase 1.
 - [ ] Add a persistent scheduler and a concurrency policy.
 - [ ] Create an HMAC webhook endpoint with deduplication.
 - [ ] Implement GitHub/GitLab adapters.
-- [ ] Add `notify` with safe templates.
+- [ ] Provide a notification image (Slack/email/webhook) with safe templates, runnable as an ordinary image-based step.
 
 ## Acceptance criteria & manual tests
 
