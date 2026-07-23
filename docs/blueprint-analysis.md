@@ -14,6 +14,9 @@ Icaro is a workflow engine where:
   external APIs** from steps.
 - The system should stay **simple**, but adding a **new integration must be easy** —
   no forking the engine, no heavy SDK.
+- **AI agents are first-class users**: an MCP server exposes the engine (including
+  the workflow JSON Schema) so agents can author workflows precisely, and a shipped
+  skill teaches them the authoring loop (§5).
 
 This is a proven shape: Drone CI, GitHub Actions, and Argo Workflows all converge on
 "a step is a container run." The concept is sound. The part that kills projects like
@@ -141,7 +144,8 @@ specificity lives in payload handling inside steps, which are already easy to wr
   webhooks ────► │  API / Control plane          │
   cron loop ───► │  - workflow & run CRUD        │──► Postgres (defs, runs,
   CLI / UI ────► │  - trigger gateway (HMAC)     │     logs index, connections*)
-                 │  - connection store*          │
+  agents (MCP) ► │  - connection store*          │
+                 │  - MCP server (see §5)        │
                  └──────────────┬───────────────┘
                                 │ enqueue run (Postgres queue is fine at first)
                  ┌──────────────▼───────────────┐
@@ -185,7 +189,86 @@ steps:
       text: "New signup: {{ steps.enrich.outputs.email }}"
 ```
 
-## 5. Security considerations (must be in the blueprint, not an afterthought)
+## 5. Agent interface: MCP server + authoring skill
+
+Agents are first-class users of Icaro, on equal footing with the CLI and a future UI.
+Two deliverables make that real: an **MCP server** exposing the engine, and a
+**skill** that teaches agents the authoring loop. The guiding principle: agents
+hallucinate config fields; a published schema plus a validate tool turns workflow
+authoring into a converging loop instead of guesswork.
+
+### 5.1 Schema-first: one source of truth
+
+The workflow definition gets a formal **JSON Schema**, generated at build time from
+the engine's own types (e.g. Go structs → schema via `invopop/jsonschema`). The same
+schema is used by:
+
+1. the engine itself, to validate every workflow submitted via API;
+2. the MCP server, published to agents;
+3. docs/editors (YAML language servers understand JSON Schema for free).
+
+Because it is generated, schema and behavior can never drift. Integration manifests
+(§2.2) already declare their inputs — the server compiles each manifest into a schema
+fragment, addressable as `icaro://schema/integrations/{name}@{version}`, so precision
+extends into `uses:` steps: an agent can know that `slack-message@1` requires
+`channel` and `text` before it writes a line of YAML.
+
+### 5.2 The MCP server
+
+Built into the same binary — a thin layer over the same service layer as the REST API
+(never a parallel implementation). Transports: **stdio** (`icaro mcp`) for local use
+and **streamable HTTP** (`/mcp` on the server) for remote agents; auth with the same
+API tokens as the REST API.
+
+Resources:
+
+- `icaro://schema/workflow` — the workflow JSON Schema (also `get_workflow_schema`
+  as a tool, since some clients handle tools better than resources).
+- `icaro://schema/integrations/{name}@{version}` — per-integration input schemas.
+
+Tools (the minimal, high-leverage set):
+
+| Tool | Purpose |
+|---|---|
+| `get_workflow_schema` | Full JSON Schema for workflow definitions |
+| `list_integrations` / `get_integration` | Catalog + manifest incl. input/output schema |
+| `list_connections` | Names and **types only — never secret values** |
+| `validate_workflow` | Validate a definition without saving; structured errors |
+| `create_workflow` / `update_workflow` / `get_workflow` / `list_workflows` | CRUD |
+| `run_workflow` | Start a run with an input payload (also serves as test/dry run) |
+| `get_run` | Status, per-step outputs, log tail — enough to debug a failure |
+
+Design notes:
+
+- **`validate_workflow` is the most important tool.** Errors must be structured and
+  precise — JSON Pointer path, expected vs. got, and the valid alternatives
+  (`/steps/1/uses: unknown integration 'slak-message'; nearest match:
+  'slack-message@1'`). Error quality here directly determines how fast an agent
+  converges on a correct workflow.
+- `get_run` should truncate logs (tail + size cap) so agents can debug without
+  blowing their context window.
+- Destructive operations (delete workflow, delete connection) are deliberately left
+  out of the MCP surface in v1; agents author and run, humans prune.
+
+### 5.3 The authoring skill
+
+Ship an `icaro-workflows` skill (a `SKILL.md` package, installable into Claude Code
+and other agents) in the main repo, versioned with the engine. It encodes the loop:
+
+1. `get_workflow_schema` + `list_integrations` — **always re-fetch; never write from
+   memory** (schemas change between engine versions).
+2. `list_connections` to see what credentials exist (ask the human to create missing
+   ones — agents never handle secret values).
+3. Draft the workflow → `validate_workflow` → fix until clean.
+4. `create_workflow`, then `run_workflow` with a small test input.
+5. `get_run` to verify; iterate on failures using per-step outputs and logs.
+
+The skill also carries the step-contract cheat sheet (§2.1), a couple of worked
+examples, and known gotchas (e.g. "webhook payload becomes the first step's
+`/icaro/input.json`"). Keeping it in-repo means every engine release that changes
+the schema ships the matching skill update in the same commit.
+
+## 6. Security considerations (must be in the blueprint, not an afterthought)
 
 - **The runner owns the Docker socket; step containers must never see it.** Run step
   containers with no docker.sock mount, a non-root user where possible, memory/CPU
@@ -197,8 +280,10 @@ steps:
 - **Secrets:** never write connection values to logs or `/workspace`; scrub known
   secret values from captured logs (Drone does this — copy it).
 - **Output limits:** cap `/icaro/output.json` size (e.g. 1 MB) to protect the DB.
+- **MCP surface:** same authentication as the REST API, secrets never readable
+  through any tool, and no destructive tools exposed to agents in v1 (§5.2).
 
-## 6. What to borrow, what to avoid
+## 7. What to borrow, what to avoid
 
 | System | Borrow | Avoid |
 |---|---|---|
@@ -208,20 +293,26 @@ steps:
 | Argo Workflows | Container-native step model | Kubernetes dependency for an MVP |
 | Temporal | Nothing for MVP | Whole programming model — overkill here |
 
-## 7. Suggested build order
+## 8. Suggested build order
 
-1. **Engine core** — workflow YAML, linear steps, Docker runner, step contract
-   (inputs/outputs/workspace/logs), manual trigger via API + CLI. *Usable on day one.*
+1. **Engine core** — workflow YAML validated against a generated JSON Schema from day
+   one (§5.1), linear steps, Docker runner, step contract (inputs/outputs/workspace/
+   logs), manual trigger via API + CLI. *Usable on day one.*
 2. **Triggers** — webhook gateway with HMAC + cron scheduler.
 3. **Connections** — encrypted store + injection + `http` built-in step.
-4. **Integration manifests** — `uses:` resolution, git-repo catalog, input validation.
-5. **Later, by demand** — DAG execution, approval steps, polling trigger sugar, UI,
+4. **Agent interface** — MCP server (schema resource, `validate_workflow`, CRUD,
+   runs) + the `icaro-workflows` authoring skill.
+5. **Integration manifests** — `uses:` resolution, git-repo catalog, input validation
+   compiled into per-integration schemas exposed over MCP.
+6. **Later, by demand** — DAG execution, approval steps, polling trigger sugar, UI,
    multi-runner scale-out.
 
 Steps 1–3 already deliver the stated goal ("run scripts on Docker, triggered by and
-talking to the outside world"). Step 4 is what makes integrations *cheap forever*.
+talking to the outside world"). Step 4 is cheap if step 1 was schema-first — the MCP
+server mostly re-exposes existing service methods. Step 5 is what makes integrations
+*cheap forever*, and it plugs straight into the MCP schema surface.
 
-## 8. Open questions for the author
+## 9. Open questions for the author
 
 - Single-tenant self-hosted tool, or multi-user with auth from the start?
   (Recommendation: single-tenant first; auth is a big detour.)
