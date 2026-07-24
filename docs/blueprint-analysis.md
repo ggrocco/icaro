@@ -134,8 +134,77 @@ trigger type in the MVP. Model them as a scheduled workflow whose first step che
 the source and exits with a "skip" output if nothing is new. This keeps the trigger
 subsystem tiny; a dedicated polling-trigger abstraction can be added later if it hurts.
 
-This means the trigger subsystem never needs per-provider code either — provider
-specificity lives in payload handling inside steps, which are already easy to write.
+For most providers the trigger subsystem needs zero per-provider code — provider
+specificity lives in payload handling inside steps. The one deliberate exception is
+source-control providers, which get a thin adapter layer:
+
+### 3.1 SCM provider triggers: GitHub App & GitLab
+
+Being installable as a **GitHub App** (and the GitLab equivalent) is worth first-class
+support, because SCM providers differ from plain webhooks in three ways: their own
+signature schemes, an app/installation auth model, and high event volume that needs
+filtering *before* a run is enqueued. The design: a narrow, compiled-in **trigger
+adapter** interface —
+
+```
+verify(request) → ok        // provider signature check
+normalize(request) → event  // {provider, type, repo, ref, actor, raw_payload}
+```
+
+— and nothing more. Routing, filtering, and enqueueing stay in the generic trigger
+gateway; anything smarter than verify+normalize belongs in steps. Two adapters ship
+built-in, and the interface is small enough that community adapters (Bitbucket,
+Gitea) are trivial PRs.
+
+**GitHub (as a GitHub App):**
+
+- Icaro exposes one endpoint, `POST /hooks/github`, registered as the App's webhook
+  URL. Signature check via `X-Hub-Signature-256` with the App's webhook secret.
+- One App installation covers many repos and orgs; events for *all* installations
+  arrive at the same endpoint, and the gateway routes them to workflows by filter.
+- The App's credentials (app ID + private key) become a **connection type**
+  (`github-app`). This is the payoff of app-mode: the same connection lets *steps*
+  mint short-lived installation tokens to call back — post a comment, set a commit
+  status, create a check run — so trigger and API access come from one install,
+  with no personal access tokens involved.
+- Registration should use GitHub's **App Manifest flow** (`POST /settings/apps/new`)
+  so `icaro github-app setup` can create the App, capture the credentials, and store
+  the connection in one guided step.
+
+**GitLab:**
+
+- GitLab has no App primitive; the equivalents are **project/group webhooks** (SaaS
+  and self-managed) and **system hooks** (self-managed, instance-wide). Same single
+  endpoint pattern: `POST /hooks/gitlab`, verified via the `X-Gitlab-Token` secret
+  header (note: shared secret comparison, not HMAC — the adapter hides this
+  difference).
+- Callback auth is a `gitlab` connection type holding a group/project **access
+  token** (or OAuth app credentials later). Setup can automate webhook creation via
+  the GitLab API given a token — the same guided-setup UX as the GitHub App flow.
+
+**Event filtering lives in the workflow trigger config**, evaluated by the gateway
+before enqueueing (an agent- and human-friendly surface, and cheap — no container
+spins up for filtered-out events):
+
+```yaml
+on:
+  github:
+    events: [pull_request]
+    actions: [opened, synchronize]
+    repos: [ggrocco/*]
+    branches: [main]
+```
+
+The normalized envelope is deliberately minimal — provider, event type, repo, ref,
+actor — with the **raw payload passed through untouched** as the run input. Steps get
+full provider fidelity; the envelope exists only for filtering and run metadata.
+Resist the temptation to build a rich cross-provider event model — that's the road
+to maintaining a translation layer forever.
+
+Also non-negotiable for SCM volume: **webhook delivery records** (persist every
+received event with its verification result and matched workflows) and **redelivery**
+from that record — debugging "why didn't my workflow fire?" is impossible without it,
+and it doubles as the dedup point for providers that retry deliveries.
 
 ## 4. Proposed architecture
 
@@ -143,8 +212,9 @@ specificity lives in payload handling inside steps, which are already easy to wr
                  ┌──────────────────────────────┐
   webhooks ────► │  API / Control plane          │
   cron loop ───► │  - workflow & run CRUD        │──► Postgres (defs, runs,
-  CLI / UI ────► │  - trigger gateway (HMAC)     │     logs index, connections*)
-  agents (MCP) ► │  - connection store*          │
+  CLI / UI ────► │  - trigger gateway + SCM      │     logs index, connections*,
+  agents (MCP) ► │    adapters (GitHub/GitLab)   │     webhook deliveries)
+                 │  - connection store*          │
                  │  - MCP server (see §5)        │
                  └──────────────┬───────────────┘
                                 │ enqueue run (Postgres queue is fine at first)
@@ -207,7 +277,9 @@ schema is used by:
 2. the MCP server, published to agents;
 3. docs/editors (YAML language servers understand JSON Schema for free).
 
-Because it is generated, schema and behavior can never drift. Integration manifests
+Because it is generated, schema and behavior can never drift. The schema covers the
+whole definition including trigger config — so an agent writing an `on.github`
+filter block (§3.1) gets the same precision as for steps. Integration manifests
 (§2.2) already declare their inputs — the server compiles each manifest into a schema
 fragment, addressable as `icaro://schema/integrations/{name}@{version}`, so precision
 extends into `uses:` steps: an agent can know that `slack-message@1` requires
@@ -298,13 +370,17 @@ the schema ships the matching skill update in the same commit.
 1. **Engine core** — workflow YAML validated against a generated JSON Schema from day
    one (§5.1), linear steps, Docker runner, step contract (inputs/outputs/workspace/
    logs), manual trigger via API + CLI. *Usable on day one.*
-2. **Triggers** — webhook gateway with HMAC + cron scheduler.
+2. **Triggers** — generic webhook gateway with HMAC + cron scheduler, including
+   webhook delivery records from the start.
 3. **Connections** — encrypted store + injection + `http` built-in step.
 4. **Agent interface** — MCP server (schema resource, `validate_workflow`, CRUD,
    runs) + the `icaro-workflows` authoring skill.
-5. **Integration manifests** — `uses:` resolution, git-repo catalog, input validation
+5. **SCM triggers** — the adapter interface + GitHub App adapter (manifest-flow
+   setup, `github-app` connection type) + GitLab adapter, with event filtering
+   and redelivery.
+6. **Integration manifests** — `uses:` resolution, git-repo catalog, input validation
    compiled into per-integration schemas exposed over MCP.
-6. **Later, by demand** — DAG execution, approval steps, polling trigger sugar, UI,
+7. **Later, by demand** — DAG execution, approval steps, polling trigger sugar, UI,
    multi-runner scale-out.
 
 Steps 1–3 already deliver the stated goal ("run scripts on Docker, triggered by and
