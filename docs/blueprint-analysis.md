@@ -17,6 +17,11 @@ Icaro is a workflow engine where:
 - **AI agents are first-class users**: an MCP server exposes the engine (including
   the workflow JSON Schema) so agents can author workflows precisely, and a shipped
   skill teaches them the authoring loop (§5).
+- Icaro is the **server-side implementation of the
+  [ai-launcher](https://github.com/lgldsilva/ai-launcher) concept**: where
+  ai-launcher interactively launches AI CLI harnesses (claude, codex, opencode, …)
+  sandboxed on a dev machine, Icaro runs the same harnesses headless, as workflow
+  steps, triggered by events (§2.5).
 
 This is a proven shape: Drone CI, GitHub Actions, and Argo Workflows all converge on
 "a step is a container run." The concept is sound. The part that kills projects like
@@ -114,6 +119,69 @@ integration exists:
 
 A packaged integration is then just a *nicer* version of what users can already do
 with `http` or `run` — the catalog can grow lazily, driven by real use.
+
+### 2.5 AI agent steps — the ai-launcher lineage
+
+Icaro's defining workload is running **AI CLI harnesses as workflow steps**. This is
+[ai-launcher](https://github.com/lgldsilva/ai-launcher)'s model moved server-side,
+and the mapping is direct:
+
+| | ai-launcher (local) | Icaro (server) |
+|---|---|---|
+| Where it runs | Dev machine, interactive TUI/PTY | Headless, one Docker container per step |
+| Sandbox | ai-jail (bubblewrap/sandbox-exec) | §6.1 sandbox profiles (same philosophy) |
+| Started by | A human at a keyboard | Webhooks, SCM events, cron, other agents |
+| Harnesses | claude, codex, opencode, kimi, … | The same catalog, packaged as images |
+| Trust model | Opt-in permission toggles, RO mounts | Deny-by-default schema, no host mounts |
+
+Both share the same design principle ai-launcher states outright: *compose, don't
+reimplement* — the harness is the intelligence; the platform provides launch,
+confinement, and plumbing.
+
+Concretely, a built-in **`agent` step type**:
+
+```yaml
+steps:
+  - name: fix-flaky-test
+    agent:
+      harness: claude                 # from the harness catalog
+      prompt: |
+        Fix the failing test reported in the input payload.
+        The repo is checked out in /workspace/repo.
+      params: { model: sonnet }       # params the harness manifest declares
+    connection: anthropic             # API key injected, never baked into images
+    sandbox: strict                   # §6.1 — agents always run strict
+```
+
+Design decisions, each traceable to an ai-launcher feature:
+
+- **Harness catalog** — mirrors ai-launcher's agent catalog: each harness is a
+  packaged image (CLI preinstalled, **pinned by digest** — its SHA-256 checksum
+  verification transposed to containers) plus a manifest declaring the parameters
+  that harness accepts (ai-launcher's declared-params idea, e.g. Kimi's
+  `query`/`model`). Distributed exactly like integrations (§2.2), validated through
+  the same schema pipeline (§5.1), so agents authoring workflows know each
+  harness's exact knobs.
+- **Headless execution** — harnesses run in non-interactive mode (`claude -p`, and
+  equivalents), prompt in, transcript to logs, structured result to
+  `/icaro/output.json`. No PTY layer to build.
+- **Permission toggles become schema fields** — what is a TUI checkbox in
+  ai-launcher (SSH, Docker socket, GPU, display) is an explicit, validated field
+  here, and strictly narrower: the Docker socket and host mounts are not grantable
+  at all (§6.1); network and connections are the only capabilities a step can
+  request. Host-desktop toggles (GPU/display) have no server equivalent and are
+  simply not features.
+- **`--dry-run` becomes `validate_workflow`** — same idea, same payoff: see the
+  exact effective configuration before anything executes.
+- **Profiles become reusable step presets** — a later, cheap feature: named,
+  versioned `agent` step fragments (`preset: pr-reviewer`) referenced across
+  workflows.
+
+What ai-launcher gets from **ai-memory** (persistent sessions, MCP memory across
+runs) has no v1 equivalent in Icaro — within a run, steps share `/workspace` and
+outputs, which covers most pipelines. Cross-run agent memory is deliberately an open
+question (§9) rather than an MVP feature: it could later be a mounted session-store
+volume or an ai-memory MCP sidecar the harness connects to.
 
 ## 3. Triggers
 
@@ -419,6 +487,7 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
 | Argo Workflows | Container-native step model | Kubernetes dependency for an MVP |
 | Temporal | Nothing for MVP | Whole programming model — overkill here |
 | ai-jail | Deny-by-default sandbox mindset: seccomp, rlimits, tmpfs HOME, secret masking (§6.1) | Its mechanism as-is — bubblewrap targets host processes, not containers |
+| ai-launcher | Harness catalog with declared params, digest/checksum pinning, opt-in capabilities, dry-run UX (§2.5) | TUI/PTY interactivity, host mounts, desktop toggles — no server equivalent |
 
 ## 8. Suggested build order
 
@@ -434,10 +503,11 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
 5. **SCM triggers** — the adapter interface + GitHub App adapter (manifest-flow
    setup, `github-app` connection type) + GitLab adapter, with event filtering
    and redelivery.
-6. **Integration manifests** — `uses:` resolution, git-repo catalog, input validation
-   compiled into per-integration schemas exposed over MCP.
-7. **Later, by demand** — DAG execution, approval steps, polling trigger sugar, UI,
-   multi-runner scale-out.
+6. **Integration manifests + harness catalog** — `uses:` resolution, git-repo
+   catalog, input validation compiled into per-integration schemas exposed over MCP;
+   the `agent` step type and first harness images (§2.5) ride on the same machinery.
+7. **Later, by demand** — DAG execution, approval steps, polling trigger sugar,
+   step presets, cross-run agent memory, UI, multi-runner scale-out.
 
 Steps 1–3 already deliver the stated goal ("run scripts on Docker, triggered by and
 talking to the outside world"). Step 4 is cheap if step 1 was schema-first — the MCP
@@ -452,3 +522,6 @@ server mostly re-exposes existing service methods. Step 5 is what makes integrat
   runs must survive a runner restart (recommendation: persist step state so they do).
 - Is a UI in scope for v1, or is CLI + YAML enough? (Recommendation: CLI first;
   the manifest design already leaves room for form-rendering later.)
+- Cross-run agent memory (§2.5): do harnesses need persistent context between runs —
+  and if so, via a session-store volume, an ai-memory MCP sidecar, or nothing?
+  (Recommendation: defer; within-run `/workspace` sharing covers most pipelines.)
