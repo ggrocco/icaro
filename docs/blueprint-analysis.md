@@ -344,9 +344,7 @@ the schema ships the matching skill update in the same commit.
 
 - **The runner owns the Docker socket; step containers must never see it.** Run step
   containers with no docker.sock mount, a non-root user where possible, memory/CPU
-  limits, and a hard timeout per step.
-- **Network egress:** steps need outbound network (that's the point), but consider a
-  per-workflow allowlist later; at minimum document that steps are trusted code.
+  limits, and a hard timeout per step. §6.1 hardens this further.
 - **Webhook endpoints are internet-facing:** HMAC verification, per-trigger tokens,
   payload size limits, and rate limiting from day one.
 - **Secrets:** never write connection values to logs or `/workspace`; scrub known
@@ -354,6 +352,62 @@ the schema ships the matching skill update in the same commit.
 - **Output limits:** cap `/icaro/output.json` size (e.g. 1 MB) to protect the DB.
 - **MCP surface:** same authentication as the REST API, secrets never readable
   through any tool, and no destructive tools exposed to agents in v1 (§5.2).
+
+### 6.1 Step sandboxing — ai-jail concepts applied to Docker
+
+Icaro will run AI agents *inside steps*, and agent-generated commands must be treated
+as untrusted code. The scenario to design against: a step (or a prompt-injected agent
+in a step) escalating out of its container — with the Docker socket as the classic
+escape route to root on the host. [ai-jail](https://github.com/akitaonrails/ai-jail)
+is the right reference for the mindset. Note it is *not* Docker-based (it sandboxes
+with bubblewrap, Landlock, and seccomp directly on the host OS), so Icaro adopts its
+**concepts**, translated to the container runtime, in three layers:
+
+**Layer 1 — the socket never crosses the boundary (already §6, restated as policy):**
+the runner talks to Docker; steps get no docker.sock bind-mount ever, and the engine
+should *refuse* a workflow whose `run.volumes` tries to mount it (or anything under
+`/var/run`, `/proc`, `/sys`) — validation-time rejection, not just convention. On the
+runner side, reduce the blast radius of the socket the runner itself holds: run
+**rootless Docker** (or Podman), or front the socket with a **docker-socket-proxy**
+that allowlists only the API calls the runner needs (create/start/wait/logs/remove) —
+so even a compromised runner cannot `docker exec` into neighbors or mount host paths.
+
+**Layer 2 — hardened defaults for every step container** (ai-jail's philosophy of
+deny-by-default resource and syscall access, expressed as Docker flags):
+
+| ai-jail concept | Icaro equivalent |
+|---|---|
+| Seccomp-BPF blocking ~30 dangerous syscalls | Custom seccomp profile: Docker's default *minus* nothing, *plus* deny `ptrace`, `bpf`, `mount`, `keyctl`, module & namespace syscalls |
+| No privilege escalation | `--security-opt no-new-privileges`, `--cap-drop ALL` (add back only what a step declares) |
+| RLIMIT_NPROC / fork-bomb protection | `--pids-limit` (e.g. 256), memory + CPU limits, `--ulimit nofile` |
+| tmpfs `$HOME`, mask `.env`/`.ssh`/`.aws` | Read-only root FS (`--read-only`) + tmpfs `/tmp` and `/home`; only `/workspace` and `/icaro` are real mounts |
+| Selective project mounts | Steps see *only* the run's workspace volume — never host paths; host bind-mounts are not a feature |
+| User separation | `--userns-remap` (or rootless engine) so root-in-container ≠ root-on-host |
+
+**Layer 3 — a `sandbox` profile in the workflow schema**, so strictness is explicit,
+validated, and visible to agents via the published JSON Schema (§5.1):
+
+```yaml
+steps:
+  - name: agent-task
+    run:
+      image: my-agent:latest
+      script: ...
+    sandbox: strict     # default: standard
+    network: none       # default: egress; 'none' for pure-compute steps
+```
+
+- `standard` — Layer-2 defaults above; suitable for trusted scripts and packaged
+  integrations.
+- `strict` — additionally `network: none` unless declared, tighter pids/ulimits, and
+  (when installed) a **gVisor (`runsc`) or Kata runtime** for kernel-level isolation.
+  This is the profile the docs recommend for steps that run LLM-driven agents, and
+  ai-jail's own caveat applies: process/container sandboxes are "not 100% secure, but
+  enough" — for truly hostile workloads the answer is a VM-isolated runtime, which is
+  exactly what the pluggable `runtime` escape hatch is for.
+
+Defaults matter more than options: `standard` is applied with **zero configuration**,
+and nothing in the schema allows weakening below it (no `privileged: true`, ever).
 
 ## 7. What to borrow, what to avoid
 
@@ -364,12 +418,14 @@ the schema ships the matching skill update in the same commit.
 | n8n | Connection/credential UX | Per-node SDK + bespoke UI code per integration |
 | Argo Workflows | Container-native step model | Kubernetes dependency for an MVP |
 | Temporal | Nothing for MVP | Whole programming model — overkill here |
+| ai-jail | Deny-by-default sandbox mindset: seccomp, rlimits, tmpfs HOME, secret masking (§6.1) | Its mechanism as-is — bubblewrap targets host processes, not containers |
 
 ## 8. Suggested build order
 
 1. **Engine core** — workflow YAML validated against a generated JSON Schema from day
-   one (§5.1), linear steps, Docker runner, step contract (inputs/outputs/workspace/
-   logs), manual trigger via API + CLI. *Usable on day one.*
+   one (§5.1), linear steps, Docker runner with the hardened `standard` sandbox as
+   the only mode (§6.1), step contract (inputs/outputs/workspace/logs), manual
+   trigger via API + CLI. *Usable on day one.*
 2. **Triggers** — generic webhook gateway with HMAC + cron scheduler, including
    webhook delivery records from the start.
 3. **Connections** — encrypted store + injection + `http` built-in step.
