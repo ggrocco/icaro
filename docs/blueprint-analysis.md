@@ -279,13 +279,13 @@ and it doubles as the dedup point for providers that retry deliveries.
 ```
                  ┌──────────────────────────────┐
   webhooks ────► │  API / Control plane          │
-  cron loop ───► │  - workflow & run CRUD        │──► Postgres (defs, runs,
-  CLI / UI ────► │  - trigger gateway + SCM      │     logs index, connections*,
-  agents (MCP) ► │    adapters (GitHub/GitLab)   │     webhook deliveries)
-                 │  - connection store*          │
+  cron loop ───► │  - workflow & run CRUD        │──► DB (SQLite default;
+  CLI / UI ────► │  - trigger gateway + SCM      │     Postgres via config)
+  agents (MCP) ► │    adapters (GitHub/GitLab)   │     defs, runs, logs index,
+                 │  - connection store*          │     connections*, deliveries
                  │  - MCP server (see §5)        │
                  └──────────────┬───────────────┘
-                                │ enqueue run (Postgres queue is fine at first)
+                                │ enqueue run (DB-backed queue)
                  ┌──────────────▼───────────────┐
                  │  Runner (worker)              │
                  │  - resolves steps & manifests │──► Docker API
@@ -301,8 +301,25 @@ Implementation notes:
 - **One binary, two roles.** Ship a single binary that can run as `server` and
   `runner` (or both, for single-machine setups). Go is the natural fit (Docker SDK,
   single static binary), but the shape works in any language.
-- **Queue:** start with a Postgres-backed queue (`SELECT ... FOR UPDATE SKIP LOCKED`).
-  Do not introduce Redis/RabbitMQ until multiple runners exist and it hurts.
+- **Storage: SQLite by default, Postgres by configuration.** A single
+  `database.driver: sqlite | postgres` + DSN config setting selects the backend.
+  SQLite is the right default for a self-hosted, single-node tool — zero external
+  dependencies, the whole state is one backup-able file — and Postgres is the
+  scale-out path (multiple runners, HA) rather than a day-one requirement. What
+  keeping both honest requires:
+  - A thin repository interface with **portable SQL** — no Postgres-only features
+    (`jsonb` operators, arrays, `SKIP LOCKED`); JSON payloads stored as TEXT and
+    parsed in code. Migrations maintained per driver from day one; CI runs the full
+    test suite against **both** backends, or the "swap by config" promise rots.
+  - SQLite operational settings baked in, not left to the user: WAL mode,
+    `busy_timeout`, a single writer connection (SQLite is single-writer by design —
+    the engine must serialize writes through one pool connection to avoid
+    `SQLITE_BUSY` surprises).
+- **Queue:** DB-backed in the same storage layer, portable claim semantics: a
+  transactional `UPDATE ... SET claimed_by WHERE id = (SELECT ... LIMIT 1)` works on
+  both backends. On Postgres this can later be upgraded to `FOR UPDATE SKIP LOCKED`
+  behind the same interface when multiple runners arrive. Do not introduce
+  Redis/RabbitMQ until multiple runners exist and it hurts.
 - **Workflow definition:** YAML, stored via API (optionally synced from git later).
 - **DAG vs. sequence:** start with a linear sequence + `if`/`skip` conditions.
   A full DAG (`needs:`) is a clean later addition; don't pay its complexity up front.
@@ -493,8 +510,9 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
 
 1. **Engine core** — workflow YAML validated against a generated JSON Schema from day
    one (§5.1), linear steps, Docker runner with the hardened `standard` sandbox as
-   the only mode (§6.1), step contract (inputs/outputs/workspace/logs), manual
-   trigger via API + CLI. *Usable on day one.*
+   the only mode (§6.1), step contract (inputs/outputs/workspace/logs), SQLite
+   storage behind the driver-swappable repository layer (§4) with both-backend
+   tests from the first migration, manual trigger via API + CLI. *Usable on day one.*
 2. **Triggers** — generic webhook gateway with HMAC + cron scheduler, including
    webhook delivery records from the start.
 3. **Connections** — encrypted store + injection + `http` built-in step.
@@ -507,7 +525,8 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
    catalog, input validation compiled into per-integration schemas exposed over MCP;
    the `agent` step type and first harness images (§2.5) ride on the same machinery.
 7. **Later, by demand** — DAG execution, approval steps, polling trigger sugar,
-   step presets, cross-run agent memory, UI, multi-runner scale-out.
+   step presets, cross-run agent memory, UI, multi-runner scale-out (which is the
+   moment the Postgres config swap earns its keep).
 
 Steps 1–3 already deliver the stated goal ("run scripts on Docker, triggered by and
 talking to the outside world"). Step 4 is cheap if step 1 was schema-first — the MCP
