@@ -425,6 +425,56 @@ examples, and known gotchas (e.g. "webhook payload becomes the first step's
 `/icaro/input.json`"). Keeping it in-repo means every engine release that changes
 the schema ships the matching skill update in the same commit.
 
+### 5.4 In-step MCP: the engine exposed inside agent steps
+
+The same MCP server, exposed *inside* agent step containers, lets a harness running
+in a workflow call other workflows and create or change workflows mid-run. This is
+the natural completion of §2.5 + §5: outside agents author workflows; inside agents
+compose them. It should be in the blueprint — with the transport and the authority
+model pinned down, because both are easy to get wrong.
+
+**Transport: a Unix socket, not the network.** The runner bind-mounts a per-step
+socket at `/icaro/mcp.sock` and the harness image's entrypoint wires it into the
+harness's MCP client config automatically. This matters because it composes with the
+sandbox (§6.1): a step with `network: none` can still reach the engine — and *only*
+the engine; no TCP endpoint to discover, nothing reachable from other containers,
+and the capability disappears when the mount does.
+
+**Authority: per-step, minted, and visible in the schema.** The runner mints a
+short-lived token scoped to the run and injects it behind the socket. What the token
+allows is an explicit workflow field, consistent with "permission toggles become
+schema fields" (§2.5):
+
+```yaml
+steps:
+  - name: orchestrator
+    agent: { harness: claude, prompt: ... }
+    icaro_access: invoke     # none (default) | read | invoke | author
+```
+
+- `none` — no socket mounted. The default: most steps don't need the engine.
+- `read` — schema, catalog, own-run status. Safe introspection.
+- `invoke` — plus `run_workflow`/`get_run` on other workflows. The workhorse level.
+- `author` — plus `create_workflow`/`update_workflow`, **landing as drafts**: a
+  workflow written by an in-step agent is stored versioned and inert until a human
+  (or an explicitly configured auto-approve rule) activates it. This is the
+  prompt-injection firewall: an agent step processes untrusted trigger payloads, and
+  a payload that talks the agent into rewriting automation must not yield a live
+  workflow by itself. Actor identity (which run/step authored what) goes in the
+  version history.
+
+**Recursion needs brakes, not trust.** Workflows invoking workflows is a queue fork
+bomb waiting for a retry loop: every run records `root_run_id` + `parent_run_id`
+lineage; enforce a chain-depth cap (e.g. 5), a per-root-run budget of descendant
+runs, and reject self-invocation cycles at `run_workflow` time. Lineage doubles as
+observability — "what did this webhook ultimately cause" is one query.
+
+**Deterministic composition stays out of the agent.** When a workflow always calls
+another workflow, that belongs in a `call_workflow` built-in step (sub-workflow as a
+step, outputs mapped back), not in an agent's judgment. In-step MCP `invoke` is for
+the cases where *deciding what to run* is the agent's job. Offer both; the skill
+(§5.3) should say when to use which.
+
 ## 6. Security considerations (must be in the blueprint, not an afterthought)
 
 - **The runner owns the Docker socket; step containers must never see it.** Run step
@@ -436,7 +486,9 @@ the schema ships the matching skill update in the same commit.
   secret values from captured logs (Drone does this — copy it).
 - **Output limits:** cap `/icaro/output.json` size (e.g. 1 MB) to protect the DB.
 - **MCP surface:** same authentication as the REST API, secrets never readable
-  through any tool, and no destructive tools exposed to agents in v1 (§5.2).
+  through any tool, and no destructive tools exposed to agents in v1 (§5.2). In-step
+  access is a separate, narrower authority: per-run minted tokens, `icaro_access`
+  levels, agent-authored workflows land as drafts (§5.4).
 
 ### 6.1 Step sandboxing — ai-jail concepts applied to Docker
 
@@ -523,7 +575,9 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
    and redelivery.
 6. **Integration manifests + harness catalog** — `uses:` resolution, git-repo
    catalog, input validation compiled into per-integration schemas exposed over MCP;
-   the `agent` step type and first harness images (§2.5) ride on the same machinery.
+   the `agent` step type and first harness images (§2.5) ride on the same machinery,
+   then in-step MCP over the per-step socket with `icaro_access` levels and the
+   `call_workflow` built-in step (§5.4).
 7. **Later, by demand** — DAG execution, approval steps, polling trigger sugar,
    step presets, cross-run agent memory, UI, multi-runner scale-out (which is the
    moment the Postgres config swap earns its keep).
