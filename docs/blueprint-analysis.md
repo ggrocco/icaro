@@ -568,8 +568,17 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
 2. **Triggers** — generic webhook gateway with HMAC + cron scheduler, including
    webhook delivery records from the start.
 3. **Connections** — encrypted store + injection + `http` built-in step.
+   **3b. Shared library** — versioned scripts and step presets managed in Icaro
+   (git pull/push for review), mounted read-only at `/icaro/lib` in every step,
+   referenced via `script:` / `preset:` step fields.
 4. **Agent interface** — MCP server (schema resource, `validate_workflow`, CRUD,
-   runs) + the `icaro-workflows` authoring skill.
+   runs, library) + the `icaro-workflows` authoring skill, adopted with one command
+   (`icaro skill install`).
+   **4b. Web UI** — embedded SPA over the same REST API: workflows editor with
+   schema-backed YAML, runs with a live **flow-graph view** (what ran, what will run,
+   per-step outputs), fleet board, admin screens.
+   **4c. Menu bar tray** — `icaro tray` in the same single binary (macOS `.app`
+   wraps it): status counts, quick run/cancel, notifications, service control.
 5. **SCM triggers** — the adapter interface + GitHub App adapter (manifest-flow
    setup, `github-app` connection type) + GitLab adapter, with event filtering
    and redelivery.
@@ -577,24 +586,34 @@ and nothing in the schema allows weakening below it (no `privileged: true`, ever
    catalog, input validation compiled into per-integration schemas exposed over MCP;
    the `agent` step type and first harness images (§2.5) ride on the same machinery,
    then in-step MCP over the per-step socket with `icaro_access` levels and the
-   `call_workflow` built-in step (§5.4).
+   `call_workflow` built-in step (§5.4). **Memory spaces**: ai-memory attached
+   like Docker networks — declared at machine level, attachable per workflow,
+   overridable per step — via a per-step socket that injects the token, with the
+   marker file written into `/workspace` (see `docs/implementation-plan.md`).
 7. **Later, by demand** — DAG execution, approval steps, polling trigger sugar,
-   step presets, cross-run agent memory, UI, multi-runner scale-out (which is the
-   moment the Postgres config swap earns its keep).
+   multi-runner scale-out (which is the moment the Postgres config swap earns its
+   keep), user accounts/OIDC for the UI.
 
 Steps 1–3 already deliver the stated goal ("run scripts on Docker, triggered by and
 talking to the outside world"). Step 4 is cheap if step 1 was schema-first — the MCP
-server mostly re-exposes existing service methods. Step 5 is what makes integrations
-*cheap forever*, and it plugs straight into the MCP schema surface.
+server mostly re-exposes existing service methods, and the UI is a client of the same
+API. Step 5 is what makes integrations *cheap forever*, and it plugs straight into the
+MCP schema surface.
 
-## 9. Open questions for the author
+## 9. Decisions taken (formerly open questions)
 
-- Single-tenant self-hosted tool, or multi-user with auth from the start?
-  (Recommendation: single-tenant first; auth is a big detour.)
-- Expected step duration — seconds or hours? Affects timeout defaults and whether
-  runs must survive a runner restart (recommendation: persist step state so they do).
-- Is a UI in scope for v1, or is CLI + YAML enough? (Recommendation: CLI first;
-  the manifest design already leaves room for form-rendering later.)
-- Cross-run agent memory (§2.5): do harnesses need persistent context between runs —
-  and if so, via a session-store volume, an ai-memory MCP sidecar, or nothing?
-  (Recommendation: defer; within-run `/workspace` sharing covers most pipelines.)
+- **Single-tenant** with API bearer tokens from day one; the UI logs in by pasting a
+  token (cookie session). Multi-user accounts/OIDC are a later layer on the same
+  session table.
+- **Runs survive restarts**: step state is persisted before each container starts and
+  the runner re-attaches to running containers by label on startup.
+- **UI is in v1** (phase 4b), plus a menu bar tray (4c) — all inside the single
+  `icaro` binary.
+- **Cross-run agent memory is ai-memory**, integrated as configurable memory spaces
+  (machine / workflow / step), on by default for `agent` steps when a default space
+  exists. Long-term memory is per ai-memory `workspace/project`; the live session is
+  shared across a run tree by default so agents, sub-agents and sub-workflows can
+  pass handoffs.
+
+The concrete Go plan — layout, storage schema, runner state machine, sandbox flags,
+API/MCP surfaces, phases and verification — is in `docs/implementation-plan.md`.

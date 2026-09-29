@@ -1,4 +1,4 @@
-# Icaro — Go Implementation Plan (Milestone: Phases 1–4)
+# Icaro — Go Implementation Plan (Milestone: Phases 1–4c)
 
 ## Context
 
@@ -14,7 +14,7 @@ adapters, integration/harness catalog, in-step MCP) are sketched at the end so n
 
 | Topic | Decision |
 |---|---|
-| Milestone | Phases 1–4: engine core, webhook+cron triggers, connections + `http` step, MCP server + skill |
+| Milestone | Phases 1–4c: engine core, webhook+cron triggers, connections + `http` step, shared library, MCP server + skill, embedded web UI, menu bar tray |
 | Auth | Single-tenant API bearer tokens from day one (`icaro token create`), hashed in DB |
 | DB layer | `database/sql`, hand-written portable SQL, `modernc.org/sqlite` (pure Go) + `pgx/v5` stdlib driver, `pressly/goose` migrations per dialect |
 | Durability | Runs survive restarts: step state persisted before container start; runner re-attaches to containers by label |
@@ -22,6 +22,11 @@ adapters, integration/harness catalog, in-step MCP) are sketched at the end so n
 | Expressions | Go `text/template` (`{{ }}`) for interpolation **and** `if:` (renders to `true`/`false`) |
 | Logs | Files on disk (`<data>/logs/<run>/<step>.log`), secret-scrubbed on write; DB holds path/size |
 | CI | Unit everywhere + integration job with real Docker and a Postgres service (both-backend matrix) |
+| Shared memory | ai-memory (official image), attached via **memory spaces** configurable at machine (`icaro.yaml`), workflow, and step level — like Docker networks; on by default for `agent` steps when a default space exists |
+| Library | Shared **scripts + step presets**, versioned in Icaro's DB, git pull/push for review, mounted read-only at `/icaro/lib` (on PATH) in every step; `script:`/`preset:` step fields; exposed via MCP + skill |
+| Skill adoption | `icaro skill install` wires the skill + MCP entry into Claude Code/Codex in one idempotent command |
+| Tray | `icaro tray` subcommand in the **same single binary** (fyne.io/systray, cgo on macOS); `.app` bundle wraps that binary and auto-selects `tray`; `icaro service …` manages launchd/systemd; status + quick actions + notifications |
+| UI | React + TypeScript SPA embedded in the binary (`go:embed`), over the same REST API; lands as **Phase 4b** after MCP; login by pasting an API token (HttpOnly cookie session); v1 covers workflows, runs + **run flow-graph view**, admin (connections/tokens/deliveries); memory spaces + draft approvals arrive with Phase 6 |
 
 ### Decisions taken in this plan (flag if you disagree)
 
@@ -59,6 +64,10 @@ internal/
   trigger/                        # webhook gateway (verify, record delivery, enqueue), scheduler loop
   mcp/                            # tool + resource definitions over Backend; stdio and HTTP transports
   apiclient/                      # Go client for the REST API (used by CLI and stdio MCP)
+  ui/                             # embed.go: go:embed dist/** + SPA fallback handler (build tag `noui` → 404 page)
+  tray/                           # systray menu model + actions (Phase 4c); build tag `tray`
+packaging/macos/                  # Icaro.app template (Info.plist LSUIElement, icons); `make app`
+ui/                               # Vite + React + TS app (package.json, src/, e2e/); `make ui` → internal/ui/dist
 schema/workflow.schema.json       # generated (go generate) + committed; drift test
 skills/icaro-workflows/SKILL.md   # the authoring skill (+ examples/)
 examples/                         # hello.yaml, webhook-echo.yaml, http-step.yaml
@@ -208,6 +217,446 @@ Throwaway program: create container with `--read-only` + tmpfs + `/icaro` named 
 **Phase 4 — MCP + skill**
 12. `internal/mcp`: tool/resource definitions over `Backend`; in-process `/mcp` route with auth; `icaro mcp` stdio over `apiclient`. Tests: tool round-trips via the SDK's in-memory transport; `validate_workflow` returns structured issues.
 13. `skills/icaro-workflows/SKILL.md` + examples + `.mcp.json` snippet; README quick start.
+    Make it one command to adopt: `icaro skill install [--client claude-code|codex]` writes
+    the skill into the client's skills directory and the MCP entry into its config
+    (idempotent, like ai-memory's `install-mcp`); the skill is also served at
+    `GET /api/v1/skill` (zip) and downloadable from the UI's Help page. The skill covers:
+    the authoring loop (§5.3), the step contract, the library (check it first, reuse
+    presets), memory spaces, and when to use `call_workflow` vs in-step `invoke`.
+
+## Shared library (Phase 3b) — scripts and step presets reusable across flows
+
+### Context
+
+Many flows need the same helper scripts, and agents writing flows should be able to find
+and reuse them instead of re-generating them. The library is a first-class, versioned
+object in Icaro (managed via UI/CLI/MCP, git import/export for review), and it is on disk
+inside every step so using it is as easy as calling a path.
+
+### Model
+
+Two item kinds, one table `library_items(id, kind script|preset, name UNIQUE per kind,
+version, description, language, content, meta_json, created_at, updated_at)` +
+`library_versions(item_id, version, content, meta_json, actor, created_at)`.
+
+**Scripts** — any language; an optional header block declares how to run them and what
+they take (parsed on save, surfaced in MCP/UI):
+
+```python
+#!/usr/bin/env python3
+# icaro: image=python:3.12-slim
+# icaro: inputs=issue_url:string!, dry_run:bool
+# icaro: outputs=summary:string
+"""Summarize an issue for downstream steps. Reads /icaro/input.json, writes /icaro/output.json."""
+```
+
+**Presets** — named step fragments (YAML) merged into a step; used for `agent` steps
+("pr-reviewer") as much as for `run` steps:
+
+```yaml
+# preset: pr-reviewer
+agent: { harness: claude, params: { model: sonnet } }
+sandbox: strict
+memory: team
+```
+
+### Using it from a workflow (schema-visible, validated)
+
+```yaml
+steps:
+  - name: summarize
+    script: summarize-issue          # library script → image from header, inputs validated
+    inputs: { issue_url: "{{ inputs.url }}" }
+  - name: review
+    preset: pr-reviewer              # merged first; step fields override
+    agent: { prompt: "Review PR {{ inputs.url }}. Helpers are in /icaro/lib." }
+  - name: custom
+    run:
+      image: alpine
+      script: /icaro/lib/notify.sh "{{ steps.summarize.outputs.summary }}"   # direct path use
+```
+
+`script:` joins the exactly-one-of set (`run` | `http` | `script` | `uses` | `agent`).
+`preset:` is orthogonal and merges before validation (so errors point at the effective
+step). Unknown names get nearest-match hints.
+
+### Mechanics
+
+- **Mount**: the runner materializes the library (all current script versions, mode 0555,
+  plus a `MANIFEST.json`) into a content-addressed directory
+  `<data>/lib/<hash>/` and bind-mounts it **read-only** at `/icaro/lib` in every step;
+  `/icaro/lib` is prepended to `PATH`. Same hash ⇒ same dir ⇒ no rebuild between runs.
+  A run pins the library hash at start (recorded on `runs.library_hash`) so all its
+  steps see one consistent snapshot.
+- **`script:` step** = a `run` step whose image/inputs come from the header; input
+  validation from the header's `inputs=` spec; missing header ⇒ requires explicit
+  `image:` on the step.
+- **Harness ease**: harness images get `/icaro/lib` on PATH; the agent preamble lists
+  available scripts (name + one-line description from `MANIFEST.json`) so the model knows
+  what exists without a tool call; in-step MCP (§5.4, level `read`+) exposes
+  `library_list/get`, and `author` allows `library_put` (stored as a new version with
+  run/step actor, no draft gate needed — scripts only take effect when a flow references
+  them).
+- **MCP (outside)**: `list_library`, `get_library_item`, `put_library_item`,
+  `list_presets` are added to §5.2; the skill's authoring loop gains step 0: "check the
+  library before writing a script; put reusable helpers there".
+- **CLI/UI**: `icaro library list|get|put|rm|pull <dir>|push <dir>` (pull/push map to a
+  directory layout `scripts/<name>` + `presets/<name>.yaml` for git); UI gets a Library
+  screen (Monaco editor per item, versions, "used by" list computed from workflow specs).
+
+### Implementation steps (Phase 3b, after step 11)
+
+12a. Migration + store + service (`internal/service/library.go`), header parser
+     (`internal/library/header.go`) with tests, materializer + hash (`internal/library/fs.go`).
+12b. Spec: `Step.Script`, `Step.Preset`, `Step.Inputs`; preset merge + validation;
+     runner mount + PATH; `script:` executor delegating to `run`.
+12c. CLI + REST endpoints; MCP tools and skill text land with step 12/13; UI Library
+     screen lands in Phase 4b step 17.
+
+### Verification (library)
+
+- `icaro library put scripts/summarize-issue.py` → `icaro library list` shows it with
+  parsed inputs; a workflow using `script: summarize-issue` runs with the header's image
+  and fails validation when a required input is missing (path `/steps/0/inputs/issue_url`).
+- Inside a `run` step, `ls /icaro/lib` shows the scripts, `which notify.sh` resolves,
+  files are not writable (`touch` fails).
+- Two concurrent runs during a `library put` see different `library_hash` values and
+  each stays consistent across its steps.
+- `icaro library pull ./lib-export && git diff` yields a reviewable directory; `push`
+  round-trips without spurious versions (content-equal ⇒ no new version).
+- Via MCP, an agent calls `list_library`, then authors a workflow that references a
+  preset; `validate_workflow` errors point at the merged step's effective fields.
+
+## Web UI (Phase 4b) — manage workflows, watch runs as a flow graph
+
+### Context
+
+Operators need to manage workflows and, when many are running, see at a glance what ran,
+what is about to run, and each step's outputs. The UI is a client of the same REST API the
+CLI and MCP use — no parallel service layer — and ships inside the single binary.
+
+### Stack and serving
+
+- `ui/`: Vite + React 18 + TypeScript, React Router, TanStack Query, Tailwind.
+  **Monaco** with `monaco-yaml` bound to `GET /schema/workflow` → autocomplete + inline
+  schema errors while editing YAML. **`@xyflow/react`** (React Flow) + `elkjs` layout for
+  the run graph. `vitest` + Testing Library for units; **Playwright** for e2e.
+- `internal/ui/embed.go`: `//go:embed dist/**`, served at `/` with SPA fallback for
+  non-`/api`, non-`/hooks`, non-`/mcp` paths; immutable cache headers for hashed assets.
+  Build tag `noui` compiles without the bundle (dev/CI-fast). `make ui` runs `npm ci &&
+  npm run build` into `internal/ui/dist`; CI builds the UI before `go build`; the
+  release Dockerfile has a node stage.
+
+### Auth for humans
+
+- `POST /api/v1/session` with `{token}` → verify against `api_tokens` → create row in
+  `ui_sessions(id, token_id, expires_at, created_at)` → `HttpOnly; Secure; SameSite=Strict`
+  cookie carrying the session id. `DELETE /api/v1/session` logs out. Sessions inherit the
+  token's scope; revoking the token kills its sessions.
+- Auth middleware accepts **bearer or cookie**. Cookie-authenticated mutations require the
+  `X-Icaro-UI: 1` header (CSRF belt-and-braces on top of SameSite).
+- Login page = paste a token (created via `icaro token create`). Users/OIDC later, behind
+  the same session table.
+
+### API additions the UI needs (all reusable by CLI/MCP)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /runs/{id}/steps/{idx}/logs/stream` | SSE; tails the log file and follows while the step runs |
+| `GET /runs/{id}/events` | SSE of run/step status transitions (runner publishes on an in-process bus; poll fallback every 2s) |
+| `GET /runs/{id}/graph` | Nodes/edges for the graph: steps from the run's **pinned workflow version** (so pending steps are known), each with status/timing/exit code/output size; child runs via `parent_run_id` as sub-graph nodes; `if:` shown on edges |
+| `GET /runs/{id}/tree` | Lineage: root, parent, children (for the fleet view and §5.4 lineage) |
+| `POST /runs/{id}/rerun` | New run with the same input and workflow version (recorded as `rerun_of`) |
+| `GET /workflows/{name}/versions`, `GET .../versions/{n}` | Version history + diff source |
+| `GET /overview` | Counts by status (running/queued/failed 24h), active workflows, next scheduled fires (from `schedule_state`), recent deliveries |
+| `POST /workflows/{name}/enable|disable` | Status toggle |
+
+### Screens (v1)
+
+1. **Overview / fleet board** — live board of running and queued runs across all
+   workflows (SSE-fed), recent failures, upcoming schedule fires, webhook activity. Each
+   card links to the run graph.
+2. **Workflows** — list (status, triggers, last/next run); detail with Monaco YAML editor
+   (debounced `POST /workflows/validate`, issues rendered inline by JSON pointer),
+   **Save = Apply** (new version), version history with diff, trigger card (webhook URL,
+   secret set/unset, cron list), enable/disable, **Run now** with a JSON input box.
+3. **Run graph view** — the requested view: nodes are steps laid out left→right, colored by
+   status (pending / running-animated / succeeded / failed / skipped); edges carry `if:`
+   labels; steps that will run are already visible because the graph comes from the
+   pinned version. Child runs (`call_workflow`, in-step `invoke`) render as collapsible
+   group nodes with their own step graph. Click a node → side panel: resolved inputs,
+   **outputs JSON viewer** (collapsible tree + copy), live logs (SSE), timing, attempt,
+   exit code, error. Toggle to a **timeline (Gantt)** view for long runs. Header actions:
+   cancel, re-run.
+4. **Runs** — filterable list (workflow, status, trigger kind, date); bulk cancel.
+5. **Admin** — Connections (create: type picker + fields, values write-only; list shows
+   name/type/field names; delete), Tokens (create shows the secret once; revoke),
+   Deliveries (list with verified/failed, payload viewer, **Redeliver**).
+   **Library** — scripts and presets: Monaco editor per item, parsed header shown as a
+   form, versions, "used by" workflows. **Help** — skill download + `icaro skill install`
+   instructions, MCP config snippets.
+6. **Phase 6 additions** — Memory spaces (list spaces, per-workflow resolved marker,
+   link to the ai-memory web UI), Drafts (agent-authored workflows from §5.4: diff vs
+   active version, approve/reject with actor and run lineage shown).
+
+### Implementation steps (Phase 4b, after step 13)
+
+14. API additions above + `ui_sessions` migration + cookie auth + CSRF header; SSE helper
+    (`internal/api/sse.go`); runner event bus (`internal/runner/events.go`).
+15. `ui/` scaffold, embed handler, login, layout/nav, Workflows list + editor (Monaco +
+    schema), Run now, versions/diff.
+16. Run graph view (React Flow + ELK), side panel with outputs/logs, timeline toggle,
+    Overview board, Runs list.
+17. Admin screens. Playwright e2e in the integration job: login → create `hello` workflow
+    → run → graph turns green → outputs visible in the panel → redeliver a delivery.
+
+### Verification (UI)
+
+- `make ui && go build ./... && icaro serve` → open `/`, paste a token, land on Overview.
+- Paste `examples/hello.yaml` with `imgae:` typo → inline error at `steps[0].run` from
+  the schema and the same issue in the validate panel; fix → Save creates version 2, diff
+  shows the change.
+- Run it; the graph shows both steps pending, first turns running with live log lines,
+  then green; clicking the second node shows its `outputs` JSON; re-run creates a run
+  with `rerun_of` set.
+- Start five runs of a 60s workflow: the Overview board shows five running cards updating
+  over SSE without refresh; cancel one from its graph header.
+- `curl -b <cookie> -X POST /api/v1/workflows/x/disable` without `X-Icaro-UI` → 403;
+  with it → 200. Bearer requests need no header.
+
+## Menu bar tray (Phase 4c) — `icaro tray`, same single binary
+
+### Context
+
+On a Mac (and Linux/Windows) the operator wants an always-visible top-bar icon with
+workflow status and quick actions. Constraint from the user: **one binary** — CLI,
+service, web app and tray are all `icaro`. So the tray is a subcommand, not a second
+program, and the macOS `.app` bundle simply wraps that binary.
+
+### Design
+
+- `icaro tray` (`internal/tray/`) built on `fyne.io/systray` (Cocoa on macOS via cgo,
+  GTK/AppIndicator on Linux, Win32 on Windows). Runs on the main thread as systray
+  requires; all API work in goroutines. Uses `internal/apiclient` (bearer token) — the
+  same client the CLI uses.
+- **Auto-detect bundle launch**: when the executable path contains `.app/Contents/MacOS/`
+  and no args are given, `main` defaults to `tray` (an `.app` cannot pass CLI args).
+  `packaging/macos/Icaro.app` template: `Info.plist` with `LSUIElement=true` (no Dock
+  icon), `CFBundleExecutable=icaro`, template icons; `Icaro.app/Contents/MacOS/icaro` is
+  a copy of (or symlink to) the release binary so `icaro` on `PATH` and the app are the
+  same build.
+- **Service control from the tray**: `icaro service install|uninstall|start|stop|status`
+  (`internal/service/daemon.go`): launchd user agent on macOS
+  (`~/Library/LaunchAgents/dev.icaro.server.plist` running `icaro serve --role all`),
+  systemd user unit on Linux, Windows service later. The tray shows service state and can
+  start/stop it; if the server is unreachable the icon shows a dimmed state.
+- **Data feed**: `GET /api/v1/overview` on start + a new global SSE stream
+  `GET /api/v1/events` (run/step transitions across all workflows, drafts pending,
+  service heartbeat) — the same bus the web UI's fleet board uses; poll fallback 10s.
+- **Menu (v1, "status + quick actions")**:
+  - Icon: template glyph with a small badge state — idle / running (animated) / failures
+    present; title text optional (`● 3 ▸ 1`) toggle in preferences.
+  - `Running (n)` / `Queued (n)` / `Failed 24h (n)` headers → each a submenu of runs
+    (`workflow · step k/m · 2m31s`) → click opens the web UI at the run graph.
+  - `Run workflow ▸` submenu of active workflows → runs with `{}` input (workflows that
+    require input open the UI's Run dialog instead — driven by a `requires_input` flag
+    derived from the spec's `inputs` schema when present).
+  - `Cancel ▸` submenu of running runs.
+  - `Drafts pending (n)` → opens the UI approvals screen (Phase 6).
+  - `Service ▸` start / stop / status; `Open Icaro` (web UI); `Preferences…`
+    (server URL, token stored in the OS keychain via `zalando/go-keyring`, notifications
+    on/off, show counts in title); `Quit`.
+- **Notifications** (`gen2brain/beeep`): run failed, draft pending, service went down.
+  Clicking a notification opens the relevant UI page where the platform supports it;
+  otherwise the menu item does.
+- **Build/release**: darwin builds need cgo → CI job on `macos-latest` produces
+  `darwin/arm64` + `darwin/amd64` and `lipo`s a universal binary; GoReleaser packages the
+  `.app` (zip) alongside the plain binary; Linux/Windows builds keep cgo off unless the
+  tray build tag is on (`-tags tray`), so headless servers stay static. Code-signing and
+  notarization are a follow-up (documented, not blocking).
+
+### Implementation steps (Phase 4c, after step 17)
+
+18. `GET /api/v1/events` global SSE + `overview.drafts_pending` + `requires_input` flag;
+    `icaro service …` daemon management with launchd/systemd templates and tests for the
+    generated unit/plist.
+19. `internal/tray`: systray skeleton, apiclient wiring, keychain prefs, menu building
+    from overview + SSE, actions (run/cancel/open), notifications; bundle auto-detect in
+    `cmd/icaro/main.go`; `packaging/macos` template + `make app`.
+20. CI: macOS job building the tray with cgo and running `go test ./internal/tray/...`
+    (menu model is pure Go and unit-tested; systray itself is mocked behind an interface).
+
+### Verification (tray)
+
+- `icaro service install && icaro service status` → launchd agent loaded; `icaro tray`
+  shows the icon; stopping the service from the menu dims the icon and `icaro service
+  status` reports stopped; starting restores it.
+- Run five workflows from the `Run workflow ▸` submenu → icon goes to running state,
+  `Running (5)` lists them with live step counters; cancel one from `Cancel ▸`; make one
+  fail → macOS notification appears and `Failed 24h (1)` shows it; clicking opens the
+  run graph in the browser.
+- `open packaging/macos/Icaro.app` launches the tray with no Dock icon; `icaro --version`
+  from the bundle path prints the same version as the CLI on PATH.
+- Preferences: token saved to keychain (visible in Keychain Access under `dev.icaro`),
+  not in any plist/config file.
+
+## Shared agent memory: ai-memory integration (Phase 6, "memory spaces")
+
+### Context
+
+Harnesses running as `agent` steps — and the sub-agents, sub-workflows and in-step
+`invoke`s they spawn — need a shared memory so a pipeline of agents doesn't re-explain
+itself at every step. [ai-memory](https://github.com/akitaonrails/ai-memory) already is that
+(it's what ai-launcher composes): one binary/Docker image serving a **stateless HTTP MCP
+endpoint at `/mcp` (port 49374)** plus a hook endpoint, bearer-token auth, a git-backed
+markdown wiki per `workspace/project`, `per_actor` scoping keyed by the
+`X-Memory-Actor-Session-Id` header, project routing via a `.ai-memory.toml` marker in the
+working directory, and claim-once **handoffs** between sessions. Icaro therefore does not
+implement memory — it implements *attachment*, exactly like Docker networks: memory spaces
+are declared once, workflows attach to one, steps can override.
+
+### The model: memory spaces
+
+```yaml
+# icaro.yaml (machine level) — declare spaces, like `docker network create`
+memory:
+  default: team                      # space attached to every agent step unless overridden
+  spaces:
+    team:
+      connection: ai-memory-main     # connection type `ai-memory` = {url, token}
+      workspace: acme                # ai-memory workspace
+      project: "{{ workflow.name }}" # template; one wiki per workflow by default
+      session: root_run              # root_run | run | step | workflow  (who shares a live session)
+      sub_agents: capture            # capture | drop  → marker `drop_subagent_captures`
+      recall_global: false           # marker [recall].default_global
+      briefing: true                 # marker [briefing].inject_on_session_start
+    shared-wiki:
+      connection: ai-memory-main
+      workspace: acme
+      project: platform              # fixed project: every attached workflow shares one wiki
+      session: workflow
+```
+
+```yaml
+# workflow level — attach the whole workflow to a space
+name: pr-review
+memory: shared-wiki
+
+steps:
+  - name: triage
+    agent: { harness: claude, prompt: ... }        # inherits shared-wiki
+  - name: deep-dive
+    agent: { harness: codex, prompt: ... }
+    memory: { space: team, project: pr-review-deep }   # per-step override (project/session only)
+  - name: summarize
+    run: { image: python:3.12-slim, script: ... }
+    memory: false                                  # opt out (default for `run` steps anyway)
+```
+
+Resolution order: step `memory` → workflow `memory` → `memory.default` → none. A step may
+only *override* `project`, `session`, `sub_agents`, `recall_global`, `briefing` — never the
+`connection`/`workspace` of a space (those are the operator's boundary, same as a step can't
+invent a Docker network). Everything is in the JSON Schema (§5.1), so agents authoring
+workflows see the knobs; `validate_workflow` rejects unknown space names with a
+nearest-match hint.
+
+`session` decides which harnesses share one live ai-memory actor session (handoffs, active
+project, `memory_recent`):
+- `root_run` (default) — every step of a run *and everything it spawns* (sub-workflows via
+  `call_workflow`, in-step `invoke`, harness-internal sub-agents) share one session id.
+- `run` — the run only, not its descendants. `step` — isolated. `workflow` — all runs of the
+  workflow share (useful for long-lived "assistant" workflows). Long-term memory (the wiki)
+  is always per `workspace/project`; `session` only scopes the live coordination layer.
+
+### Mechanics (runner side) — the token never enters the container
+
+1. **Connection type `ai-memory`** (`internal/service/connections.go` registry):
+   fields `url`, `token`. `icaro init --with-memory` writes the compose service (below),
+   runs `ai-memory generate-auth-token`, and creates the connection.
+2. **Per-step memory socket** — the runner starts a UDS listener
+   `<data>/sockets/<run>/<step>/memory.sock` and bind-mounts it at `/icaro/memory.sock`
+   (same mechanism as `/icaro/mcp.sock` in §5.4 — one `runner/sockets` package serves both).
+   It is a reverse proxy to the space's `url` that **injects** `Authorization: Bearer`,
+   `X-Memory-Actor-Session-Id: <resolved session id>` and `X-Memory-Actor-Agent: <harness>`,
+   and passes `/mcp` and `/hook*` through. Container never sees the token or the network;
+   works under `network: none`.
+3. **Marker file** — the runner writes `/workspace/.ai-memory.toml` from the resolved space
+   (`workspace`, `project`, `drop_subagent_captures`, `[recall]`, `[briefing]`) before the
+   first memory-enabled step. ai-memory's marker discovery walks up from cwd (`/workspace`),
+   so routing is explicit by construction — no reliance on directory-name heuristics.
+4. **In-container loopback** — the harness image's `icaro-shim` entrypoint forwards
+   `127.0.0.1:49374` → `/icaro/memory.sock`. Result: ai-memory's *default* generated
+   config (`http://127.0.0.1:49374/mcp`) and hooks work unmodified inside the container.
+   The shim also materializes the harness config skeleton (`install-mcp`/`install-hooks`
+   output, baked at image build time) into the tmpfs `$HOME` at start (rootfs is
+   read-only, `/home` is tmpfs — §6.1), then execs the harness headless.
+5. **Harness images** bundle the `ai-memory` binary (hooks invoke it) pinned by version;
+   the `claude` harness image runs `ai-memory install-hooks --agent claude-code --apply` and
+   `install-mcp --client claude-code --apply` at build time into the skeleton.
+6. **Env for advanced `run` steps**: when `memory` is attached to a plain `run` step, the
+   socket is mounted and `ICARO_MEMORY_SOCKET=/icaro/memory.sock` is set — scripts can
+   `curl --unix-socket` it. No shim, no loopback, no hooks.
+7. **Handoffs across steps**: the `agent` executor prepends a short system preamble
+   ("shared memory is available via the `ai-memory` MCP server; check for a pending handoff
+   with `memory_handoff_accept` before starting; leave one with `memory_handoff` when done")
+   — configurable off with `memory.preamble: false`. The skill documents the same loop.
+
+### Deployment (the "easy way")
+
+- `docker-compose.yml` gains an `ai-memory` service: `image: akitaonrails/ai-memory:<pinned>`,
+  volume `ai-memory-data:/data`, `AI_MEMORY_AUTH_TOKEN` from `.env`, `AI_MEMORY_AUTO_SCOPE__MODE=per_actor`,
+  attached only to an `internal: true` network shared with the `icaro` service (never
+  published on the host). The runner reaches it via that network; step containers never do
+  (they get the socket).
+- `icaro init --with-memory` generates the token + connection + a default `team` space in
+  `icaro.yaml`. Pointing at an existing ai-memory server is just `icaro connection create
+  ai-memory-main --type ai-memory --field url=… --field token=…` — no compose needed.
+- `icaro memory status` — probes the connection, prints resolved spaces and the marker each
+  workflow would get (`--workflow X`), and lists ai-memory workstreams (`--json`).
+
+### Code map
+
+- `internal/workflow/spec.go`: `Workflow.Memory *MemoryRef`, `Step.Memory *MemoryRef`
+  (`string | false | {space, project, session, sub_agents, recall_global, briefing}`
+  — implement as a struct with custom YAML/JSON unmarshal).
+- `internal/config/memory.go`: `Spaces map[string]Space`, `Default`, validation.
+- `internal/memory/`: `Resolve(cfg, workflow, step, run) (*Attachment, error)`,
+  `MarkerTOML(att)`, `SessionID(att, run)` (root_run/run/step/workflow), `Proxy` (UDS →
+  HTTP with header injection).
+- `internal/runner/sockets/`: shared per-step UDS lifecycle (mcp.sock + memory.sock).
+- `internal/runner/steps/agent.go`: mounts, marker write, preamble, `ICARO_MEMORY_SOCKET`.
+- `images/harness/claude/Dockerfile` + `cmd/icaro-shim/`: loopback forwarder, config
+  materialization, headless exec, output.json capture.
+- `skills/icaro-workflows/SKILL.md`: memory section (spaces, when to use `session`,
+  handoff loop, `memory: false` for pure-compute steps).
+
+### Forward-compat hooks to do in Phases 1–4 for this
+
+- Connection type registry accepts `ai-memory` (Phase 3, one line).
+- `Step.Memory` / `Workflow.Memory` fields reserved in the spec (`jsonschema:"-"` until
+  Phase 6) so exactly-one-of and override validation already know them.
+- `runner/sockets` written for `/icaro/mcp.sock` in a way that takes N named sockets.
+- `runs.root_run_id` already in migration 0001 — it is the default `session` key.
+
+### Verification (Phase 6)
+
+1. `icaro init --with-memory && docker compose up -d` → `icaro memory status` reports the
+   connection healthy and lists space `team`.
+2. Workflow with two `agent` steps (claude, then codex) under the default space: step 1's
+   prompt "record that the deploy target is `prod-eu` and leave a handoff"; step 2's prompt
+   "what is the deploy target? claim the handoff first". Step 2's output names `prod-eu`;
+   ai-memory's wiki (`/data/wiki/<workspace>/<workflow>/…`) contains the page; both steps
+   show the same `X-Memory-Actor-Session-Id` in the proxy log.
+3. `docker inspect` of a running agent step: no `Authorization`/token in env, only
+   `/workspace` and `/icaro` mounts, `NetworkMode=none` — and the step still reaches memory.
+4. A `call_workflow` child run (or in-step `invoke`) under `session: root_run` claims a
+   handoff left by the parent; under `session: run` it cannot (empty inbox).
+5. Two workflows attached to `shared-wiki` see each other's pages; two under `team` (project
+   = workflow name) do not, until `recall_global: true`.
+6. Per-step override `memory: { space: team, project: x }` writes a different marker
+   project for that step only; `memory: false` mounts no socket and sets no env.
+7. Validation: unknown space name → `/steps/0/memory/space: unknown memory space 'tean'`
+   with hint `team`; attempting `connection:` inside a step override is rejected.
 
 ## Forward-compatibility hooks for Phases 5–6 (do now, cheap)
 
