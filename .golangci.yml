@@ -1,0 +1,17 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - misspell
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        - G304 # file paths are validated by callers
