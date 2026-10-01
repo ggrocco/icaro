@@ -50,7 +50,8 @@ func newFixture(t *testing.T) *fixture {
 		RunnerID: "r1", Concurrency: 2, PollInterval: 10 * time.Millisecond, Heartbeat: 20 * time.Millisecond,
 		StepTimeout: 2 * time.Second, MemoryBytes: 1 << 30, NanoCPUs: 1e9, Pids: 256, NoFile: 4096, LogsDir: logDir,
 	}
-	r := New(cfg, st, fd, fakeSecrets{"slack": {"token": "xoxb-super-secret"}} //nolint:gosec // test fixture, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	secrets := fakeSecrets{"slack": {"token": "xoxb-super-secret"}} //nolint:gosec // test fixture
+	r := New(cfg, st, fd, secrets, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	return &fixture{t: t, ctx: ctx, store: st, docker: fd, runner: r, logDir: logDir}
 }
 
