@@ -158,7 +158,7 @@ func StepRefs(t *template.Template) []string {
 		}
 	}
 	if t.Tree != nil {
-		walk(t.Tree.Root)
+		walk(t.Root)
 	}
 	return refs
 }
