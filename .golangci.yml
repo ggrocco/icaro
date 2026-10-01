@@ -15,3 +15,5 @@ linters:
     gosec:
       excludes:
         - G304 # file paths are validated by callers
+        - G701 # taint-based SQL injection: queries are constant strings with bound parameters
+        - G703 # taint-based path traversal: config/data paths come from the operator

@@ -285,7 +285,7 @@ func schemaIssues(ve *jsonschema.ValidationError) Issues {
 func knownKeysAt(loc []string) []string {
 	t := reflect.TypeOf(Workflow{})
 	for _, seg := range loc {
-		for t.Kind() == reflect.Ptr {
+		for t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		switch t.Kind() {
@@ -301,7 +301,7 @@ func knownKeysAt(loc []string) []string {
 			return nil
 		}
 	}
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
