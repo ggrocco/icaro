@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,13 @@ func Open(ctx context.Context, dialect Dialect, dsn string) (*Store, error) {
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("connect %s: %w", dialect, err)
+	}
+	if dialect == SQLite {
+		// The driver creates the file with the process umask; state is private.
+		if err := os.Chmod(dsn, 0o600); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	return &Store{db: db, dialect: dialect}, nil
 }
