@@ -1,0 +1,10 @@
+/bin/
+/dist/
+/data/
+*.db
+*.db-*
+icaro.yaml
+.env
+coverage.out
+/internal/ui/dist/
+/ui/node_modules/

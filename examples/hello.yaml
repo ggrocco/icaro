@@ -1,0 +1,19 @@
+# The smallest useful workflow: one container step that reads the run input
+# and publishes an output for later steps / the API to see.
+name: hello
+description: Greet whoever is in the input and report back
+inputs:
+  who: { type: string, default: world, description: "Name to greet" }
+steps:
+  - name: greet
+    run:
+      image: alpine:3.20
+      script: |
+        echo "hello {{ inputs.who }}"
+        echo "input.json was: $(cat /icaro/input.json)"
+        printf '{"greeting":"hello {{ inputs.who }}"}' > /icaro/output.json
+  - name: shout
+    run:
+      image: alpine:3.20
+      command: ["sh", "-c", "echo '{{ steps.greet.outputs.greeting }}' | tr a-z A-Z"]
+    network: none

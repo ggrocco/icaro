@@ -1,0 +1,24 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - misspell
+    - gosec
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    gosec:
+      excludes:
+        - G304 # file paths are validated by callers
+        - G701 # taint-based SQL injection: queries are constant strings with bound parameters
+        - G703 # taint-based path traversal: config/data paths come from the operator

@@ -1,0 +1,27 @@
+name: notify-on-signup
+description: Enrich a signup and notify
+inputs:
+  email: { type: string, required: true }
+on:
+  webhook: { secret: required }
+  schedule:
+    - cron: "*/15 * * * *"
+      input: { email: cron@example.com }
+steps:
+  - name: enrich
+    run:
+      image: python:3.12-slim
+      script: |
+        python -c 'print("hi {{ inputs.email }}")'
+    timeout: 5m
+    retry: { attempts: 3, backoff: 5s }
+  - name: notify
+    if: '{{ ne steps.enrich.outputs.plan "free" }}'
+    http:
+      url: https://example.com/notify
+      method: POST
+      body: { email: "{{ inputs.email }}", plan: "{{ steps.enrich.outputs.plan }}" }
+      auth: bearer
+    connection: notify-api
+    sandbox: strict
+    network: none
