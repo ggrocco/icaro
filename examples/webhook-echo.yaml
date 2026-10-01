@@ -1,0 +1,12 @@
+# Exposes POST /hooks/webhook-echo/<token>; the request body becomes the
+# run input and is echoed by the step.
+name: webhook-echo
+on:
+  webhook: { secret: optional }
+steps:
+  - name: echo
+    run:
+      image: alpine:3.20
+      script: |
+        echo "received:"
+        cat /icaro/input.json

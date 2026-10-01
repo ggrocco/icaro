@@ -46,7 +46,10 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.configPath, "config", "", "config file (default: $ICARO_CONFIG, ./icaro.yaml, $XDG_CONFIG_HOME/icaro/icaro.yaml)")
 	root.PersistentFlags().StringVar(&opts.dataDir, "data-dir", "", "data directory (default from config)")
 
-	root.AddCommand(newVersionCmd(), newConfigCmd(opts), newInitCmd(opts), newMigrateCmd(opts), newTokenCmd(opts))
+	root.AddCommand(
+		newVersionCmd(), newConfigCmd(opts), newInitCmd(opts), newMigrateCmd(opts), newTokenCmd(opts),
+		newServeCmd(opts), newWorkflowCmd(opts), newRunCmd(opts), newRunsCmd(opts), newConnectionCmd(opts), newSchemaCmd(),
+	)
 	return root
 }
 
