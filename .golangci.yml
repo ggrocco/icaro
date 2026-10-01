@@ -12,6 +12,11 @@ linters:
     - misspell
     - gosec
   settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     gosec:
       excludes:
         - G304 # file paths are validated by callers
