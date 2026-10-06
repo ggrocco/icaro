@@ -13,7 +13,7 @@
 
 ## Surgical mocks
 
-Allowed only at the edges: clock, filesystem, process runner, external HTTP, and notification provider. Never mock the planner/executor itself to test the planner/executor.
+Allowed only at the edges: clock, filesystem, process runner, and external HTTP (integration actions included). Never mock the planner/executor itself to test the planner/executor.
 
 ## Tools
 

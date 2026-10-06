@@ -53,8 +53,7 @@ internal/workflow/            # schema, DAG planner, executor, scheduler, logs (
 internal/preview/             # watcher, compose, Traefik labels, cleanup
 internal/memory/              # indexing, retrieval, handoff, per-project ACL, MCP server (ADR 0004)
 internal/store/               # migrations + repositories
-internal/notify/              # Slack/email/webhook
-internal/integration/         # GitHub/GitLab webhooks
+internal/integration/         # manifest packs, webhook router, HTTP action executor (ADR 0007)
 internal/platform/            # small macOS/Linux abstractions
 internal/doctor/              # checks and remediations
 web/                          # React/Vite, Wails bindings, UI served by the daemon
@@ -96,14 +95,14 @@ Scope: the workflow engine **orchestrates sessions** (ADR 0002). It is not a gen
 
 A workflow is a DAG validated by JSON Schema plus semantic validations: unique names, acyclicity, valid references, retry/timeout policies, repository dependencies, and permissions. **Data flow is part of the contract:** steps declare `outputs`, later steps reference them via a defined interpolation syntax, and `env` is explicit. A workflow without defined data flow is incomplete (see `docs/schemas/workflow.schema.json`).
 
-Step model: a step has no built-in kind — it **runs a container image** (`image` + `command`). One primitive covers every case:
+Step model: a step takes exactly one of two forms (ADR 0007):
 
-- An **agent** step runs the agent base image (`ghcr.io/icaro-dev/agent-base:<version>`, §5) with the agent CLI as its command.
-- A **shell** or **JS** step is just an image with the right runtime (e.g. a Bash or Node image); host execution requires an explicit flag.
-- A **notification** is an image whose command renders/sends a templated message (Slack/email/webhook) — not a special step type.
-- **Conditional execution** is expressed with a step's `when` expression rather than a dedicated condition step.
+- An **`image` step** runs a container image (`image` + `command`) — the general compute primitive. An **agent** step runs the agent base image (`ghcr.io/icaro-dev/agent-base:<version>`, §5) with the agent CLI as its command; a **shell** or **JS** step is just an image with the right runtime; host execution requires an explicit flag.
+- A **`uses` step** invokes a declarative integration action (`uses: slack.post-message` + typed `input`) executed **in-process by the daemon** — talking to an external API needs no container. Notifications are `uses` actions, not a special step type (§9).
+- Both forms are full DAG citizens: `needs`, `when`, `retry`, `timeout`, and `outputs` behave identically. **Conditional execution** is expressed with a step's `when` expression rather than a dedicated condition step.
+- Runs started by an integration trigger expose the normalized event payload as `${{ trigger.* }}` (§9); manual runs prompt for those fields, so every workflow stays testable by hand.
 
-Images are free to choose; the engine never bakes credentials into them — creds remain brokered (§5, ADR 0003).
+Images are free to choose; the engine never bakes credentials into them — agent creds follow ADR 0005, integration creds stay host-bound in the daemon (§9).
 
 Executor:
 
@@ -134,3 +133,13 @@ Do not copy Graphify or ai-memory as a core dependency. Integrate via adapters/i
 - every memory returned carries provenance, a timestamp, and a link to the source.
 
 **Agent interface (ADR 0004).** Memory is exposed to agents as an **MCP server** hosted by the daemon, injected into each session's agent config at setup. Tools: write (decision/task/finding/handoff), query (FTS + filters), read-provenance. Scope is enforced **server-side** from the session identity — an agent cannot read another project's memory by asking. Deterministic ingest runs without the agent; the MCP surface is for human/agent memory and retrieval. Non-MCP agents fall back to a documented HTTP/CLI interface.
+
+## 9. Integrations
+
+Integrations follow the same pattern as memory (uniform contract) and credentials (broker): a **declarative seam, not code** (ADR 0007).
+
+- **Manifests.** An integration is a YAML manifest declaring **triggers** (webhook signature verification, event matching, payload normalization into the typed `${{ trigger.* }}` context) and **actions** (typed inputs, an HTTP request template, auth by reference, output extraction from the response). One interpolation language is shared with workflows. Manifests execute no code.
+- **Packs are git repositories** under `~/.icaro/integrations/`. GitHub, GitLab, Slack, Jira, Linear, Sentry, and Datadog — plus a generic `webhook` integration for custom sources — ship as a read-only `builtin` pack embedded in the binary; `icaro integration add <git-url>` clones a third-party pack; the `local` pack is auto-initialized as a git repo on first edit and **UI edits commit directly to it** (push manual by default). A user pack may deliberately shadow a builtin; a collision between two user packs is a validation error. The daemon watches packs; an invalid manifest keeps its last good version loaded.
+- **Engine surface.** Exactly three generic pieces: a webhook endpoint per integration (`/hooks/<name>`), an in-daemon HTTP action executor for `uses:` steps, and the `trigger.*` context. Inbound flow: verify signature per manifest → match subscribed workflows → evaluate `filter` → normalize payload → enqueue with the existing idempotency key and concurrency policy.
+- **Reachability.** Inbound webhooks assume a reachable daemon (homelab/VPS with a hostname); polling is the documented laptop fallback — designed for in the manifest model, not built in the MVP.
+- **Security.** Integration credentials live in the daemon's secret store, **host-bound at setup time**; the executor refuses to attach a secret to a request outside the confirmed binding. Pack install shows a complete permission summary (hosts, auth kinds). The executor blocks private-range URLs by default (SSRF) with per-integration user opt-in for self-hosted services; unsigned webhooks require a per-workflow URL token; log redaction covers response bodies (see `docs/03-security.md`).

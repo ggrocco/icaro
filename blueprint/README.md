@@ -21,6 +21,7 @@ The MVP wedge is the parallel-isolated-agents experience built on this spine. Pr
 - Database: local-first SQLite (pure-Go, CGO-free driver) behind a `database/sql` store interface, so it can point at any SQL-compatible database if needed.
 - Credentials are brokered, never raw-mounted: agents receive scoped, short-lived access rather than a bind mount of `~/.claude` and friends (see [ADR 0003](docs/adr/0003-credential-broker.md)).
 - Shared memory is exposed to agents as an **MCP server**, so any MCP-capable CLI reads and writes it without bespoke integration (see [ADR 0004](docs/adr/0004-memory-mcp.md)).
+- Integrations (triggers and external-API actions) are **declarative manifests in git-backed packs** — adding one is a YAML file, not a release; UI edits commit to the pack repo (see [ADR 0007](docs/adr/0007-integration-manifests.md)).
 
 ## Artifacts
 
@@ -30,6 +31,6 @@ The MVP wedge is the parallel-isolated-agents experience built on this spine. Pr
 - [Risks & feasibility gate](docs/08-risks-feasibility.md)
 - [Workflow contract](docs/schemas/workflow.schema.json)
 - [Phased roadmap](docs/phases/)
-- ADRs: [0001 single daemon](docs/adr/0001-single-daemon.md) · [0002 session spine](docs/adr/0002-session-spine.md) · [0003 credential broker](docs/adr/0003-credential-broker.md) · [0004 memory over MCP](docs/adr/0004-memory-mcp.md) · [0005 persistent home + egress](docs/adr/0005-persistent-home-egress.md) · [0006 session persistence](docs/adr/0006-session-persistence-recovery.md)
+- ADRs: [0001 single daemon](docs/adr/0001-single-daemon.md) · [0002 session spine](docs/adr/0002-session-spine.md) · [0003 credential broker](docs/adr/0003-credential-broker.md) · [0004 memory over MCP](docs/adr/0004-memory-mcp.md) · [0005 persistent home + egress](docs/adr/0005-persistent-home-egress.md) · [0006 session persistence](docs/adr/0006-session-persistence-recovery.md) · [0007 integration manifests](docs/adr/0007-integration-manifests.md)
 
 ![Ícaro AI development overview](assets/icaro-overview-en.png)

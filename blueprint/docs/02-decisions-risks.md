@@ -6,6 +6,7 @@
 | Credentials | **Brokered, not raw-mounted** (ADR 0003) | Bounds blast radius of an injected agent — the #1 threat | Each provider needs a broker adapter; long-lived-key providers documented as residual risk |
 | Memory interface | Exposed to agents over **MCP** (ADR 0004) | Target CLIs already speak MCP; avoids "a DB nobody writes to" | Non-MCP agents get an HTTP/CLI fallback; scope enforced server-side |
 | Workflow scope | Orchestrates **sessions**, not general CI | Avoids competing with `act`/Dagger; smaller surface | Data flow (`outputs`/`env`/interpolation) is mandatory in the contract, not optional |
+| Integrations | **Declarative manifests in git-backed packs** (ADR 0007); triggers + HTTP actions are data, not Go code | Adding an integration is a YAML file, not a release; UI edits commit to the pack repo; first- and third-party use the same seam | Daemon executes manifest-defined HTTP: creds host-bound at setup, SSRF guard, pack-install permission summary; template engine can't cover every API — `image` steps are the escape hatch |
 | Stronger isolation | Evaluate per-container microVMs (Apple Containerization / gVisor / Firecracker) in the Phase 0/1 spike | Docker non-root is a weak boundary for semi-trusted LLM output | If microVMs slip, untrusted profiles still get a mandatory egress allowlist |
 | macOS UI | Wails v3 alpha only behind an interface; assess stability before GA | Tray and Go/React integrated | Keep `internal/platform` isolated and test Wails v2 if v3 does not stabilize |
 | DB | Local SQLite (`modernc.org/sqlite`, pure Go) | local-first, offline, no CGO | Keep storage behind a small store interface so a driver swap stays cheap |
@@ -25,7 +26,8 @@
 5. No advanced visual editor before the JSON Schema and executor are stable.
 6. Previews cover **compose-based projects with a declared port** only; host-run dev servers (Vite/Next on the host) are out of MVP scope.
 7. The native macOS app is **deferred until the session spine works end-to-end**; the web UI served by the daemon is the MVP surface (the native app is polish, not the wedge).
-8. Workflows orchestrate sessions only; a step is a container image (`image` + `command`) — agent, shell, JS, and notify are just images, conditions are `when` expressions — not a general-purpose CI step library.
+8. Workflows orchestrate sessions only; a step is either a container image (`image` + `command` — agent, shell, JS are just images) or a declarative integration action (`uses:`, ADR 0007); conditions are `when` expressions — not a general-purpose CI step library.
+9. Integration manifests v1 exclude OAuth flows (token/PAT first), pagination, polling triggers, and scripting hooks; inbound webhooks assume a reachable daemon, laptop users fall back to manual/cron.
 
 ## Risks needing a spike before extensive build
 
@@ -34,3 +36,4 @@
 - Local DNS for `.test` on macOS and coexistence with VPNs.
 - Heterogeneous Compose: projects without a clearly declared HTTP port.
 - Status/usage semantics of the CLIs: each vendor exposes different data.
+- Expressiveness of declarative HTTP action templates against the real Slack/Jira/Datadog APIs: validate the seven bundled manifests against live APIs before freezing the manifest schema v1.

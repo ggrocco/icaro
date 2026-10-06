@@ -14,12 +14,15 @@ Depends on Phase 2. The canvas is a later subphase.
 - [ ] Add the form editor first; drag/drop canvas later.
 - [ ] Generate canonical JSON and validate before saving.
 - [ ] Display the DAG, status, and attempts per step.
+- [ ] Render `uses:` steps as real forms from the action's typed input declaration (ADR 0007); pick triggers from installed integrations' events.
+- [ ] Add an integration manifest editor: edits are validated, written to the pack, and **committed to the pack's git repo** with a structured message; push stays a manual button.
 - [ ] Add accessibility and error/empty states.
 
 ## Acceptance criteria & manual tests
 
 - [ ] Editing in the form produces compatible JSON.
 - [ ] A canvas round-trip does not lose unknown fields.
+- [ ] Saving a manifest edit in the UI produces a commit in the pack repo; an invalid edit is rejected before any write.
 - [ ] The UI updates status without aggressive polling.
 - [ ] An E2E test covers create, run, and cancel.
 

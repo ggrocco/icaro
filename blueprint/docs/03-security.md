@@ -7,6 +7,7 @@
 3. A forged webhook triggering expensive or destructive workflows.
 4. A Slack/email/DNS token exposed in a log or a world-readable file.
 5. A duplicate process competing for Docker, the DB, or previews.
+6. A malicious integration pack templating a stored credential into an attacker-controlled URL, or an action URL targeting the daemon/LAN (SSRF).
 
 ## Mandatory policies
 
@@ -14,8 +15,10 @@
 - The preview Compose goes through its own lint: block `privileged`, `pid: host`, `network_mode: host`, mounts outside the allowed root, the Docker socket, and dangerous capabilities, unless overridden with user confirmation.
 - **Credential broker, not raw mounts (ADR 0003).** The daemon holds secrets and hands agents scoped, short-lived access over the session socket. No bind mount of `~/.claude`/`~/.config/gh`/`~/.aws` into an agent container by default; a raw mount needs an explicit profile and a setup-time warning. This is the primary mitigation for threat #1.
 - Secrets in the macOS keychain / Linux secret store when available; fallback to an encrypted `0600` file only after an explicit password.
-- Webhooks: mandatory HMAC, replay protection, a maximum timestamp, a persisted delivery id.
-- Logs: a secret redactor for known patterns and structured records; never log the full env.
+- Webhooks: signature verification per the integration manifest (HMAC etc.), replay protection, a maximum timestamp, a persisted delivery id, body size caps, and rate limiting; unsigned generic webhooks require a per-workflow random URL token.
+- **Integration credentials are host-bound (ADR 0007).** Secrets used by `uses:` actions live in the daemon's secret store with a host allowlist the user confirms at setup; the HTTP executor refuses to attach a secret to a request whose host is outside that binding — a malicious pack update gets a refusal, not the token. These secrets never enter a container.
+- **HTTP action executor:** private-range URLs (localhost, link-local, RFC 1918) blocked by default; self-hosted services need a per-integration user opt-in that a pack cannot grant itself. `icaro integration add` shows the pack's complete permission summary (hosts, auth kinds) before activation — complete because manifests execute no code.
+- Logs: a secret redactor for known patterns and structured records, covering HTTP response bodies from integration actions; never log the full env.
 - Egress: a per-profile allowlist — **mandatory for untrusted profiles**, optional otherwise. Combined with the credential broker, this bounds an injected agent to limited creds and limited network. The MVP documents that Docker non-root is a weak boundary and evaluates per-container microVMs (Apple Containerization / gVisor / Firecracker) in the Phase 0/1 spike.
 - Every destructive action requires `--yes` or UI confirmation; non-interactive mode requires an explicit flag.
 

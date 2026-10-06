@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://icaro.dev/schemas/workflow/v1.json",
   "title": "Icaro Workflow v1",
-  "description": "A workflow orchestrates sessions (ADR 0002). It is not general-purpose CI. Data flow between steps is part of the contract: steps expose `outputs`, later steps reference them via ${{ steps.<id>.outputs.<key> }} interpolation.",
+  "description": "A workflow orchestrates sessions (ADR 0002). It is not general-purpose CI. Data flow between steps is part of the contract: steps expose `outputs`, later steps reference them via ${{ steps.<id>.outputs.<key> }} interpolation. Runs started by an integration trigger also expose the normalized event payload as ${{ trigger.<key> }} (ADR 0007).",
   "type": "object",
   "required": ["version", "name", "steps"],
   "additionalProperties": false,
@@ -13,25 +13,41 @@
     "concurrency": {"enum": ["forbid", "queue", "replace", "allow"]},
     "env": {
       "type": "object",
-      "description": "Workflow-level environment, available to every step and to interpolation as ${{ env.<key> }}. Values may reference secrets via ${{ secrets.<key> }}; secrets are resolved by the credential broker and never inlined.",
+      "description": "Workflow-level environment, available to every step and to interpolation as ${{ env.<key> }}. Values may reference secrets via ${{ secrets.<key> }}; secrets are resolved by the daemon's secret store and never inlined.",
       "additionalProperties": {"type": "string"}
     },
     "triggers": {
       "type": "array",
-      "description": "Single source of truth for what starts a workflow. There is no separate top-level `schedule`; a cron trigger carries its own expression.",
+      "description": "Single source of truth for what starts a workflow. Built-in triggers are `manual` and `cron`; everything else is an integration trigger referencing a manifest event (ADR 0007). There is no separate top-level `schedule`; a cron trigger carries its own expression.",
       "items": {"$ref": "#/$defs/trigger"}
     },
     "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
   },
   "$defs": {
     "trigger": {
+      "oneOf": [
+        {"$ref": "#/$defs/builtinTrigger"},
+        {"$ref": "#/$defs/integrationTrigger"}
+      ]
+    },
+    "builtinTrigger": {
       "type": "object",
       "required": ["type"],
       "additionalProperties": false,
       "properties": {
-        "type": {"enum": ["manual", "cron", "github", "gitlab", "webhook"]},
-        "cron": {"type": "string", "description": "Required when type=cron; a standard cron expression.", "maxLength": 100},
-        "event": {"type": "string", "description": "For github/gitlab/webhook: the event name to match."}
+        "type": {"enum": ["manual", "cron"]},
+        "cron": {"type": "string", "description": "Required when type=cron; a standard cron expression.", "maxLength": 100}
+      }
+    },
+    "integrationTrigger": {
+      "type": "object",
+      "description": "Subscribes the workflow to an event defined by an integration manifest (e.g. integration: github, event: pull_request.opened). The manifest verifies the inbound webhook and normalizes its payload into the ${{ trigger.* }} context. Manual runs prompt for the payload fields.",
+      "required": ["integration", "event"],
+      "additionalProperties": false,
+      "properties": {
+        "integration": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$", "description": "Integration manifest name, resolved across installed packs."},
+        "event": {"type": "string", "description": "Event name declared by the manifest's triggers section.", "maxLength": 200},
+        "filter": {"type": "string", "description": "Optional boolean expression over the normalized ${{ trigger.* }} payload; the run is enqueued only when it holds.", "maxLength": 2000}
       }
     },
     "repositoryRef": {
@@ -46,29 +62,34 @@
     },
     "step": {
       "type": "object",
-      "description": "A step runs a container image. There are no built-in step kinds: an agent, a shell command, a JS runtime, or a notification are all just different images. Conditional execution is expressed with `when` rather than a dedicated step type.",
-      "required": ["id", "image"],
+      "description": "A step takes exactly one of two forms (ADR 0007): `image` runs a container image — the general compute primitive (an agent, a shell command, a JS runtime are all just images); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container. Both forms are full DAG citizens: needs, when, retry, timeout, and outputs behave identically. Conditional execution is expressed with `when` rather than a dedicated step type.",
+      "required": ["id"],
+      "oneOf": [
+        {"required": ["image"]},
+        {"required": ["uses"]}
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "image": {"type": "string", "description": "Container image reference to run for this step (e.g. ghcr.io/icaro-dev/agent-base:<version> for an agent, or any image for shell/js/notify work). The single execution primitive.", "minLength": 1, "maxLength": 512},
+        "image": {"type": "string", "description": "Container image reference to run for this step (e.g. ghcr.io/icaro-dev/agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.", "minLength": 1, "maxLength": 512},
+        "uses": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}\\.[a-z][a-z0-9-]{1,62}$", "description": "Integration action reference as <integration>.<action> (e.g. slack.post-message), resolved against installed manifest packs. Executed in-process by the daemon's HTTP action executor with host-bound credentials. Mutually exclusive with `image`."},
         "needs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
         "repository": {"$ref": "#/$defs/repositoryRef"},
         "timeout": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
         "retry": {"type": "integer", "minimum": 0, "maximum": 5},
-        "command": {"type": "string", "description": "Command run inside the image. For an agent image this is the agent CLI invocation; for a notify image it renders/sends a templated message.", "maxLength": 20000},
+        "command": {"type": "string", "description": "Command run inside the image (image steps only; semantic validation rejects it on uses steps). For an agent image this is the agent CLI invocation.", "maxLength": 20000},
         "env": {
           "type": "object",
-          "description": "Step-level environment, merged over workflow env. Supports interpolation.",
+          "description": "Step-level environment, merged over workflow env. Supports interpolation. Image steps only.",
           "additionalProperties": {"type": "string"}
         },
         "input": {
           "type": "object",
-          "description": "Inputs to the step. Values may use ${{ steps.<id>.outputs.<key> }}, ${{ env.<key> }}, and ${{ secrets.<key> }} interpolation."
+          "description": "Inputs to the step. For uses steps these are validated against the action's typed input declaration in the manifest. Values may use ${{ steps.<id>.outputs.<key> }}, ${{ trigger.<key> }}, ${{ env.<key> }}, and ${{ secrets.<key> }} interpolation."
         },
         "outputs": {
           "type": "object",
-          "description": "Named outputs this step produces, consumable by dependent steps. Keys are output names; values describe how each is captured (e.g. from stdout, a file, or a JSON path).",
+          "description": "Named outputs this step produces, consumable by dependent steps. For image steps, values describe how each is captured (e.g. from stdout, a file, or a JSON path). For uses steps, outputs are declared by the action's manifest and this field is not set (semantic validation rejects it).",
           "additionalProperties": {"type": "string"}
         },
         "when": {
