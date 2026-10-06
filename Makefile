@@ -1,7 +1,7 @@
 BIN      ?= bin/icaro
 PKG      := ./...
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS  := -s -w -X github.com/ggrocco/icaro/internal/cli.version=$(VERSION)
+LDFLAGS  := -s -w -X icaro/internal/cli.version=$(VERSION)
 
 .PHONY: build test test-integration lint generate fmt tidy clean
 

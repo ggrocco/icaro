@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ggrocco/icaro/internal/service"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/service"
+	"icaro/internal/workflow"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

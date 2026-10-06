@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ggrocco/icaro/internal/crypto"
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/crypto"
+	"icaro/internal/store"
 )
 
 type fakeRunner struct{ woke, cancelled int }

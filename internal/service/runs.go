@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/runner/logs"
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/runner/logs"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 // RunInfo is the API view of a run.

@@ -1,4 +1,4 @@
-module github.com/ggrocco/icaro
+module icaro
 
 go 1.26.0
 

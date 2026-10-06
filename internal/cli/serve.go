@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ggrocco/icaro/internal/api"
-	"github.com/ggrocco/icaro/internal/crypto"
-	"github.com/ggrocco/icaro/internal/runner"
-	"github.com/ggrocco/icaro/internal/runner/docker"
-	"github.com/ggrocco/icaro/internal/service"
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/api"
+	"icaro/internal/crypto"
+	"icaro/internal/runner"
+	"icaro/internal/runner/docker"
+	"icaro/internal/service"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 func schemaJSON() []byte { return workflow.SchemaJSON() }

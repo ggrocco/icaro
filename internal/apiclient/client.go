@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/service"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/service"
+	"icaro/internal/workflow"
 )
 
 // Client talks to an icaro server.

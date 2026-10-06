@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/ggrocco/icaro/internal/cli"
+	"icaro/internal/cli"
 )
 
 func main() {

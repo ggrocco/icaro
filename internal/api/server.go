@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/service"
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/service"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 const maxBody = 1 << 20

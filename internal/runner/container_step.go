@@ -11,11 +11,11 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 
-	"github.com/ggrocco/icaro/internal/runner/docker"
-	"github.com/ggrocco/icaro/internal/runner/logs"
-	"github.com/ggrocco/icaro/internal/runner/sandbox"
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/runner/docker"
+	"icaro/internal/runner/logs"
+	"icaro/internal/runner/sandbox"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 // Labels set on every step container.

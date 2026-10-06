@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/runner/docker"
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/runner/docker"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 type fixture struct {

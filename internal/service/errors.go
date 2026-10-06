@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/workflow"
 )
 
 // Sentinel errors mapped to HTTP statuses by the API layer.
