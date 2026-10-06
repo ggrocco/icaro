@@ -13,8 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ggrocco/icaro/internal/apiclient"
-	"github.com/ggrocco/icaro/internal/service"
+	"icaro/internal/apiclient"
+	"icaro/internal/service"
 )
 
 // client builds an API client from config (server.url / server.token) and

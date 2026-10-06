@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ggrocco/icaro/internal/config"
-	"github.com/ggrocco/icaro/internal/crypto"
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/config"
+	"icaro/internal/crypto"
+	"icaro/internal/store"
 )
 
 // openStore opens the configured database, creating the data directory.

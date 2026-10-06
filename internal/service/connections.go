@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/store"
 )
 
 // ConnectionType declares which fields a connection type carries.

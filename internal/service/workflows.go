@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 // WorkflowInfo is the API view of a workflow.

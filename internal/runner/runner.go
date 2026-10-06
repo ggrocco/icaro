@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/runner/docker"
-	"github.com/ggrocco/icaro/internal/runner/logs"
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/runner/docker"
+	"icaro/internal/runner/logs"
+	"icaro/internal/store"
 )
 
 // Config tunes the runner.

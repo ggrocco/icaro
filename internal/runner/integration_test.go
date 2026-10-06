@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/runner/docker"
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/runner/docker"
+	"icaro/internal/store"
 )
 
 // These tests need a reachable Docker daemon: `make test-integration`.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ggrocco/icaro/internal/config"
+	"icaro/internal/config"
 )
 
 // version is set at build time via -ldflags.

@@ -18,8 +18,8 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 
-	"github.com/ggrocco/icaro/internal/runner/docker"
-	"github.com/ggrocco/icaro/internal/runner/sandbox"
+	"icaro/internal/runner/docker"
+	"icaro/internal/runner/sandbox"
 )
 
 func main() {

@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/crypto"
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/crypto"
+	"icaro/internal/store"
 )
 
 // RunnerControl is what the service needs from an in-process runner.

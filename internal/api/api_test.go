@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ggrocco/icaro/internal/apiclient"
-	"github.com/ggrocco/icaro/internal/crypto"
-	"github.com/ggrocco/icaro/internal/service"
-	"github.com/ggrocco/icaro/internal/store"
+	"icaro/internal/apiclient"
+	"icaro/internal/crypto"
+	"icaro/internal/service"
+	"icaro/internal/store"
 )
 
 type env struct {

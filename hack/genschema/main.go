@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/workflow"
 )
 
 func main() {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ggrocco/icaro/internal/store"
-	"github.com/ggrocco/icaro/internal/workflow"
+	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 // errCancelled marks a run stopped by request.
