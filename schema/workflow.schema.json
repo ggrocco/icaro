@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://icaro.dev/schema/workflow",
+  "$defs": {
+    "HTTPStep": {
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD"
+          ],
+          "default": "GET"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "body": {
+          "description": "Request body: a string (sent as-is) or an object/array (sent as JSON)."
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "none",
+            "bearer",
+            "basic"
+          ],
+          "description": "Authorization derived from the step connection.",
+          "default": "none"
+        },
+        "expect_status": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array",
+          "description": "Accepted status codes (default: any 2xx)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url"
+      ]
+    },
+    "InputDef": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array"
+          ],
+          "default": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": true
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Limits": {
+      "properties": {
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 16
+        },
+        "cpus": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "pids": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Retry": {
+      "properties": {
+        "attempts": {
+          "type": "integer",
+          "maximum": 10,
+          "minimum": 1,
+          "description": "Total attempts including the first."
+        },
+        "backoff": {
+          "type": "string",
+          "description": "Delay between attempts as a Go duration (default 10s)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "attempts"
+      ]
+    },
+    "RunStep": {
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Container image reference. Pin by tag or digest."
+        },
+        "script": {
+          "type": "string",
+          "description": "Script written to /icaro/script.sh and executed with shell. Mutually exclusive with command."
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Explicit argv. Mutually exclusive with script."
+        },
+        "shell": {
+          "type": "string",
+          "description": "Shell used to run script (default: sh -e)."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Working directory (default /workspace)."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits",
+          "description": "Resource ceilings; may only tighten the server defaults."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "image"
+      ]
+    },
+    "ScheduleTrigger": {
+      "properties": {
+        "cron": {
+          "type": "string",
+          "description": "5-field cron expression evaluated in UTC, e.g. \"*/5 * * * *\"."
+        },
+        "input": {
+          "type": "object",
+          "description": "Input payload for scheduled runs."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cron"
+      ]
+    },
+    "Step": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$",
+          "description": "Step name, unique within the workflow; referenced as steps.\u003cname\u003e."
+        },
+        "if": {
+          "type": "string",
+          "description": "Template that must render to true/false; false skips the step."
+        },
+        "run": {
+          "$ref": "#/$defs/RunStep",
+          "description": "Run a script or command in a container."
+        },
+        "http": {
+          "$ref": "#/$defs/HTTPStep",
+          "description": "Perform an HTTP request (runs in the engine, no container)."
+        },
+        "connection": {
+          "type": "string",
+          "description": "Named connection whose fields are injected as ICARO_CONN_\u003cFIELD\u003e (run) or used for auth (http)."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Extra environment variables (templated)."
+        },
+        "sandbox": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "strict"
+          ],
+          "description": "strict additionally disables network unless declared and uses the strict runtime when configured.",
+          "default": "standard"
+        },
+        "network": {
+          "type": "string",
+          "enum": [
+            "egress",
+            "none"
+          ],
+          "description": "none: no network access for the container.",
+          "default": "egress"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Step timeout as a Go duration (e.g. 10m). Must not exceed the server default."
+        },
+        "retry": {
+          "$ref": "#/$defs/Retry"
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "Mark the step failed but continue the run."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "Triggers": {
+      "properties": {
+        "webhook": {
+          "$ref": "#/$defs/WebhookTrigger",
+          "description": "Expose POST /hooks/{workflow}/{token}; the request body becomes the run input."
+        },
+        "schedule": {
+          "items": {
+            "$ref": "#/$defs/ScheduleTrigger"
+          },
+          "type": "array",
+          "description": "Cron schedules (5-field, UTC)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "WebhookTrigger": {
+      "properties": {
+        "secret": {
+          "type": "string",
+          "enum": [
+            "optional",
+            "required"
+          ],
+          "description": "required: reject requests without a valid X-Icaro-Signature HMAC.",
+          "default": "optional"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "Unique workflow name: lowercase letters, digits and dashes."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-text description shown in listings."
+    },
+    "inputs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/InputDef"
+      },
+      "type": "object",
+      "description": "Declared run inputs. Values arrive as {{ inputs.\u003cname\u003e }} and in /icaro/input.json."
+    },
+    "on": {
+      "$ref": "#/$defs/Triggers",
+      "description": "Triggers that start runs. Runs can always be started manually via API/CLI/MCP."
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "type": "array",
+      "minItems": 1,
+      "description": "Steps executed in order. Each step is exactly one of: run, http."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "name",
+    "steps"
+  ],
+  "title": "Icaro workflow",
+  "description": "A workflow is a named, triggerable sequence of steps; each step runs a container or an HTTP request."
+}

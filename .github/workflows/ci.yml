@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          install-mode: goinstall
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go generate ./... && git diff --exit-code
+      - run: make test
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: icaro
+          POSTGRES_PASSWORD: icaro
+          POSTGRES_DB: icaro
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U icaro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ICARO_TEST_POSTGRES_DSN: postgres://icaro:icaro@localhost:5432/icaro?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: docker version
+      - run: make test-integration
