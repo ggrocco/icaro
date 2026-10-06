@@ -32,7 +32,7 @@ state on startup.
   whether its container / worktree / preview still exist. Re-attach where
   possible; otherwise mark `orphaned` and surface it via `icaro doctor`.
 - **Queued state:** the `queued` status is the persistence hook for the
-  concurrency cap (see `docs/08-risks-feasibility.md`); sessions over the cap are
+  concurrency cap (see `docs/02-decisions-risks.md`, O1); sessions over the cap are
   persisted as `queued` rather than started.
 - **Upgrade handoff (Phase 8):** the daemon persists enough to **re-attach** to
   running containers after a restart instead of orphaning them.

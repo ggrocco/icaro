@@ -6,8 +6,9 @@ code as status — under a hardened sandbox, triggered by API, webhooks or
 schedules, and authored by humans or AI agents against a published JSON
 Schema.
 
-Design: [`docs/blueprint-analysis.md`](docs/blueprint-analysis.md) ·
-Plan: [`docs/implementation-plan.md`](docs/implementation-plan.md)
+Design and roadmap: [`blueprint/`](blueprint/README.md). The code below was built
+from an earlier design and is migrating toward the blueprint; see
+[existing code](blueprint/docs/04-roadmap.md#existing-code).
 
 > Status: Phase 1 (engine core). Workflows, runs, connections, tokens,
 > CLI and REST API work; the runner executes `run` steps on Docker.

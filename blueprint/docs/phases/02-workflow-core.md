@@ -1,37 +1,24 @@
 # Phase 2 — Workflow core
 
-## Objective
+**Objective:** DAG, schema, persistence, execution, and logs.
 
-Objective: DAG, schema, persistence, execution, and logs.
-
-## Dependencies
-
-Can start in parallel with Phase 1 once the config contract is in place.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows.
 
 ## Deliverables
 
-- [ ] Version the JSON Schema and validate it in the CLI/API.
+- [ ] Version the JSON Schema and validate it in the CLI/API; generate it from the engine's types with a drift test against the [blueprint contract](../schemas/workflow.schema.json).
+- [ ] Implement the [image-step I/O contract](../01-architecture.md#6-workflow-engine) (`/icaro/input.json`, `/icaro/output.json` capped at 1 MiB, `/workspace`, exit code).
 - [ ] Add semantic validation for cycles, dependencies, and timeouts.
-- [ ] Implement **data flow**: step `outputs`, `env`, and `${{ steps.<id>.outputs.<key> }}` interpolation, with a defined `when` expression grammar for step gating.
-- [ ] Implement a DAG planner and an executor with channels; the unit of work a step drives is a **session** (ADR 0002), not a generic job.
+- [ ] Implement **data flow**: step `outputs`, `env`, `${{ steps.<id>.outputs.<key> }}` interpolation, and `when` gating per the grammar chosen for O3.
+- [ ] Implement a DAG planner and an executor with channels, mapping steps onto sessions as decided in O2 ([ADR 0002](../adr/0002-session-spine.md)).
 - [ ] Persist run/step state and indexed logs.
 - [ ] Implement cancellation, retry, and recovery after restart.
+- [ ] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase.
 
-## Acceptance criteria & manual tests
+## Acceptance criteria
 
-- [ ] An invalid workflow points to the JSON path and a clear error.
+- [ ] An invalid workflow returns structured issues: JSON Pointer path, clear message, and a nearest-match hint for unknown names.
 - [ ] A DAG with two independent steps runs in parallel.
 - [ ] Step B consumes step A's declared output via interpolation; a reference to a missing output fails validation.
 - [ ] Cancellation propagates to child processes.
 - [ ] A restart never leaves a run in an ambiguous state.
-
-## Automated tests
-
-- Unit: business logic and validations, without real Docker.
-- Integration: Docker/daemon/DB in an ephemeral environment.
-- E2E: only critical flows, run in a separate CI.
-- Regression: every bug produces a test before the fix.
-
-## Review checkpoint
-
-Do not advance until the criteria above are green. Record new decisions in `docs/adr/`.

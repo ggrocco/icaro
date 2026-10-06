@@ -1,35 +1,21 @@
 # Phase 7 — macOS app
 
-## Objective
+**Objective:** Wails, tray, startup, and native UX.
 
-Objective: Wails, tray, startup, and native UX.
-
-## Dependencies
-
-Depends on Phase 0; can use a mock server until Phase 2/5.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. It may use a mock server for runs until Phase 2 lands.
 
 ## Deliverables
 
 - [ ] Connect Wails to the existing daemon.
-- [ ] Add a menu bar: previews, runs, usage, and quick actions.
-- [ ] Configure launch at login and tray-only mode.
+- [ ] Add a menu bar: previews, running/queued/failed runs (opening the run in the UI), usage, and quick actions (run, cancel).
+- [ ] Notify on run failure and when the daemon becomes unreachable.
+- [ ] Configure launch at login (a launchd user agent) and tray-only mode.
 - [ ] Define a fallback/headless mode when the UI fails.
 - [ ] Signing/notarization in the release pipeline.
 
-## Acceptance criteria & manual tests
+## Acceptance criteria
 
 - [ ] Opening the app while the daemon is running does not create a second daemon.
 - [ ] The tray shows the correct state after a restart.
 - [ ] Launch at login works and does not open a window when configured.
 - [ ] Smoke test on a clean macOS install.
-
-## Automated tests
-
-- Unit: business rules and validations, without real Docker.
-- Integration: Docker/daemon/DB in an ephemeral environment.
-- E2E: critical flows only, run in a separate CI.
-- Regression: every bug produces a test before the fix.
-
-## Review checkpoint
-
-Do not move forward until the criteria above are green. Record any new decisions in `docs/adr/`.
