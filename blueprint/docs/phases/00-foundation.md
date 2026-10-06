@@ -1,12 +1,8 @@
 # Phase 0 — Foundation & contracts
 
-## Objective
+**Objective:** repository, CI, conventions, daemon lock, configuration, and a minimal doctor.
 
-Objective: repository, CI, conventions, daemon lock, configuration, and a minimal doctor.
-
-## Dependencies
-
-Blocks all phases.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows.
 
 ## Deliverables
 
@@ -16,20 +12,9 @@ Blocks all phases.
 - [ ] Implement lock/socket/PID and clean shutdown.
 - [ ] Add CI: fmt, vet, staticcheck, tests, coverage, and cross-platform build.
 
-## Acceptance criteria & manual tests
+## Acceptance criteria
 
 - [ ] `icaro version` works on macOS/Linux.
 - [ ] A duplicate `icaro serve` fails deterministically.
 - [ ] Killing the process and running `icaro doctor` detects and cleans up orphaned state.
-- [ ] Domain coverage >= 95%; exceptions justified.
-
-## Automated tests
-
-- Unit: business logic and validations, without real Docker.
-- Integration: Docker/daemon/DB in an ephemeral environment.
-- E2E: only critical flows, run in a separate CI.
-- Regression: every bug produces a test before the fix.
-
-## Review checkpoint
-
-Do not advance until the criteria above are green. Record new decisions in `docs/adr/`.
+- [ ] Domain coverage meets the [target](../05-engineering.md#coverage); exceptions justified.

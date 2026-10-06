@@ -1,12 +1,8 @@
 # Phase 1 — Container and CLI
 
-## Objective
+**Objective:** isolated profile, the session's first segment, and the `setup`, `sh`, and `claude` commands.
 
-Objective: isolated profile and the `setup`, `sh`, and `claude` commands.
-
-## Dependencies
-
-Can start after Phase 0.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows.
 
 ## Deliverables
 
@@ -15,26 +11,17 @@ Can start after Phase 0.
 - [ ] Implement an idempotent setup with diff preview and overwrite confirmation.
 - [ ] Implement `icaro sh`, `icaro claude`, the CLI adapter, and TTY passthrough.
 - [ ] Install Ícaro inside the image for internal commands.
-- [ ] Implement the **credential broker** (ADR 0003): scoped/short-lived access over the session socket; no raw creds mount by default.
-- [ ] Stand up `internal/session/` and **worktree lifecycle**; an agent runs against a session's worktree (this is the spine's first segment, ADR 0002).
-- [ ] Spike per-container microVM isolation (Apple Containerization / gVisor) and record the result in an ADR.
+- [ ] Implement the **per-profile persistent home** ([ADR 0005](../adr/0005-persistent-home-egress.md)): login seeding, golden seed layer + per-session writable overlay, and the mandatory egress allowlist locked to provider endpoints.
+- [ ] Stand up `internal/session/` and **worktree lifecycle**; an agent runs against a session's worktree ([ADR 0002](../adr/0002-session-spine.md)).
+- [ ] Persist sessions in the `sessions` table and reconcile them on startup ([ADR 0006](../adr/0006-session-persistence-recovery.md)).
 
-## Acceptance criteria & manual tests
+## Acceptance criteria
 
 - [ ] Running `icaro setup` twice changes nothing without consent.
 - [ ] A file outside the allowlist is not mounted.
-- [ ] `icaro sh` preserves the UID and the expected workspace.
+- [ ] `icaro sh` preserves the UID and the expected workspace on both macOS and Linux.
 - [ ] The CLI agent receives a TTY and the correct exit code.
-- [ ] An agent obtains provider access via the broker with **no** `~/.claude`/`~/.config/gh` bind mount.
+- [ ] The egress allowlist confines every credential present in the agent container: a request to a non-allowlisted host fails. The host's real `~/.claude` is never mounted.
+- [ ] Two sessions sharing a profile use the seeded login concurrently without corrupting each other's `~/.claude`.
 - [ ] Two sessions on two worktrees run concurrently without interfering.
-
-## Automated tests
-
-- Unit: business logic and validations, without real Docker.
-- Integration: Docker/daemon/DB in an ephemeral environment.
-- E2E: only critical flows, run in a separate CI.
-- Regression: every bug produces a test before the fix.
-
-## Review checkpoint
-
-Do not advance until the criteria above are green. Record new decisions in `docs/adr/`.
+- [ ] After a daemon restart, a running session is re-attached or marked `orphaned`, never left ambiguous.

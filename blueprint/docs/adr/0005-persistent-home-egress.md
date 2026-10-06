@@ -46,6 +46,6 @@ egress allowlist**.
   anything the allowlist permits (quota burn, calls to the provider); any
   allowlisted endpoint is a potential exfil channel. Bounded, not eliminated.
 - The per-session overlay requires a Docker Desktop / Linux spike (see
-  `docs/08-risks-feasibility.md`, S2).
+  `docs/02-decisions-risks.md`, S2).
 - ADR 0003 is downgraded: the broker/proxy is future hardening for untrusted
   profiles, not the MVP default.

@@ -1,12 +1,8 @@
 # Phase 11 — Hardening and GA
 
-## Objective
+**Objective:** reliability, performance, and security before GA.
 
-Objective: reliability, performance, and security before GA.
-
-## Dependencies
-
-Final phase.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows.
 
 ## Deliverables
 
@@ -16,20 +12,9 @@ Final phase.
 - [ ] Performance profiling and memory/CPU budget.
 - [ ] Compatibility matrix and public beta.
 
-## Acceptance criteria & manual tests
+## Acceptance criteria
 
 - [ ] SLOs met on the reference hardware.
 - [ ] No deadlock/race under `-race` where applicable.
-- [ ] Doctor resolves the defined scenarios.
+- [ ] Doctor resolves every scenario in the [doctor checks](../03-security.md#icaro-doctor).
 - [ ] The release candidate passes smoke tests on macOS/Linux.
-
-## Automated tests
-
-- Unit: business rules and validations, without real Docker.
-- Integration: Docker/daemon/DB in an ephemeral environment.
-- E2E: critical flows only, run in a separate CI.
-- Regression: every bug produces a test before the fix.
-
-## Review checkpoint
-
-Do not move forward until the criteria above are green. Record any new decisions in `docs/adr/`.
