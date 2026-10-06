@@ -41,6 +41,8 @@ Each principle is a one-line summary; the linked doc is canonical.
 - **Credentials live in a managed, per-profile home** that is seeded once and confined by the egress allowlist. The host's real `~/.claude` is never mounted ([ADR 0005](docs/adr/0005-persistent-home-egress.md)).
 - **Memory speaks MCP**, so any MCP-capable agent CLI uses it without bespoke integration ([ADR 0004](docs/adr/0004-memory-mcp.md)).
 - **Integrations are data.** Triggers and external-API actions are YAML manifests in git-backed packs, so adding one does not need a release ([ADR 0007](docs/adr/0007-integration-manifests.md)).
+- **Compose, don't reimplement.** The agent CLI is the intelligence; Ícaro provides launch, confinement, and plumbing.
+- **Agents are first-class users.** They author and run workflows through MCP tools validated against the published schema ([architecture §10](docs/01-architecture.md#10-agent-interface)).
 - **Channels, not mutexes.** Each goroutine owns its state and communicates over channels; no mutex in domain code ([engineering](docs/05-engineering.md)).
 
 ## Documents
@@ -53,6 +55,6 @@ Each principle is a one-line summary; the linked doc is canonical.
 | [04 Roadmap](docs/04-roadmap.md) | Critical path, phase dependencies, rules every phase follows; per-phase packets in [`docs/phases/`](docs/phases/) |
 | [05 Engineering standards](docs/05-engineering.md) | Test strategy and dependency policy |
 | [Workflow contract](docs/schemas/workflow.schema.json) | JSON Schema for workflow files |
-| ADRs | [0001 single daemon](docs/adr/0001-single-daemon.md) · [0002 session spine](docs/adr/0002-session-spine.md) · [0003 credential broker (superseded)](docs/adr/0003-credential-broker.md) · [0004 memory over MCP](docs/adr/0004-memory-mcp.md) · [0005 persistent home + egress](docs/adr/0005-persistent-home-egress.md) · [0006 session persistence](docs/adr/0006-session-persistence-recovery.md) · [0007 integration manifests](docs/adr/0007-integration-manifests.md) |
+| ADRs | [0001 single daemon](docs/adr/0001-single-daemon.md) · [0002 session spine](docs/adr/0002-session-spine.md) · [0003 credential broker (superseded)](docs/adr/0003-credential-broker.md) · [0004 memory over MCP](docs/adr/0004-memory-mcp.md) · [0005 persistent home + egress](docs/adr/0005-persistent-home-egress.md) · [0006 session persistence](docs/adr/0006-session-persistence-recovery.md) · [0007 integration manifests](docs/adr/0007-integration-manifests.md) · [0008 blueprint supersedes the engine design](docs/adr/0008-blueprint-supersedes-engine-design.md) |
 
 How the docs divide the work: an **ADR** records why a decision was made, the **architecture** describes the current design, **security** holds the policies, and **phases** hold deliverables and acceptance tests. Each fact lives in one of them, and the others link to it.

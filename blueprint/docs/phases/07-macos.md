@@ -7,8 +7,9 @@
 ## Deliverables
 
 - [ ] Connect Wails to the existing daemon.
-- [ ] Add a menu bar: previews, runs, usage, and quick actions.
-- [ ] Configure launch at login and tray-only mode.
+- [ ] Add a menu bar: previews, running/queued/failed runs (opening the run in the UI), usage, and quick actions (run, cancel).
+- [ ] Notify on run failure and when the daemon becomes unreachable.
+- [ ] Configure launch at login (a launchd user agent) and tray-only mode.
 - [ ] Define a fallback/headless mode when the UI fails.
 - [ ] Signing/notarization in the release pipeline.
 

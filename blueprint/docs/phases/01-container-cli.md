@@ -14,6 +14,7 @@
 - [ ] Implement the **per-profile persistent home** ([ADR 0005](../adr/0005-persistent-home-egress.md)): login seeding, golden seed layer + per-session writable overlay, and the mandatory egress allowlist locked to provider endpoints.
 - [ ] Stand up `internal/session/` and **worktree lifecycle**; an agent runs against a session's worktree ([ADR 0002](../adr/0002-session-spine.md)).
 - [ ] Persist sessions in the `sessions` table and reconcile them on startup ([ADR 0006](../adr/0006-session-persistence-recovery.md)).
+- [ ] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase.
 
 ## Acceptance criteria
 

@@ -11,6 +11,7 @@
 - [ ] Implement versioned config and migrations.
 - [ ] Implement lock/socket/PID and clean shutdown.
 - [ ] Add CI: fmt, vet, staticcheck, tests, coverage, and cross-platform build.
+- [ ] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase.
 
 ## Acceptance criteria
 

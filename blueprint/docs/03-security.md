@@ -13,7 +13,17 @@
 
 **Containers and mounts**
 
-- Container baseline: non-root, no `--privileged`, no Docker socket, no host network, all capabilities dropped, default seccomp.
+- **Container baseline**, applied with zero configuration:
+  - non-root, with user-namespace remapping or a rootless engine so root in the container is not root on the host;
+  - no `--privileged`, no Docker socket, no host network;
+  - `--cap-drop ALL` and `no-new-privileges`;
+  - a seccomp profile equal to Docker's default minus `ptrace`, `bpf`, `keyctl`, `mount`/`umount2`, `unshare`/`setns`, and the module syscalls;
+  - a read-only root filesystem with tmpfs `/tmp`. Home is tmpfs too, except in agent containers, which mount the profile home;
+  - pids, memory, CPU, and open-file limits.
+
+  Workflow files can only tighten these limits, never weaken them.
+- **Dangerous mounts are rejected at validation time**, not by convention: the Docker socket and anything under `/var/run`, `/proc`, or `/sys`, whether in a workflow or a preview compose file.
+- **The daemon's own Docker access is narrowed.** Use rootless Docker/Podman, or a socket proxy that allows only the API calls the daemon makes, so a compromised daemon cannot `exec` into other containers or mount host paths.
 - An allowlist of mountable directories. Never mount the entire `$HOME` by default; the "shared home" option must be an explicit profile and show its impact during setup (how it interacts with agent credential directories is [open item O4](02-decisions-risks.md#open-items)).
 - The preview Compose goes through its own lint: block `privileged`, `pid: host`, `network_mode: host`, mounts outside the allowed root, the Docker socket, and dangerous capabilities, unless overridden with user confirmation.
 
@@ -26,7 +36,8 @@
 **Secrets and logs**
 
 - Secrets in the macOS keychain / Linux secret store when available; fallback to an encrypted `0600` file only after an explicit password.
-- Logs: a secret redactor for known patterns and structured records, covering HTTP response bodies from integration actions; never log the full env.
+- Logs: a secret redactor for every known secret value (6+ characters), known patterns, and structured records, covering HTTP response bodies from integration actions; never log the full env.
+- MCP surface (architecture §10): same auth as the API; no tool returns a secret value; no destructive tools in v1.
 
 **Integrations** ([ADR 0007](adr/0007-integration-manifests.md))
 

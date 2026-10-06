@@ -67,18 +67,20 @@ schemas/                      # versioned JSON Schema
 - **Daemon API:** HTTP over a Unix socket on macOS/Linux by default; TCP only with an explicit `--listen`, a mandatory token, and loopback as the default.
 - **Wails UI:** minimal bindings for lifecycle and window opening; operational data uses the same HTTP contract as the CLI to avoid forking.
 - **Events:** SSE for logs/status; one stream per run. Do not use WebSocket before proving it is needed.
-- **Local auth:** `0700` permissions on directories; socket `0600`; a token for remote TCP.
+- **One service layer.** The CLI, HTTP API, MCP server (§10), and UIs are thin clients over the same daemon service layer; business rules live only there.
+- **Local auth:** single user. `0700` permissions on directories and a `0600` socket protect local access. TCP requires an API token, stored hashed and scoped `read`, `write`, or `admin`. The browser UI logs in by pasting a token, which creates an `HttpOnly`, `SameSite=Strict` cookie session; cookie-authenticated mutations also need a custom request header (CSRF). How the browser reaches a daemon that listens only on a Unix socket by default is [open item O5](02-decisions-risks.md#open-items). Multi-user accounts/OIDC come later, behind the same session table.
 
 ## 4. Persistence
 
-Database: `~/.icaro/config/icaro.db` — a single local SQLite file (`modernc.org/sqlite`, pure Go) accessed through a `database/sql` store interface, so it can point at any SQL-compatible database when one is configured. Backups are a copy/snapshot of that file.
+Database: `~/.icaro/config/icaro.db` — a single local SQLite file (`modernc.org/sqlite`, pure Go) accessed through a `database/sql` store interface. Backups are a copy/snapshot of that file. Postgres is the supported alternative when one is configured. To keep the swap honest, the store uses portable SQL only (no dialect-only features; JSON stored as text), keeps migrations per dialect, and CI runs the store tests against both.
 
 Initial tables: `settings`, `images`, `projects`, `repositories`, `sessions`, `workflows`, `workflow_versions`, `runs`, `step_runs`, `log_chunks`, `preview_instances`, `webhook_deliveries`, `memories`, `memory_edges`, `usage_snapshots`, `migrations`.
 
-- WAL enabled; single writer via the store goroutine and a command channel.
-- Bulky logs in append-only files with an index in the database; do not store megabytes of stdout as a single SQL cell.
+- WAL, `busy_timeout`, and foreign keys enabled; single writer via the store goroutine and a command channel.
+- Bulky logs in append-only files with an index in the database, secret-redacted as they are written; do not store megabytes of stdout as a single SQL cell.
+- Runs are queued in the database and claimed transactionally, so a restart never loses or double-starts one.
 - **`sessions` is the parent row** ([ADR 0006](adr/0006-session-persistence-recovery.md)): `id`, `project_id`, `profile`, `worktree_path`, `container_id`, `preview_instance_id`, `status`, `created_at`, `updated_at`, optional `last_heartbeat`. `status` ∈ `creating | running | queued | stopped | orphaned | error`. `preview_instances` and the relevant `runs`/`step_runs` reference it.
-- **Startup reconciliation:** on boot, every non-terminal session is probed (container, worktree, preview). The daemon re-attaches where possible and otherwise marks the session `orphaned` for `icaro doctor`. The same path lets an in-place upgrade re-attach to running containers instead of orphaning them.
+- **Startup reconciliation:** on boot, every non-terminal session is probed (container, worktree, preview). The daemon re-attaches where possible and otherwise marks the session `orphaned` for `icaro doctor`. The same path lets an in-place upgrade re-attach to running containers instead of orphaning them. To make re-attach possible, a step's container id is persisted **before** the container starts, containers are labeled with their run, step, and attempt, and log capture resumes from the recorded offset.
 - `queued` holds sessions over the concurrency cap; the cap itself is an [open item](02-decisions-risks.md#open-items).
 
 ## 5. Agent container
@@ -98,6 +100,8 @@ Scope: the workflow engine **orchestrates sessions** ([ADR 0002](adr/0002-sessio
 
 A workflow is a DAG validated by JSON Schema plus semantic validations: unique names, acyclicity, valid references, retry/timeout policies, repository dependencies, and permissions. **Data flow is part of the contract:** steps declare `outputs`, later steps reference them via `${{ steps.<id>.outputs.<key> }}`, and `env` is explicit. A workflow without defined data flow is incomplete (see [the schema](schemas/workflow.schema.json)).
 
+Validation returns structured issues: a JSON Pointer path, a message, and a nearest-match hint for unknown names. The CLI, API, UI, and the MCP `validate_workflow` tool all show the same list. The implementation generates its published schema from its own types, and a drift test keeps that output equal to [the blueprint contract](schemas/workflow.schema.json).
+
 Step model: a step takes exactly one of two forms ([ADR 0007](adr/0007-integration-manifests.md)):
 
 - An **`image` step** runs a container image (`image` + `command`) — the general compute primitive. An **agent** step runs the agent base image (§5) with the agent CLI as its command; a **shell** or **JS** step is just an image with the right runtime; host execution requires an explicit flag.
@@ -107,6 +111,19 @@ Step model: a step takes exactly one of two forms ([ADR 0007](adr/0007-integrati
 
 Images are free to choose; the engine never bakes credentials into them. Agent credentials come from the profile home (§5); integration credentials stay host-bound in the daemon (§9).
 
+**Image-step I/O contract.** Any container that honors this contract is a valid step; writing one needs no knowledge of Ícaro's internals.
+
+| Channel | Mechanism |
+|---|---|
+| Inputs | `ICARO_INPUT_<NAME>` environment variables plus `/icaro/input.json`, holding the step's resolved `input` |
+| Outputs | The step writes a JSON object to `/icaro/output.json`, capped at 1 MiB. Each declared `outputs` entry says how its value is captured, per the schema (a JSON path into that file, stdout, or another file) |
+| Files | `/workspace` — the run's worktree, shared by the steps of that run |
+| Status | Exit code `0` = success |
+| Logs | stdout/stderr, captured and secret-redacted |
+| Secrets | `${{ secrets.<key> }}` in `env`, resolved by the daemon; values are redacted from logs |
+
+Agent CLIs run headless in workflows: non-interactive mode, prompt in, transcript to the logs, structured result to `/icaro/output.json`.
+
 Two contract details are still open (see [open items](02-decisions-risks.md#open-items)): the `when` grammar, and how an `image` step maps onto a session.
 
 Executor:
@@ -115,6 +132,7 @@ Executor:
 - Configurable global and per-workflow parallelism.
 - The repository is resolved once per `repository_ref + revision`; a temporary worktree is shared only by steps of the same run.
 - An idempotency key for webhook/schedule; an explicit concurrency policy: `forbid`, `queue`, `replace`, `allow`.
+- The scheduler persists each cron trigger's next fire time; a fire missed while the daemon was down runs once on restart, not once per missed tick.
 
 ## 7. Previews
 
@@ -151,6 +169,8 @@ Do not copy Graphify or ai-memory as a core dependency. Integrate via adapters/i
 
 Scope is enforced server-side from the session identity. Deterministic ingest runs without the agent. Non-MCP agents use a documented HTTP/CLI fallback. How the MCP endpoint reaches the agent inside its container is feasibility spike S3.
 
+Handoffs only help if agents use them. Each agent session gets a short, configurable preamble telling it to accept a pending handoff before starting and to leave one when done.
+
 ## 9. Integrations
 
 An integration is a **declarative manifest in a git-backed pack**, not code ([ADR 0007](adr/0007-integration-manifests.md)). Out-of-v1 limits are in [MVP cut 9](02-decisions-risks.md#mandatory-mvp-cuts).
@@ -171,6 +191,32 @@ An integration is a **declarative manifest in a git-backed pack**, not code ([AD
   - an in-daemon HTTP action executor for `uses:` steps;
   - the `trigger.*` context.
 
-  An inbound event is handled in this order: verify the signature per the manifest, match subscribed workflows, evaluate `filter`, normalize the payload, then enqueue with the executor's idempotency key and concurrency policy (§6).
-- **Reachability.** Inbound webhooks assume a reachable daemon (homelab/VPS with a hostname). Polling is the documented laptop fallback; the manifest model allows for it, but it is not built in the MVP.
+  An inbound event is handled in this order: verify the signature per the manifest, match subscribed workflows, evaluate `filter`, normalize the payload, then enqueue with the executor's idempotency key and concurrency policy (§6). Filtering happens before enqueueing, so a filtered-out event never starts a container.
+- **Verification kinds.** A manifest's trigger declares how requests are verified. This covers HMAC signatures (GitHub's `X-Hub-Signature-256`) and shared-secret headers (GitLab's `X-Gitlab-Token`).
+- **Delivery records.** Every inbound request is persisted with its verification result, matched workflows, and resulting runs, and can be **redelivered** from that record. The record is the dedup point for providers that retry, and it answers "why didn't my workflow fire?".
+- **Reachability.** Inbound webhooks assume a reachable daemon (homelab/VPS with a hostname). Polling is the documented laptop fallback; the manifest model allows for it, but it is not built in the MVP. Until then, a polling source is a `cron` workflow whose first step checks the source and gates the remaining steps with `when`.
 - **Credentials and network.** Integration credentials are host-bound and never enter a container. The executor enforces an SSRF guard, and installing a pack shows a permission summary. These controls are policies in [03-security](03-security.md#mandatory-policies).
+
+## 10. Agent interface
+
+AI agents author and run workflows through the same daemon MCP server that hosts memory (§8, [ADR 0004](adr/0004-memory-mcp.md)). The design goal is that authoring converges: agents invent config fields, and a published schema plus a precise validator turns guesswork into a loop.
+
+- **Resources:** the workflow JSON Schema, and one input schema per integration action, compiled from its manifest (§9). An agent therefore knows an action's required inputs before writing YAML.
+- **Tools:**
+  - `get_workflow_schema`;
+  - `list_integrations` / `get_integration`;
+  - `list_secrets` — names and host bindings only, **never values**;
+  - `validate_workflow` — the structured issues from §6. This is the most important tool, because issue quality decides how fast an agent converges;
+  - `create_workflow` / `update_workflow` / `get_workflow` / `list_workflows`;
+  - `run_workflow`;
+  - `get_run` — status, per-step outputs, and a size-capped log tail, so debugging does not flood the agent's context.
+- **No destructive tools in v1.** Agents author and run; humans delete.
+- **Transports:** stdio (`icaro mcp`, which proxies to the daemon) for local CLIs, and streamable HTTP on the daemon under the same auth as the API (§3). One tool-definition layer sits over the service layer, so both transports share semantics.
+- **Authoring skill.** An `icaro-workflows` skill ships in the repo, versioned with the engine. It is installable into Claude Code/Codex with `icaro skill install`, which writes the skill and the MCP entry. It encodes the loop:
+  1. re-fetch the schema and integrations; never write from memory;
+  2. list secrets, and ask the human to create missing ones;
+  3. draft, then `validate_workflow` until the workflow is clean;
+  4. create it, then run it with a small input;
+  5. debug with `get_run`.
+
+Exposing these tools *inside* agent containers, so a running agent can invoke or author workflows, is a [deferred design](02-decisions-risks.md#deferred-designs).
