@@ -10,7 +10,7 @@ import (
 )
 
 // HostInstructions are sent to host CLIs that connect to /mcp.
-const HostInstructions = "Ícaro daemon tools. Memory tools are scoped to the project the bridge was started in (icaro mcp --project <path>)."
+const HostInstructions = "Ícaro daemon tools. Workflow authoring: fetch get_workflow_schema and list_integrations first, check list_secrets, then validate_workflow until clean before create_workflow/update_workflow, run_workflow with a small trigger, and debug with get_run. Memory tools are scoped to the project the bridge was started in (icaro mcp --project <path>)."
 
 func init() {
 	RegisterWirer(40, "memory", func(_ context.Context, a *App) error {
