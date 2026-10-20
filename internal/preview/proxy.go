@@ -16,8 +16,13 @@ import (
 	"icaro/internal/container/docker"
 )
 
-// ProxyName is the Ícaro-managed Traefik container.
-const ProxyName = "icaro-traefik"
+// ProxyName is the Ícaro-managed Traefik container for a state root. The
+// name carries a hash of the root so two Ícaro homes on one Docker
+// engine (a developer's and a test's) never replace each other's proxy.
+func ProxyName(root string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	return "icaro-traefik-" + hex.EncodeToString(sum[:4])
+}
 
 // proxyDynamicDir is where Traefik reads its file-provider config.
 const proxyDynamicDir = "/etc/icaro/dynamic"
@@ -36,6 +41,7 @@ type Engine interface {
 
 // ProxyOptions configure the Traefik container.
 type ProxyOptions struct {
+	Name       string // container name, see ProxyName
 	Image      string
 	HTTPPort   int
 	DynamicDir string // host directory holding one file per preview
@@ -61,19 +67,19 @@ func EnsureProxy(ctx context.Context, e Engine, o ProxyOptions) error {
 	if err := os.MkdirAll(o.DynamicDir, 0o700); err != nil {
 		return err
 	}
-	st, err := e.Inspect(ctx, ProxyName)
+	st, err := e.Inspect(ctx, o.Name)
 	if err != nil {
 		return err
 	}
 	want := o.hash()
 	if st.Exists && st.Labels["icaro.proxy.config"] == want {
 		if !st.Running {
-			return e.StartContainer(ctx, ProxyName)
+			return e.StartContainer(ctx, o.Name)
 		}
 		return nil
 	}
 	if st.Exists {
-		if err := e.RemoveContainer(ctx, ProxyName); err != nil {
+		if err := e.RemoveContainer(ctx, o.Name); err != nil {
 			return err
 		}
 	}
@@ -92,7 +98,7 @@ func EnsureProxy(ctx context.Context, e Engine, o ProxyOptions) error {
 		Resources: container.Resources{Memory: 256 << 20, PidsLimit: &pids},
 	}
 	id, err := e.CreateProxy(ctx, docker.ProxySpec{
-		Name:  ProxyName,
+		Name:  o.Name,
 		Image: o.Image,
 		Cmd: []string{
 			"--entrypoints.web.address=:8080",
@@ -118,7 +124,7 @@ func EnsureProxy(ctx context.Context, e Engine, o ProxyOptions) error {
 		if strings.Contains(err.Error(), "Conflict") || strings.Contains(err.Error(), "already in use") {
 			return nil // a concurrent ensure won
 		}
-		return fmt.Errorf("create %s: %w", ProxyName, err)
+		return fmt.Errorf("create %s: %w", o.Name, err)
 	}
 	return e.StartContainer(ctx, id)
 }

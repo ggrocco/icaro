@@ -14,34 +14,35 @@ import (
 // NetworkCheck is "Proxy without a dedicated network" (03-security): the
 // fix recreates the network and drops the proxy container so the daemon
 // recreates it attached to the new network.
-func NetworkCheck(e Engine) doctor.Check {
+// proxy is the proxy container name (ProxyName).
+func NetworkCheck(e Engine, proxy string) doctor.Check {
 	return doctor.Func("preview proxy network", func(ctx context.Context) doctor.Result {
 		ok, err := e.NetworkExists(ctx, Network)
 		if err != nil {
 			return doctor.Result{Severity: doctor.Error, Detail: "docker: " + err.Error()}
 		}
 		if ok {
-			st, err := e.Inspect(ctx, ProxyName)
+			st, err := e.Inspect(ctx, proxy)
 			switch {
 			case err != nil:
 				return doctor.Result{Severity: doctor.Error, Detail: err.Error()}
 			case !st.Exists:
 				return doctor.Result{Severity: doctor.OK, Detail: Network + " exists; proxy starts with the first preview"}
 			case !st.Running:
-				return doctor.Result{Severity: doctor.Warning, Detail: ProxyName + " is not running", Fix: func(ctx context.Context) (string, error) {
-					return "started " + ProxyName, e.StartContainer(ctx, ProxyName)
+				return doctor.Result{Severity: doctor.Warning, Detail: proxy + " is not running", Fix: func(ctx context.Context) (string, error) {
+					return "started " + proxy, e.StartContainer(ctx, proxy)
 				}}
 			}
-			return doctor.Result{Severity: doctor.OK, Detail: Network + " exists and " + ProxyName + " is running"}
+			return doctor.Result{Severity: doctor.OK, Detail: Network + " exists and " + proxy + " is running"}
 		}
 		return doctor.Result{Severity: doctor.Error, Detail: "the dedicated network " + Network + " is missing", Fix: func(ctx context.Context) (string, error) {
 			if _, err := e.EnsureNetwork(ctx, Network, map[string]string{"icaro.managed": "preview"}); err != nil {
 				return "", err
 			}
-			if err := e.RemoveContainer(ctx, ProxyName); err != nil {
+			if err := e.RemoveContainer(ctx, proxy); err != nil {
 				return "", err
 			}
-			return "recreated " + Network + " (the daemon recreates " + ProxyName + " on the next preview)", nil
+			return "recreated " + Network + " (the daemon recreates " + proxy + " on the next preview)", nil
 		}}
 	})
 }

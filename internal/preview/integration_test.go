@@ -98,7 +98,7 @@ func TestIntegrationPreviewLifecycle(t *testing.T) {
 	go func() { _ = m.Run(ctx) }()
 	t.Cleanup(func() {
 		c := context.Background()
-		_ = eng.RemoveContainer(c, ProxyName)
+		_ = eng.RemoveContainer(c, ProxyName(l.Root))
 		_ = eng.RemoveNetwork(c, Network)
 	})
 	t.Cleanup(func() {
@@ -250,7 +250,7 @@ func TestIntegrationPreviewLifecycle(t *testing.T) {
 	}
 
 	// Doctor: network present, nothing blocked after cleanup.
-	if r := NetworkCheck(eng).Run(ctx); r.Severity != "ok" {
+	if r := NetworkCheck(eng, ProxyName(l.Root)).Run(ctx); r.Severity != "ok" {
 		t.Fatalf("network check: %+v", r)
 	}
 }

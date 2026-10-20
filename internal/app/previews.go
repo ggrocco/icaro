@@ -65,7 +65,7 @@ func PreviewChecks(_ context.Context, cfg *config.Config, st *store.Store, eng *
 	}
 	var checks []doctor.Check
 	if eng != nil {
-		checks = append(checks, preview.NetworkCheck(eng))
+		checks = append(checks, preview.NetworkCheck(eng, preview.ProxyName(cfg.Home)))
 	}
 	if st != nil {
 		checks = append(checks, preview.ComposeCheck(st))

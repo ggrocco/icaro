@@ -534,7 +534,13 @@ func (m *Manager) sync(ctx context.Context, path string, force bool) error {
 	}
 	if !force && p.Status == store.PreviewRunning && p.ConfigHash == hash {
 		if n, err := m.compose.Running(ctx, p.ComposeProject); err == nil && n > 0 {
-			return nil // unchanged and alive: re-attached, not restarted
+			// Unchanged and alive: re-attached, not restarted. The proxy may
+			// still be gone (removed, or renamed by an upgrade), and routing
+			// needs it, so ensure it (idempotent).
+			if err := m.proxyDo(ctx, false); err != nil {
+				return fail(store.PreviewError, fmt.Errorf("preview proxy: %w", err))
+			}
+			return nil
 		}
 	}
 	proj, err := m.loadProject(ctx, path, file)
@@ -600,7 +606,7 @@ func (m *Manager) sync(ctx context.Context, path string, force bool) error {
 
 // proxyLoop serializes proxy operations on one goroutine.
 func (m *Manager) proxyLoop(ctx context.Context) {
-	opts := ProxyOptions{Image: m.opts.TraefikImage, HTTPPort: m.opts.HTTPPort, DynamicDir: m.routeDir(), MacOS: m.opts.MacOS}
+	opts := ProxyOptions{Name: ProxyName(m.opts.Layout.Root), Image: m.opts.TraefikImage, HTTPPort: m.opts.HTTPPort, DynamicDir: m.routeDir(), MacOS: m.opts.MacOS}
 	for {
 		select {
 		case <-ctx.Done():
@@ -608,7 +614,7 @@ func (m *Manager) proxyLoop(ctx context.Context) {
 		case req := <-m.proxy:
 			var err error
 			if req.kick {
-				err = m.engine.Restart(context.WithoutCancel(ctx), ProxyName)
+				err = m.engine.Restart(context.WithoutCancel(ctx), opts.Name)
 			} else {
 				err = EnsureProxy(context.WithoutCancel(ctx), m.engine, opts)
 			}

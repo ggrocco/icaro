@@ -393,10 +393,15 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		return err
 	}
 	if m.o.Memory != nil {
-		stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), filepath.Join(icaroDir, "mcp.sock"))
+		sock := filepath.Join(icaroDir, "mcp.sock")
+		stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock)
 		if err != nil {
 			m.o.Log.Warn("memory MCP unavailable for session", "session", row.ID, "err", err)
 		} else {
+			// The socket is created after the session dir was handed to the
+			// container user; a root daemon must hand it over too, or the
+			// non-root agent cannot connect (0600).
+			m.chownForContainer(sock)
 			m.mcp.put(row.ID, stop)
 		}
 	}
@@ -673,7 +678,9 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if row.Kind == KindAgent && m.o.Memory != nil {
 			proj, _ := m.o.Store.GetProject(ctx, row.ProjectID)
 			agent, _ := creds.LookupAgent(m.o.Config.Profiles[row.Profile].Agent)
-			if stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), filepath.Join(m.icaroDir(row.ID), "mcp.sock")); err == nil {
+			sock := filepath.Join(m.icaroDir(row.ID), "mcp.sock")
+			if stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock); err == nil {
+				m.chownForContainer(sock)
 				m.mcp.put(row.ID, stop)
 			}
 		}
