@@ -1,0 +1,17 @@
+# Generic webhook for custom sources. Unsigned, so every subscribed
+# workflow gets its own random URL token: POST /hooks/webhook/<token>
+# (`icaro integration webhook-tokens` lists them). The parsed JSON (or form)
+# body is trigger.body and the query string is trigger.query.
+version: 1
+name: webhook
+description: Generic inbound webhook with a per-workflow URL token.
+triggers:
+  verify: { kind: url-token }
+  delivery_id: "${{ headers['x-request-id'] }}"
+  events:
+    received:
+      description: Any request to the workflow's webhook URL.
+      match: "true"
+      payload:
+        body: "${{ body }}"
+        query: "${{ query }}"

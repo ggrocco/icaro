@@ -1,0 +1,73 @@
+# Linear: webhooks signed with Linear-Signature (HMAC-SHA256 hex of the
+# body) and GraphQL actions. Credentials: linear.webhook_secret,
+# linear.api_key (personal API key, bound to api.linear.app).
+version: 1
+name: linear
+description: Linear issues — react to created/updated issues, create issues and comments.
+hosts: [api.linear.app]
+auth:
+  api_key: { kind: header, header: Authorization, credential: api_key }
+triggers:
+  verify: { kind: hmac-sha256, header: Linear-Signature, encoding: hex }
+  delivery_id: "${{ headers['linear-delivery'] }}"
+  events:
+    issue.created:
+      description: An issue was created.
+      match: "body.type == 'Issue' && body.action == 'create'"
+      payload: &issue
+        action: "${{ body.action }}"
+        issue_id: "${{ body.data.id }}"
+        identifier: "${{ body.data.identifier }}"
+        title: "${{ body.data.title }}"
+        team_id: "${{ body.data.teamId }}"
+        url: "${{ body.url }}"
+    issue.updated:
+      description: An issue was updated.
+      match: "body.type == 'Issue' && body.action == 'update'"
+      payload: *issue
+    comment.created:
+      description: A comment was added to an issue.
+      match: "body.type == 'Comment' && body.action == 'create'"
+      payload:
+        comment_id: "${{ body.data.id }}"
+        issue_id: "${{ body.data.issueId }}"
+        body: "${{ body.data.body }}"
+        url: "${{ body.url }}"
+actions:
+  create-issue:
+    description: Create an issue in a team.
+    inputs:
+      team_id: { type: string, required: true }
+      title: { type: string, required: true }
+      description: { type: string, default: "" }
+    request:
+      method: POST
+      url: https://api.linear.app/graphql
+      auth: api_key
+      body:
+        json:
+          query: "mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }"
+          variables:
+            input: { teamId: "${{ input.team_id }}", title: "${{ input.title }}", description: "${{ input.description }}" }
+    success: "has(response.body.data.issueCreate.success) && response.body.data.issueCreate.success == true"
+    outputs:
+      id: "${{ response.body.data.issueCreate.issue.id }}"
+      identifier: "${{ response.body.data.issueCreate.issue.identifier }}"
+      url: "${{ response.body.data.issueCreate.issue.url }}"
+  create-comment:
+    description: Comment on an issue.
+    inputs:
+      issue_id: { type: string, required: true }
+      body: { type: string, required: true }
+    request:
+      method: POST
+      url: https://api.linear.app/graphql
+      auth: api_key
+      body:
+        json:
+          query: "mutation CommentCreate($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }"
+          variables:
+            input: { issueId: "${{ input.issue_id }}", body: "${{ input.body }}" }
+    success: "has(response.body.data.commentCreate.success) && response.body.data.commentCreate.success == true"
+    outputs:
+      id: "${{ response.body.data.commentCreate.comment.id }}"

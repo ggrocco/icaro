@@ -1,0 +1,56 @@
+# Sentry: integration-platform webhooks (Sentry-Hook-Signature, HMAC-SHA256
+# hex of the body) and API actions. Credentials: sentry.webhook_secret (the
+# integration's client secret), sentry.token (auth token, bound to sentry.io).
+version: 1
+name: sentry
+description: Sentry issues and alerts; resolve issues.
+hosts: [sentry.io, "*.sentry.io"]
+config:
+  base_url:
+    default: https://sentry.io/api/0
+    description: API base URL; set integrations.sentry.base_url for self-hosted Sentry or a regional host.
+auth:
+  token: { kind: bearer, credential: token }
+triggers:
+  verify: { kind: hmac-sha256, header: Sentry-Hook-Signature, encoding: hex }
+  timestamp: { header: Sentry-Hook-Timestamp, format: unix, max_skew: 5m }
+  delivery_id: "${{ headers['request-id'] }}"
+  events:
+    issue.created:
+      description: A new issue was created.
+      match: "headers['sentry-hook-resource'] == 'issue' && body.action == 'created'"
+      payload: &issue
+        action: "${{ body.action }}"
+        issue_id: "${{ body.data.issue.id }}"
+        title: "${{ body.data.issue.title }}"
+        culprit: "${{ body.data.issue.culprit }}"
+        level: "${{ body.data.issue.level }}"
+        project: "${{ body.data.issue.project.slug }}"
+        url: "${{ body.data.issue.web_url }}"
+    issue.resolved:
+      description: An issue was resolved.
+      match: "headers['sentry-hook-resource'] == 'issue' && body.action == 'resolved'"
+      payload: *issue
+    alert.triggered:
+      description: An issue alert rule fired.
+      match: "headers['sentry-hook-resource'] == 'event_alert' && body.action == 'triggered'"
+      payload:
+        rule: "${{ body.data.triggered_rule }}"
+        event_id: "${{ body.data.event.event_id }}"
+        title: "${{ body.data.event.title }}"
+        issue_url: "${{ body.data.event.issue_url }}"
+        url: "${{ body.data.event.web_url }}"
+actions:
+  resolve-issue:
+    description: Mark an issue as resolved.
+    inputs:
+      issue_id: { type: string, required: true }
+    request:
+      method: PUT
+      url: "${{ config.base_url }}/issues/${{ input.issue_id }}/"
+      auth: token
+      body:
+        json: { status: resolved }
+    expect_status: [200]
+    outputs:
+      status: "${{ response.body.status }}"

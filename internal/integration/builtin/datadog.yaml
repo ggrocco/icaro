@@ -1,0 +1,63 @@
+# Datadog: monitor notifications through the Webhooks integration, verified
+# by a custom shared-secret header, and Events API actions.
+#
+# Configure the Datadog webhook with header X-Icaro-Webhook-Secret set to the
+# secret stored as datadog.webhook_secret, and this payload:
+#   {"id": "$ID", "event_type": "$EVENT_TYPE", "alert_transition": "$ALERT_TRANSITION",
+#    "title": "$EVENT_TITLE", "monitor_id": "$ALERT_ID", "priority": "$ALERT_PRIORITY",
+#    "link": "$LINK", "tags": "$TAGS", "date": "$DATE"}
+# Credentials: datadog.webhook_secret, datadog.api_key (bound to your site's API host).
+version: 1
+name: datadog
+description: Datadog monitor alerts; post events.
+hosts: [api.datadoghq.com, api.datadoghq.eu, api.us3.datadoghq.com, api.us5.datadoghq.com, api.ap1.datadoghq.com, api.ddog-gov.com]
+config:
+  base_url:
+    default: https://api.datadoghq.com
+    description: API host for your Datadog site, e.g. https://api.datadoghq.eu.
+auth:
+  api_key: { kind: header, header: DD-API-KEY, credential: api_key }
+triggers:
+  verify: { kind: shared-secret, header: X-Icaro-Webhook-Secret }
+  delivery_id: "${{ body.id }}"
+  events:
+    monitor.triggered:
+      description: A monitor entered the alert state.
+      match: "body.alert_transition == 'Triggered'"
+      payload: &alert
+        transition: "${{ body.alert_transition }}"
+        title: "${{ body.title }}"
+        monitor_id: "${{ body.monitor_id }}"
+        priority: "${{ body.priority }}"
+        link: "${{ body.link }}"
+        tags: "${{ body.tags }}"
+    monitor.recovered:
+      description: A monitor recovered.
+      match: "body.alert_transition == 'Recovered'"
+      payload: *alert
+    monitor.any:
+      description: Any monitor notification.
+      match: "has(body.alert_transition)"
+      payload: *alert
+actions:
+  post-event:
+    description: Post an event to the event stream.
+    inputs:
+      title: { type: string, required: true }
+      text: { type: string, required: true }
+      tags: { type: array, default: [] }
+      alert_type: { type: string, default: info, description: "error | warning | info | success" }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/api/v1/events"
+      auth: api_key
+      body:
+        json:
+          title: "${{ input.title }}"
+          text: "${{ input.text }}"
+          tags: "${{ input.tags }}"
+          alert_type: "${{ input.alert_type }}"
+    expect_status: [202]
+    outputs:
+      id: "${{ response.body.event.id }}"
+      url: "${{ response.body.event.url }}"
