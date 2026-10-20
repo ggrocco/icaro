@@ -19,9 +19,15 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -s -l $(git ls-files '*.go'))" || (gofmt -s -l $(git ls-files '*.go'); exit 1)
       - run: go vet ./...
+      # golangci-lint is built from source and needs a toolchain at least as
+      # new as the one it was released with, so build it with current stable
+      # Go and pin the version (05-engineering: pinned dependencies).
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.15.0
           install-mode: goinstall
 
   unit:
