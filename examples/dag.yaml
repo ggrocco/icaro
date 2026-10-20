@@ -1,0 +1,47 @@
+# A DAG: lint and test run in parallel on the same workspace, report waits
+# for both, and publish runs only when the trigger asks for it.
+#   icaro workflow apply examples/dag.yaml
+#   icaro run build-and-report --set publish=false --wait
+version: 1
+name: build-and-report
+concurrency: queue
+env:
+  STAGE: ci
+triggers:
+  - type: manual
+steps:
+  - id: prepare
+    image: alpine:3.20
+    command: |
+      mkdir -p /workspace/src
+      echo 'print("hi")' > /workspace/src/app.py
+      ls /workspace/src | wc -l
+    outputs:
+      files: stdout:last-line
+  - id: lint
+    image: alpine:3.20
+    needs: [prepare]
+    command: |
+      echo "linting ${{ steps.prepare.outputs.files }} file(s) in $STAGE"
+      echo '{"warnings": 0}' > /icaro/output.json
+    outputs:
+      warnings: json:warnings
+  - id: test
+    image: alpine:3.20
+    needs: [prepare]
+    timeout: 5m
+    retry: 1
+    command: |
+      mkdir -p /workspace/reports
+      echo "1 passed" | tee /workspace/reports/summary.txt
+    outputs:
+      summary: file:reports/summary.txt
+  - id: report
+    image: alpine:3.20
+    needs: [lint, test]
+    command: echo "warnings=${{ steps.lint.outputs.warnings }} tests='${{ steps.test.outputs.summary }}'"
+  - id: publish
+    image: alpine:3.20
+    needs: [report]
+    when: ${{ trigger.publish == true }}
+    command: echo publishing

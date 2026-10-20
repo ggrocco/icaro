@@ -6,18 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
-const runCols = `id, workflow_id, workflow_name, workflow_version, status, trigger_kind, input_json, root_run_id, parent_run_id, depth, rerun_of, library_hash, claimed_by, claimed_at, heartbeat_at, started_at, finished_at, cancel_requested_at, error, created_at`
+const runCols = `id, workflow_id, workflow_name, workflow_version, status, trigger_kind, input_json, root_run_id, parent_run_id, depth, rerun_of, library_hash, claimed_by, claimed_at, heartbeat_at, started_at, finished_at, cancel_requested_at, error, created_at, idempotency_key, concurrency, session_id, delivery_id, actor`
 
 func scanRun(sc interface{ Scan(...any) error }) (*Run, error) {
 	var r Run
-	var parent, rerun, lib, claimedBy sql.NullString
+	var parent, rerun, lib, claimedBy, idem, session, delivery sql.NullString
 	var claimedAt, heartbeat, started, finished, cancel sql.NullString
 	var created string
-	err := sc.Scan(&r.ID, &r.WorkflowID, &r.WorkflowName, &r.WorkflowVersion, &r.Status, &r.TriggerKind, &r.InputJSON, &r.RootRunID,
-		&parent, &r.Depth, &rerun, &lib, &claimedBy, &claimedAt, &heartbeat, &started, &finished, &cancel, &r.Error, &created)
+	err := sc.Scan(&r.ID, &r.WorkflowID, &r.WorkflowName, &r.WorkflowVersion, &r.Status, &r.TriggerKind, &r.TriggerJSON, &r.RootRunID,
+		&parent, &r.Depth, &rerun, &lib, &claimedBy, &claimedAt, &heartbeat, &started, &finished, &cancel, &r.Error, &created,
+		&idem, &r.Concurrency, &session, &delivery, &r.Actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -25,15 +25,24 @@ func scanRun(sc interface{ Scan(...any) error }) (*Run, error) {
 		return nil, err
 	}
 	r.ParentRunID, r.RerunOf, r.LibraryHash, r.ClaimedBy = parent.String, rerun.String, lib.String, claimedBy.String
+	r.IdempotencyKey, r.SessionID, r.DeliveryID = idem.String, session.String, delivery.String
 	r.ClaimedAt, r.HeartbeatAt, r.StartedAt = parseTSPtr(claimedAt), parseTSPtr(heartbeat), parseTSPtr(started)
 	r.FinishedAt, r.CancelRequestedAt = parseTSPtr(finished), parseTSPtr(cancel)
 	r.CreatedAt = parseTS(created)
 	return &r, nil
 }
 
-// CreateRun inserts a queued run and its pending steps. ID, RootRunID and
-// CreatedAt are filled in when empty.
-func (s *Store) CreateRun(ctx context.Context, r *Run, stepNames []string) error {
+// StepInit is a step row created with its run.
+type StepInit struct {
+	StepID string
+	Idx    int
+	Kind   string
+}
+
+// CreateRun inserts a queued run and its pending steps in one
+// transaction. ID, RootRunID and CreatedAt are filled in when empty. A
+// duplicate IdempotencyKey returns ErrConflict.
+func (s *Store) CreateRun(ctx context.Context, r *Run, steps []StepInit) error {
 	if r.ID == "" {
 		r.ID = NewID()
 	}
@@ -46,29 +55,59 @@ func (s *Store) CreateRun(ctx context.Context, r *Run, stepNames []string) error
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = Now()
 	}
-	if r.InputJSON == "" {
-		r.InputJSON = "{}"
+	if r.TriggerJSON == "" {
+		r.TriggerJSON = "{}"
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
-			r.ID, r.WorkflowID, r.WorkflowName, r.WorkflowVersion, r.Status, r.TriggerKind, r.InputJSON, r.RootRunID,
+	if r.Concurrency == "" {
+		r.Concurrency = "allow"
+	}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+			r.ID, r.WorkflowID, r.WorkflowName, r.WorkflowVersion, r.Status, r.TriggerKind, r.TriggerJSON, r.RootRunID,
 			nullStr(r.ParentRunID), r.Depth, nullStr(r.RerunOf), nullStr(r.LibraryHash), nullStr(r.ClaimedBy),
 			tsPtr(r.ClaimedAt), tsPtr(r.HeartbeatAt), tsPtr(r.StartedAt), tsPtr(r.FinishedAt), tsPtr(r.CancelRequestedAt),
-			r.Error, ts(r.CreatedAt)); err != nil {
+			r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor); err != nil {
 			return err
 		}
-		for i, name := range stepNames {
-			if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO run_steps (run_id, idx, name, status) VALUES (?,?,?,?)`), r.ID, i, name, StepPending); err != nil {
+		for _, st := range steps {
+			if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO step_runs (run_id, step_id, idx, kind, status) VALUES (?,?,?,?,?)`),
+				r.ID, st.StepID, st.Idx, st.Kind, StepPending); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
 }
 
 // GetRun fetches a run by id.
 func (s *Store) GetRun(ctx context.Context, id string) (*Run, error) {
 	return scanRun(s.queryRow(ctx, `SELECT `+runCols+` FROM runs WHERE id = ?`, id))
+}
+
+// GetRunByIdempotencyKey fetches the run created for a key.
+func (s *Store) GetRunByIdempotencyKey(ctx context.Context, key string) (*Run, error) {
+	return scanRun(s.queryRow(ctx, `SELECT `+runCols+` FROM runs WHERE idempotency_key = ?`, key))
+}
+
+func (s *Store) listRuns(ctx context.Context, q string, args ...any) ([]*Run, error) {
+	rows, err := s.query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // ListRuns returns runs newest first, filtered.
@@ -92,30 +131,35 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 		limit = 100
 	}
 	q += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT %d", limit)
-	rows, err := s.query(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return s.listRuns(ctx, q, args...)
 }
 
-// ClaimRun atomically takes the oldest queued run for a runner. It returns
-// ErrNotFound when the queue is empty.
+// ListRunsByStatus returns runs in a status, oldest first.
+func (s *Store) ListRunsByStatus(ctx context.Context, status string) ([]*Run, error) {
+	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE status = ? ORDER BY created_at, id`, status)
+}
+
+// ActiveRuns returns a workflow's queued and running runs, oldest first.
+func (s *Store) ActiveRuns(ctx context.Context, workflowID string) ([]*Run, error) {
+	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?) ORDER BY created_at, id`,
+		workflowID, RunQueued, RunRunning)
+}
+
+// ClaimRun atomically takes the oldest claimable queued run. A run whose
+// policy is "queue" waits while another run of the same workflow is
+// running. It returns ErrNotFound when nothing is claimable.
 func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 	now := ts(Now())
 	var id string
 	err := s.queryRow(ctx, `UPDATE runs SET status = ?, claimed_by = ?, claimed_at = ?, heartbeat_at = ?, started_at = ?
-		WHERE id = (SELECT id FROM runs WHERE status = ? ORDER BY created_at, id LIMIT 1) AND status = ?
-		RETURNING id`, RunRunning, runnerID, now, now, now, RunQueued, RunQueued).Scan(&id)
+		WHERE id = (
+			SELECT r.id FROM runs r
+			WHERE r.status = ?
+			  AND NOT (r.concurrency = 'queue' AND EXISTS (
+			      SELECT 1 FROM runs o WHERE o.workflow_id = r.workflow_id AND o.status = ?))
+			ORDER BY r.created_at, r.id LIMIT 1)
+		AND status = ?
+		RETURNING id`, RunRunning, runnerID, now, now, now, RunQueued, RunRunning, RunQueued).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -125,7 +169,16 @@ func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 	return s.GetRun(ctx, id)
 }
 
-// Heartbeat refreshes the runner's liveness mark on a run.
+// SetRunSession records the run session backing a run (ADR 0010).
+func (s *Store) SetRunSession(ctx context.Context, runID, sessionID string) error {
+	res, err := s.exec(ctx, `UPDATE runs SET session_id = ? WHERE id = ?`, nullStr(sessionID), runID)
+	if err != nil {
+		return err
+	}
+	return affected(res)
+}
+
+// Heartbeat refreshes the daemon's liveness mark on a run.
 func (s *Store) Heartbeat(ctx context.Context, runID string) error {
 	_, err := s.exec(ctx, `UPDATE runs SET heartbeat_at = ? WHERE id = ?`, ts(Now()), runID)
 	return err
@@ -141,7 +194,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 }
 
 // RequestCancel marks a run for cancellation. Queued runs are cancelled
-// immediately; running runs are flagged for the runner to stop.
+// immediately; running runs are flagged for the engine to stop.
 func (s *Store) RequestCancel(ctx context.Context, runID string) (*Run, error) {
 	now := ts(Now())
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -151,14 +204,15 @@ func (s *Store) RequestCancel(ctx context.Context, runID string) (*Run, error) {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 1 {
-			return nil
+			_, err := tx.ExecContext(ctx, s.rebind(`UPDATE step_runs SET status = ?, finished_at = ? WHERE run_id = ? AND status = ?`),
+				StepCancelled, now, runID, StepPending)
+			return err
 		}
 		res, err = tx.ExecContext(ctx, s.rebind(`UPDATE runs SET cancel_requested_at = ? WHERE id = ? AND status = ? AND cancel_requested_at IS NULL`), now, runID, RunRunning)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			// Already finished or already requested: not an error, caller sees state.
 			var exists int
 			if err := tx.QueryRowContext(ctx, s.rebind(`SELECT COUNT(*) FROM runs WHERE id = ?`), runID).Scan(&exists); err != nil {
 				return err
@@ -173,99 +227,6 @@ func (s *Store) RequestCancel(ctx context.Context, runID string) (*Run, error) {
 		return nil, err
 	}
 	return s.GetRun(ctx, runID)
-}
-
-// ListRunsClaimedBy returns running runs held by a runner (for reconcile).
-func (s *Store) ListRunsClaimedBy(ctx context.Context, runnerID string) ([]*Run, error) {
-	rows, err := s.query(ctx, `SELECT `+runCols+` FROM runs WHERE claimed_by = ? AND status = ? ORDER BY created_at`, runnerID, RunRunning)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-// ReleaseStaleRuns re-queues running runs whose heartbeat is older than
-// maxAge and whose runner is not the caller (crash recovery for other
-// runners). Returns the number of runs re-queued.
-func (s *Store) ReleaseStaleRuns(ctx context.Context, exceptRunner string, maxAge time.Duration) (int64, error) {
-	cutoff := ts(Now().Add(-maxAge))
-	res, err := s.exec(ctx, `UPDATE runs SET status = ?, claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL
-		WHERE status = ? AND claimed_by <> ? AND heartbeat_at < ?`, RunQueued, RunRunning, exceptRunner, cutoff)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-const stepCols = `run_id, idx, name, status, attempt, container_id, exit_code, output_json, log_path, log_size, started_at, finished_at, error`
-
-func scanStep(sc interface{ Scan(...any) error }) (*RunStep, error) {
-	var st RunStep
-	var exit sql.NullInt64
-	var started, finished sql.NullString
-	err := sc.Scan(&st.RunID, &st.Idx, &st.Name, &st.Status, &st.Attempt, &st.ContainerID, &exit, &st.OutputJSON, &st.LogPath, &st.LogSize, &started, &finished, &st.Error)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if exit.Valid {
-		v := int(exit.Int64)
-		st.ExitCode = &v
-	}
-	st.StartedAt, st.FinishedAt = parseTSPtr(started), parseTSPtr(finished)
-	return &st, nil
-}
-
-// GetRunSteps returns the steps of a run in order.
-func (s *Store) GetRunSteps(ctx context.Context, runID string) ([]*RunStep, error) {
-	rows, err := s.query(ctx, `SELECT `+stepCols+` FROM run_steps WHERE run_id = ? ORDER BY idx`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*RunStep
-	for rows.Next() {
-		st, err := scanStep(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, st)
-	}
-	return out, rows.Err()
-}
-
-// GetRunStep returns one step.
-func (s *Store) GetRunStep(ctx context.Context, runID string, idx int) (*RunStep, error) {
-	return scanStep(s.queryRow(ctx, `SELECT `+stepCols+` FROM run_steps WHERE run_id = ? AND idx = ?`, runID, idx))
-}
-
-// UpdateRunStep writes the full mutable state of a step.
-func (s *Store) UpdateRunStep(ctx context.Context, st *RunStep) error {
-	var exit any
-	if st.ExitCode != nil {
-		exit = *st.ExitCode
-	}
-	if st.OutputJSON == "" {
-		st.OutputJSON = "{}"
-	}
-	res, err := s.exec(ctx, `UPDATE run_steps SET status = ?, attempt = ?, container_id = ?, exit_code = ?, output_json = ?, log_path = ?, log_size = ?, started_at = ?, finished_at = ?, error = ?
-		WHERE run_id = ? AND idx = ?`,
-		st.Status, st.Attempt, st.ContainerID, exit, st.OutputJSON, st.LogPath, st.LogSize, tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error, st.RunID, st.Idx)
-	if err != nil {
-		return err
-	}
-	return affected(res)
 }
 
 // CountRunsByStatus returns counts keyed by status.
@@ -285,4 +246,132 @@ func (s *Store) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
 		out[st] = n
 	}
 	return out, rows.Err()
+}
+
+const stepCols = `run_id, step_id, idx, kind, status, attempt, session_id, container_id, exit_code, outputs_json, log_path, log_size, log_lines, started_at, finished_at, error`
+
+func scanStep(sc interface{ Scan(...any) error }) (*StepRun, error) {
+	var st StepRun
+	var exit sql.NullInt64
+	var started, finished sql.NullString
+	err := sc.Scan(&st.RunID, &st.StepID, &st.Idx, &st.Kind, &st.Status, &st.Attempt, &st.SessionID, &st.ContainerID, &exit,
+		&st.OutputsJSON, &st.LogPath, &st.LogSize, &st.LogLines, &started, &finished, &st.Error)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if exit.Valid {
+		v := int(exit.Int64)
+		st.ExitCode = &v
+	}
+	st.StartedAt, st.FinishedAt = parseTSPtr(started), parseTSPtr(finished)
+	return &st, nil
+}
+
+// GetStepRuns returns the steps of a run in plan order.
+func (s *Store) GetStepRuns(ctx context.Context, runID string) ([]*StepRun, error) {
+	rows, err := s.query(ctx, `SELECT `+stepCols+` FROM step_runs WHERE run_id = ? ORDER BY idx`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*StepRun
+	for rows.Next() {
+		st, err := scanStep(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// GetStepRun returns one step.
+func (s *Store) GetStepRun(ctx context.Context, runID, stepID string) (*StepRun, error) {
+	return scanStep(s.queryRow(ctx, `SELECT `+stepCols+` FROM step_runs WHERE run_id = ? AND step_id = ?`, runID, stepID))
+}
+
+// UpdateStepRun writes the full mutable state of a step.
+func (s *Store) UpdateStepRun(ctx context.Context, st *StepRun) error {
+	var exit any
+	if st.ExitCode != nil {
+		exit = *st.ExitCode
+	}
+	if st.OutputsJSON == "" {
+		st.OutputsJSON = "{}"
+	}
+	res, err := s.exec(ctx, `UPDATE step_runs SET status = ?, attempt = ?, session_id = ?, container_id = ?, exit_code = ?, outputs_json = ?,
+		log_path = ?, log_size = ?, log_lines = ?, started_at = ?, finished_at = ?, error = ?
+		WHERE run_id = ? AND step_id = ?`,
+		st.Status, st.Attempt, st.SessionID, st.ContainerID, exit, st.OutputsJSON, st.LogPath, st.LogSize, st.LogLines,
+		tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error, st.RunID, st.StepID)
+	if err != nil {
+		return err
+	}
+	return affected(res)
+}
+
+// AddLogChunk records a log index entry.
+func (s *Store) AddLogChunk(ctx context.Context, c *LogChunk) error {
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = Now()
+	}
+	_, err := s.exec(ctx, `INSERT INTO log_chunks (run_id, step_id, attempt, seq, file_offset, line_count, created_at) VALUES (?,?,?,?,?,?,?)`,
+		c.RunID, c.StepID, c.Attempt, c.Seq, c.FileOffset, c.LineCount, ts(c.CreatedAt))
+	return err
+}
+
+// LastLogChunk returns the newest index entry of a step attempt.
+func (s *Store) LastLogChunk(ctx context.Context, runID, stepID string, attempt int) (*LogChunk, error) {
+	var c LogChunk
+	var created string
+	err := s.queryRow(ctx, `SELECT run_id, step_id, attempt, seq, file_offset, line_count, created_at FROM log_chunks
+		WHERE run_id = ? AND step_id = ? AND attempt = ? ORDER BY seq DESC LIMIT 1`, runID, stepID, attempt).
+		Scan(&c.RunID, &c.StepID, &c.Attempt, &c.Seq, &c.FileOffset, &c.LineCount, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	c.CreatedAt = parseTS(created)
+	return &c, nil
+}
+
+// ListLogChunks returns a step attempt's index entries in order.
+func (s *Store) ListLogChunks(ctx context.Context, runID, stepID string, attempt int) ([]*LogChunk, error) {
+	rows, err := s.query(ctx, `SELECT run_id, step_id, attempt, seq, file_offset, line_count, created_at FROM log_chunks
+		WHERE run_id = ? AND step_id = ? AND attempt = ? ORDER BY seq`, runID, stepID, attempt)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*LogChunk
+	for rows.Next() {
+		var c LogChunk
+		var created string
+		if err := rows.Scan(&c.RunID, &c.StepID, &c.Attempt, &c.Seq, &c.FileOffset, &c.LineCount, &created); err != nil {
+			return nil, err
+		}
+		c.CreatedAt = parseTS(created)
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
+
+// ActiveWorkflows returns every active workflow.
+func (s *Store) ActiveWorkflows(ctx context.Context) ([]*Workflow, error) {
+	all, err := s.ListWorkflows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, w := range all {
+		if w.Status == WorkflowActive {
+			out = append(out, w)
+		}
+	}
+	return out, nil
 }

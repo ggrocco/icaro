@@ -20,7 +20,6 @@ import (
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
 	"icaro/internal/paths"
-	"icaro/internal/runner"
 	"icaro/internal/secrets"
 	"icaro/internal/service"
 	"icaro/internal/store"
@@ -44,6 +43,9 @@ type App struct {
 	Secrets *secrets.Store
 	Service *service.Service
 	API     *api.Server
+	// Workflows holds the workflow engine and the collaborators earlier
+	// wirers provide to it (see internal/app/workflows.go).
+	Workflows WorkflowWiring
 
 	components []Component
 	checks     []doctor.Check
@@ -82,20 +84,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	a.Docker = eng
 	a.closers = append(a.closers, eng.Close)
 
-	rn := runner.New(runner.Config{
-		RunnerID:      "daemon",
-		Concurrency:   cfg.Workflows.Concurrency,
-		StepTimeout:   cfg.Limits.Timeout,
-		MemoryBytes:   cfg.Limits.MemoryMB << 20,
-		NanoCPUs:      int64(cfg.Limits.CPUs * 1e9),
-		Pids:          cfg.Limits.Pids,
-		NoFile:        cfg.Limits.NoFile,
-		StrictRuntime: cfg.Docker.StrictRuntime,
-		LogsDir:       a.Layout.Logs(),
-	}, st, eng, nil, nil, log)
-	a.Service = service.New(service.Options{Store: st, Key: key, Runner: rn, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Log: log})
+	// The workflow engine is attached by the "workflows" wirer
+	// (internal/app/workflows.go).
+	a.Service = service.New(service.Options{Store: st, Key: key, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Log: log})
 	a.API = api.New(a.Service, log)
-	a.Add(&dockerGated{name: "workflow-runner", docker: eng, log: log, run: rn.Run})
 
 	a.checks = append(a.checks, BaseChecks(cfg, st, eng)...)
 	for _, w := range sortedWirers() {
