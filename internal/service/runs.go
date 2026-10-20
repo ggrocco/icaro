@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"icaro/internal/runner/logs"
+	"icaro/internal/logs"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 )

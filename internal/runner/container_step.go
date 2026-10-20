@@ -11,9 +11,9 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 
-	"icaro/internal/runner/docker"
-	"icaro/internal/runner/logs"
-	"icaro/internal/runner/sandbox"
+	"icaro/internal/container/docker"
+	"icaro/internal/container/sandbox"
+	"icaro/internal/logs"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 )

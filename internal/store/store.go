@@ -95,20 +95,43 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // Migrate applies pending migrations for the dialect.
 func (s *Store) Migrate(ctx context.Context) error {
-	sub, err := fs.Sub(migrationsFS, "migrations/"+string(s.dialect))
-	if err != nil {
-		return err
-	}
-	gd := goose.DialectSQLite3
-	if s.dialect == Postgres {
-		gd = goose.DialectPostgres
-	}
-	p, err := goose.NewProvider(gd, s.db, sub)
+	p, err := s.provider()
 	if err != nil {
 		return err
 	}
 	_, err = p.Up(ctx)
 	return err
+}
+
+// PendingMigrations returns how many migrations have not been applied.
+func (s *Store) PendingMigrations(ctx context.Context) (int, error) {
+	p, err := s.provider()
+	if err != nil {
+		return 0, err
+	}
+	st, err := p.Status(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, m := range st {
+		if m.State == goose.StatePending {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *Store) provider() (*goose.Provider, error) {
+	sub, err := fs.Sub(migrationsFS, "migrations/"+string(s.dialect))
+	if err != nil {
+		return nil, err
+	}
+	gd := goose.DialectSQLite3
+	if s.dialect == Postgres {
+		gd = goose.DialectPostgres
+	}
+	return goose.NewProvider(gd, s.db, sub)
 }
 
 // rebind rewrites ? placeholders to $N for postgres.

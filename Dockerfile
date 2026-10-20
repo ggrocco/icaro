@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build -ldflags "-s -w -X icaro/internal/cli.version=${VERSI
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/icaro /icaro
 VOLUME ["/data"]
-ENV ICARO_DATA_DIR=/data
+ENV ICARO_HOME=/data
 EXPOSE 8787
 ENTRYPOINT ["/icaro"]
-CMD ["serve", "--role", "all"]
+CMD ["serve", "--listen", "0.0.0.0:8787"]

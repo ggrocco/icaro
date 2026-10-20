@@ -5,6 +5,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+func init() { register(newConfigCmd) }
+
 func newConfigCmd(opts *rootOpts) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
@@ -18,8 +20,8 @@ func newConfigCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if cfg.Server.Token != "" {
-				cfg.Server.Token = "***"
+			if cfg.Daemon.Token != "" {
+				cfg.Daemon.Token = "***"
 			}
 			return yaml.NewEncoder(cmd.OutOrStdout()).Encode(cfg)
 		},
