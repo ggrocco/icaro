@@ -82,6 +82,8 @@ jobs:
       - run: make web build
       - run: cd web && npx playwright install --with-deps chromium
       - run: cd web && npx playwright test
+      - name: session spine (worktree -> container -> preview -> memory)
+        run: go test -count=1 -tags e2e ./hack/e2e/
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

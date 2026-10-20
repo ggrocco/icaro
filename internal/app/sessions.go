@@ -18,7 +18,7 @@ import (
 
 func init() {
 	RegisterWirer(20, "sessions", func(_ context.Context, a *App) error {
-		a.Egress = &container.DockerEgress{Engine: a.Docker, HelperImage: a.Cfg.Docker.HelperImage, Log: a.Log}
+		a.Egress = &container.DockerEgress{Engine: a.Docker, HelperImage: a.Cfg.Docker.HelperImage, Namespace: container.Namespace(a.Cfg.Home), Log: a.Log}
 		a.Images = &container.Images{Engine: a.Docker, Pins: a.Store}
 		a.Homes = &creds.Homes{Layout: a.Layout, Mode: a.Cfg.Sessions.HomeMode, Volumes: a.Docker}
 		// Preview and Memory hooks are attached by their wirers (orders 30

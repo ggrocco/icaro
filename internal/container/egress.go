@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -30,8 +31,16 @@ const (
 	ProxyPort = 3128
 )
 
-// NetworkName is the internal network of a profile.
+// NetworkName is the internal network of a profile (no namespace).
 func NetworkName(profile string) string { return "icaro-egress-" + profile }
+
+// Namespace derives a short egress namespace from a state root, so two
+// Ícaro homes on one Docker engine keep separate networks and proxies
+// even when they use the same profile name with different allowlists.
+func Namespace(root string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	return hex.EncodeToString(sum[:4])
+}
 
 // DockerEgress implements Egress with one internal network and one proxy
 // container per profile (ADR 0005). Containers on the network have no
@@ -45,13 +54,32 @@ type DockerEgress struct {
 	HelperBinary string
 	// OutsideNetwork is the network the proxy uses to reach the world.
 	OutsideNetwork string
-	Log            *slog.Logger
+	// Namespace scopes network and proxy names and labels (see Namespace);
+	// empty keeps the bare profile names.
+	Namespace string
+	Log       *slog.Logger
+}
+
+// network is the internal network name for a profile.
+func (e *DockerEgress) network(profile string) string {
+	if e.Namespace == "" {
+		return NetworkName(profile)
+	}
+	return "icaro-egress-" + e.Namespace + "-" + profile
+}
+
+// key is the label value identifying a profile's egress resources.
+func (e *DockerEgress) key(profile string) string {
+	if e.Namespace == "" {
+		return profile
+	}
+	return e.Namespace + "/" + profile
 }
 
 // Ensure provisions the network and (for a non-empty allowlist) the proxy.
 func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []string) (Attachment, error) {
-	netName := NetworkName(profile)
-	labels := map[string]string{LabelEgress: profile}
+	netName := e.network(profile)
+	labels := map[string]string{LabelEgress: e.key(profile)}
 	if err := e.Engine.CreateNetwork(ctx, netName, true, labels); err != nil {
 		return Attachment{}, fmt.Errorf("egress network: %w", err)
 	}
@@ -68,7 +96,7 @@ func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []strin
 	sum := sha256.Sum256([]byte(strings.Join(sorted, ",") + "|" + image))
 	hash := hex.EncodeToString(sum[:6])
 
-	ids, err := e.Engine.ListByLabel(ctx, map[string]string{LabelEgress: profile})
+	ids, err := e.Engine.ListByLabel(ctx, map[string]string{LabelEgress: e.key(profile)})
 	if err != nil {
 		return Attachment{}, err
 	}
@@ -109,18 +137,18 @@ func (e *DockerEgress) startProxy(ctx context.Context, profile, image, hash stri
 	})
 	hc.RestartPolicy.Name = "unless-stopped"
 	spec := docker.Spec{
-		Name:       NetworkName(profile) + "-proxy-" + hash,
+		Name:       e.network(profile) + "-proxy-" + hash,
 		Image:      image,
 		Entrypoint: []string{"/icaro", "egress-proxy", "--listen", fmt.Sprintf(":%d", ProxyPort), "--allow", strings.Join(allow, ",")},
 		User:       "65534:65534",
-		Labels:     map[string]string{LabelEgress: profile, LabelEgressHash: hash},
+		Labels:     map[string]string{LabelEgress: e.key(profile), LabelEgressHash: hash},
 		HostConfig: hc,
 	}
 	id, err := e.Engine.CreateContainerOn(ctx, spec, docker.NetSpec{Network: outside})
 	if err != nil {
 		return fmt.Errorf("create egress proxy: %w", err)
 	}
-	if err := e.Engine.ConnectNetwork(ctx, NetworkName(profile), id, []string{ProxyAlias}); err != nil {
+	if err := e.Engine.ConnectNetwork(ctx, e.network(profile), id, []string{ProxyAlias}); err != nil {
 		_ = e.Engine.RemoveContainer(ctx, id)
 		return fmt.Errorf("attach egress proxy: %w", err)
 	}
