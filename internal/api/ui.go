@@ -20,7 +20,9 @@ const (
 	CSRFHeader = "X-Icaro-CSRF"
 )
 
-func safeMethod(m string) bool { return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions }
+func safeMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
+}
 
 // UIOptions configure the UI routes.
 type UIOptions struct {
