@@ -20,7 +20,7 @@ import (
 const QueryTargetP95 = 50 * time.Millisecond
 
 var benchVocab = func() []string {
-	r := rand.New(rand.NewSource(1))
+	r := rand.New(rand.NewSource(1)) //nolint:gosec // deterministic test corpus
 	letters := "abcdefghijklmnopqrstuvwxyz"
 	words := make([]string, 3000)
 	for i := range words {
@@ -61,8 +61,8 @@ func seed10k(tb testing.TB) (*Engine, Scope) {
 	}
 	e := New(db, slog.New(slog.NewTextHandler(io.Discard, nil)), "bench")
 	scope := Scope{ProjectID: "pbench", Origin: OriginAPI}
-	r := rand.New(rand.NewSource(42))
-	z := rand.NewZipf(r, 1.1, 1, uint64(len(benchVocab)-1))
+	r := rand.New(rand.NewSource(42))                       //nolint:gosec // deterministic test corpus
+	z := rand.NewZipf(r, 1.1, 1, uint64(len(benchVocab)-1)) //nolint:gosec // constant positive length
 	kinds := []string{KindDecision, KindTask, KindFinding, KindFile, KindSymbol}
 	now := time.Now().UTC()
 	var batch []store.MemoryBundle
@@ -87,8 +87,8 @@ func seed10k(tb testing.TB) (*Engine, Scope) {
 }
 
 func benchQueries() []Query {
-	r := rand.New(rand.NewSource(7))
-	z := rand.NewZipf(r, 1.1, 1, uint64(len(benchVocab)-1))
+	r := rand.New(rand.NewSource(7))                        //nolint:gosec // deterministic test corpus
+	z := rand.NewZipf(r, 1.1, 1, uint64(len(benchVocab)-1)) //nolint:gosec // constant positive length
 	qs := make([]Query, 200)
 	for i := range qs {
 		qs[i] = Query{Text: zipfWords(r, z, 1+i%3), Limit: 10}

@@ -19,6 +19,8 @@ import (
 	"icaro/internal/container/docker"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
+	"icaro/internal/mcp"
+	"icaro/internal/memory"
 	"icaro/internal/paths"
 	"icaro/internal/runner"
 	"icaro/internal/secrets"
@@ -42,6 +44,8 @@ type App struct {
 	Key     *crypto.Key
 	Docker  *docker.Engine
 	Secrets *secrets.Store
+	Memory  *memory.Engine
+	MCP     *mcp.Server // host MCP server at /mcp; Phase 4 adds authoring tools
 	Service *service.Service
 	API     *api.Server
 

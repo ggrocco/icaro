@@ -13,7 +13,6 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -125,6 +124,13 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		}
 	}
 
+	// Reads go through an os.Root so a symlink swapped in during the walk
+	// cannot escape the ingested tree.
+	fsRoot, err := os.OpenRoot(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fsRoot.Close() }()
 	files := 0
 	walkErr := filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -150,7 +156,8 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 			rep.Skipped++
 			return nil
 		}
-		content, err := os.ReadFile(p)
+		inRoot, _ := filepath.Rel(abs, p)
+		content, err := fsRoot.ReadFile(inRoot)
 		if err != nil || isBinary(content) {
 			rep.Skipped++
 			return nil
@@ -463,8 +470,8 @@ type commit struct {
 func gitCommits(ctx context.Context, dir string, n int) ([]commit, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "log", "-n", fmt.Sprint(n), "--no-color",
-		"--format=%x1e%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1f", "--name-only").Output()
+	out, err := git(ctx, dir, "log", "-n", fmt.Sprint(n), "--no-color",
+		"--format=%x1e%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1f", "--name-only")
 	if err != nil {
 		return nil, err
 	}

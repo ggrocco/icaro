@@ -44,7 +44,7 @@ func ProjectRoot(path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// --git-common-dir is shared by all worktrees of a repository.
-	out, err := exec.CommandContext(ctx, "git", "-C", abs, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	out, err := git(ctx, abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return abs, nil
 	}
@@ -63,7 +63,7 @@ func ProjectRoot(path string) (string, error) {
 func GitTopLevel(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--show-toplevel").Output()
+	out, err := git(ctx, path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		abs, _ := filepath.Abs(path)
 		return abs
@@ -75,7 +75,7 @@ func GitTopLevel(path string) string {
 func GitBranch(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	out, err := git(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return ""
 	}
@@ -84,4 +84,10 @@ func GitBranch(path string) string {
 		return ""
 	}
 	return b
+}
+
+// git runs the git binary in dir. Arguments are passed as argv (no shell),
+// and dir is only ever a directory the caller asked to index.
+func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output() //nolint:gosec // fixed binary, argv without a shell
 }

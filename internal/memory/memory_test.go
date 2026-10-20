@@ -307,7 +307,7 @@ func gitInit(t *testing.T, dir string) {
 		{"-c", "user.email=t@t", "-c", "user.name=Tester", "add", "-A"},
 		{"-c", "user.email=t@t", "-c", "user.name=Tester", "commit", "-q", "-m", "Initial import of the parser\n\nBody line"},
 	} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec // test fixture commands
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
@@ -318,10 +318,10 @@ func writeFiles(t *testing.T, root string, files map[string]string) {
 	t.Helper()
 	for p, c := range files {
 		full := filepath.Join(root, p)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+		if err := os.WriteFile(full, []byte(c), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -390,7 +390,7 @@ func (t *Tree) Walk() {}
 		if m := hit(Query{Text: "walk", Kinds: []string{KindSymbol}}); len(m) != 1 || m[0].Title != "parser.Tree.Walk" {
 			t.Fatalf("method: %+v", m)
 		}
-		if m := hit(Query{Text: "widget renderApp", Kinds: []string{KindSymbol}}); len(m) < 2 || !(m[0].Title == "renderApp" || m[0].Title == "Widget") || !(m[1].Title == "renderApp" || m[1].Title == "Widget") {
+		if m := hit(Query{Text: "widget renderApp", Kinds: []string{KindSymbol}}); len(m) < 2 || !isTS(m[0].Title) || !isTS(m[1].Title) {
 			t.Fatalf("ts symbols: %v", titles(m))
 		}
 		if m := hit(Query{Text: "generator", Kinds: []string{KindSymbol}}); len(m) != 1 {
@@ -477,7 +477,7 @@ func TestProjectID(t *testing.T) {
 	}
 	// A linked worktree shares the project.
 	wt := filepath.Join(t.TempDir(), "wt")
-	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-q", "-b", "feat", wt).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-q", "-b", "feat", wt).CombinedOutput(); err != nil { //nolint:gosec // test fixture command
 		t.Fatalf("%v %s", err, out)
 	}
 	c, _ := ProjectIDForPath(wt)
@@ -569,3 +569,5 @@ func titles(ms []*Memory) []string {
 	}
 	return out
 }
+
+func isTS(title string) bool { return title == "renderApp" || title == "Widget" }
