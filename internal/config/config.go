@@ -126,6 +126,9 @@ type PreviewsConfig struct {
 	HTTPPort     int           `koanf:"http_port" yaml:"http_port"`
 	TraefikImage string        `koanf:"traefik_image" yaml:"traefik_image"`
 	Debounce     time.Duration `koanf:"debounce" yaml:"debounce"`
+	// Roots are extra directories watched for compose projects, in
+	// addition to the session worktrees.
+	Roots []string `koanf:"roots" yaml:"roots"`
 }
 
 // MemoryConfig tunes shared memory.

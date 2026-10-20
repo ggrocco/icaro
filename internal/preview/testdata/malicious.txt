@@ -1,0 +1,119 @@
+Malicious compose fixtures for the lint (05-engineering, security tests).
+Each section is one compose file; the second field of its header is the
+finding ID the lint must report.
+
+-- privileged web/privileged --
+services:
+  web:
+    image: nginx
+    privileged: true
+-- pid-host web/pid --
+services:
+  web:
+    image: nginx
+    pid: host
+-- network-host web/network_mode --
+services:
+  web:
+    image: nginx
+    network_mode: host
+-- ipc-host web/ipc --
+services:
+  web:
+    image: nginx
+    ipc: host
+-- userns-host web/userns_mode --
+services:
+  web:
+    image: nginx
+    userns_mode: host
+-- docker-sock web/volumes/0 --
+services:
+  web:
+    image: nginx
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+-- docker-sock-elsewhere web/volumes/0 --
+services:
+  web:
+    image: nginx
+    volumes:
+      - ./docker.sock:/var/run/docker.sock
+-- etc-mount web/volumes/0 --
+services:
+  web:
+    image: nginx
+    volumes:
+      - type: bind
+        source: /etc
+        target: /host-etc
+-- proc-mount web/volumes/1 --
+services:
+  web:
+    image: nginx
+    volumes:
+      - ./src:/src
+      - /proc:/host-proc
+-- outside-root web/volumes/0 --
+services:
+  web:
+    image: nginx
+    volumes:
+      - ../../../../../../../../../home:/stolen:ro
+-- host-root web/volumes/0 --
+services:
+  web:
+    image: nginx
+    volumes:
+      - /:/host
+-- cap-sys-admin web/cap_add/SYS_ADMIN --
+services:
+  web:
+    image: nginx
+    cap_add: [SYS_ADMIN]
+-- cap-all web/cap_add/ALL --
+services:
+  web:
+    image: nginx
+    cap_add: [ALL]
+-- cap-net-admin-prefixed web/cap_add/NET_ADMIN --
+services:
+  web:
+    image: nginx
+    cap_add: [CAP_NET_ADMIN]
+-- seccomp-unconfined web/security_opt/seccomp_unconfined --
+services:
+  web:
+    image: nginx
+    security_opt: ["seccomp=unconfined"]
+-- apparmor-unconfined web/security_opt/apparmor_unconfined --
+services:
+  web:
+    image: nginx
+    security_opt: ["apparmor:unconfined"]
+-- devices web/devices/_dev_kmsg__dev_kmsg --
+services:
+  web:
+    image: nginx
+    devices: ["/dev/kmsg:/dev/kmsg"]
+-- named-volume-bind volumes/data --
+services:
+  web:
+    image: nginx
+    volumes: [data:/data]
+volumes:
+  data:
+    driver: local
+    driver_opts: {type: none, o: bind, device: /var/lib/docker}
+-- env-interpolation web/volumes/0 --
+services:
+  web:
+    image: nginx
+    volumes: ["${HOME}:/home"]
+-- second-service db/privileged --
+services:
+  web:
+    image: nginx
+  db:
+    image: postgres
+    privileged: true
