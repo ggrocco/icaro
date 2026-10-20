@@ -20,6 +20,7 @@ import (
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
 	"icaro/internal/paths"
+	"icaro/internal/preview"
 	"icaro/internal/runner"
 	"icaro/internal/secrets"
 	"icaro/internal/service"
@@ -44,6 +45,9 @@ type App struct {
 	Secrets *secrets.Store
 	Service *service.Service
 	API     *api.Server
+	// Previews is nil when previews.enabled is false. It implements
+	// session.PreviewHook for the session manager.
+	Previews *preview.Manager
 
 	components []Component
 	checks     []doctor.Check
