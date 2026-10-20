@@ -82,6 +82,12 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 	if fi, err := os.Stat(abs); err != nil || !fi.IsDir() {
 		return nil, fmt.Errorf("%w: %s is not a directory", ErrInvalid, root)
 	}
+	// git reports symlink-resolved paths (macOS: /var -> /private/var), so
+	// resolve ours too or a subtree looks like it is outside the repo and
+	// is ingested as a whole project, dropping every other file's facts.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
 	base := GitTopLevel(abs)
 	prefix, _ := filepath.Rel(base, abs)
 	prefix = filepath.ToSlash(prefix)

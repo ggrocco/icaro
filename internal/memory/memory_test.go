@@ -492,7 +492,13 @@ func TestProjectID(t *testing.T) {
 	if d == a || GitBranch(plain) != "" {
 		t.Fatal("non-repo dir")
 	}
-	if ProjectIDForRoot(plain) != d {
+	// ProjectIDForPath resolves symlinks (macOS temp dirs live under the
+	// /var -> /private/var link); the root hash takes the resolved path.
+	resolved, err := filepath.EvalSymlinks(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ProjectIDForRoot(resolved) != d {
 		t.Fatal("root hash")
 	}
 }
@@ -571,3 +577,41 @@ func titles(ms []*Memory) []string {
 }
 
 func isTS(title string) bool { return title == "renderApp" || title == "Widget" }
+
+// Regression: ingesting a subtree through a symlinked path (every macOS
+// temp dir, any repo reached through a link) must not treat the subtree as
+// the whole project and drop the facts of every other file.
+func TestIngestSubtreeThroughSymlink(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	engines(t, func(t *testing.T, e *Engine) {
+		ctx := context.Background()
+		real := t.TempDir()
+		writeFiles(t, real, map[string]string{
+			"go.mod":       "module demo\n",
+			"lib/lib.go":   "package lib\n\n// Frobnicate does things.\nfunc Frobnicate() {}\n",
+			"docs/note.md": "# Note\n\nAbout gizmos.\n",
+		})
+		gitInit(t, real)
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(real, link); err != nil {
+			t.Skip("symlinks unsupported: ", err)
+		}
+		pid, err := ProjectIDForPath(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := Scope{ProjectID: pid, Origin: OriginIngest}
+		if _, err := e.Ingest(ctx, scope, link, IngestOptions{Commits: -1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.Ingest(ctx, scope, filepath.Join(link, "docs"), IngestOptions{Commits: -1}); err != nil {
+			t.Fatal(err)
+		}
+		res, err := e.Query(ctx, scope, Query{Text: "Frobnicate"})
+		if err != nil || len(res) == 0 {
+			t.Fatalf("subtree ingest through a symlink dropped lib/: %v %d", err, len(res))
+		}
+	})
+}
