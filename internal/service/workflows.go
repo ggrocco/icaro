@@ -2,10 +2,9 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"icaro/internal/store"
 	"icaro/internal/workflow"
@@ -13,17 +12,26 @@ import (
 
 // WorkflowInfo is the API view of a workflow.
 type WorkflowInfo struct {
-	Name         string          `json:"name"`
-	Description  string          `json:"description,omitempty"`
-	Version      int             `json:"version"`
-	Status       string          `json:"status"`
-	WebhookToken string          `json:"webhook_token,omitempty"`
-	Schedules    []string        `json:"schedules,omitempty"`
-	Steps        []string        `json:"steps"`
-	CreatedAt    string          `json:"created_at"`
-	UpdatedAt    string          `json:"updated_at"`
-	YAML         string          `json:"yaml,omitempty"`
-	Spec         json.RawMessage `json:"spec,omitempty"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Version     int                    `json:"version"`
+	Status      string                 `json:"status"`
+	Concurrency string                 `json:"concurrency"`
+	Triggers    []workflow.TriggerSpec `json:"triggers,omitempty"`
+	Steps       []string               `json:"steps"`
+	// TriggerFields are the trigger.* keys the workflow reads; manual
+	// runs must supply the required ones.
+	TriggerFields TriggerFields   `json:"trigger_fields"`
+	CreatedAt     string          `json:"created_at"`
+	UpdatedAt     string          `json:"updated_at"`
+	YAML          string          `json:"yaml,omitempty"`
+	Spec          json.RawMessage `json:"spec,omitempty"`
+}
+
+// TriggerFields lists referenced trigger payload keys.
+type TriggerFields struct {
+	Required []string `json:"required"`
+	Optional []string `json:"optional"`
 }
 
 // VersionInfo is one historical version.
@@ -34,62 +42,65 @@ type VersionInfo struct {
 	YAML      string `json:"yaml,omitempty"`
 }
 
-func (s *Service) validateOptions() workflow.Options {
-	return workflow.Options{
-		MaxTimeout: s.maxTimeout,
-		ConnectionExists: func(name string) bool {
-			_, err := s.store.GetConnection(context.Background(), name)
-			return err == nil
-		},
+const tsFormat = "2006-01-02T15:04:05Z"
+
+func (s *Service) validateOptions(ctx context.Context) workflow.Options {
+	opts := workflow.Options{MaxTimeout: s.maxTimeout, Catalog: s.catalog}
+	if s.secrets != nil {
+		if names, err := s.secrets.Names(ctx); err == nil {
+			set := map[string]bool{}
+			for _, n := range names {
+				set[n] = true
+			}
+			opts.SecretExists = func(n string) bool { return set[n] }
+		}
 	}
+	return opts
 }
 
-// ValidateWorkflow parses and validates YAML without storing it.
-func (s *Service) ValidateWorkflow(_ context.Context, yaml string) (*workflow.Workflow, workflow.Issues, error) {
-	wf, issues, err := workflow.Parse([]byte(yaml), s.validateOptions())
+// ValidateWorkflow parses and validates YAML without storing it. Decode
+// errors are reported as an issue at "/".
+func (s *Service) ValidateWorkflow(ctx context.Context, yaml string) (*workflow.Spec, workflow.Issues, error) {
+	spec, issues, err := workflow.Parse([]byte(yaml), s.validateOptions(ctx))
 	if err != nil {
 		return nil, workflow.Issues{{Path: "/", Message: err.Error()}}, nil
 	}
-	return wf, issues, nil
+	return spec, issues, nil
 }
 
 // ApplyWorkflow validates and stores a workflow as a new version.
 func (s *Service) ApplyWorkflow(ctx context.Context, yaml, actor string) (*WorkflowInfo, error) {
-	wf, issues, err := s.ValidateWorkflow(ctx, yaml)
+	spec, issues, err := s.ValidateWorkflow(ctx, yaml)
 	if err != nil {
 		return nil, err
 	}
 	if len(issues) > 0 {
 		return nil, &ValidationError{Issues: issues}
 	}
-	specJSON, err := json.Marshal(wf)
+	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		return nil, err
 	}
-	w, err := s.store.ApplyWorkflow(ctx, wf.Name, yaml, string(specJSON), actor)
+	w, err := s.store.ApplyWorkflow(ctx, spec.Name, yaml, string(specJSON), actor)
 	if err != nil {
 		return nil, err
-	}
-	if wf.On != nil && wf.On.Webhook != nil && w.WebhookToken == "" {
-		tok := make([]byte, 16)
-		if _, err := rand.Read(tok); err != nil {
-			return nil, err
-		}
-		w.WebhookToken = hex.EncodeToString(tok)
-		if err := s.store.SetWebhook(ctx, w.ID, w.WebhookToken, nil); err != nil {
-			return nil, err
-		}
 	}
 	s.log.Info("workflow applied", "name", w.Name, "version", w.Version, "actor", actor)
-	return s.info(w, wf, true), nil
+	s.changed()
+	return s.info(w, spec, true), nil
 }
 
-// GetWorkflow returns a workflow with its YAML.
-func (s *Service) GetWorkflow(ctx context.Context, name string) (*WorkflowInfo, error) {
+func (s *Service) lookup(ctx context.Context, name string) (*store.Workflow, error) {
 	w, err := s.store.GetWorkflow(ctx, name)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotFound
 	}
+	return w, err
+}
+
+// GetWorkflow returns a workflow with its YAML.
+func (s *Service) GetWorkflow(ctx context.Context, name string) (*WorkflowInfo, error) {
+	w, err := s.lookup(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -109,16 +120,36 @@ func (s *Service) ListWorkflows(ctx context.Context) ([]*WorkflowInfo, error) {
 	return out, nil
 }
 
+// ActiveSpecs returns the specs of all active workflows (trigger routing
+// and the scheduler).
+func (s *Service) ActiveSpecs(ctx context.Context) ([]*workflow.Spec, error) {
+	ws, err := s.store.ActiveWorkflows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*workflow.Spec, 0, len(ws))
+	for _, w := range ws {
+		spec, err := decodeSpec(w.SpecJSON)
+		if err != nil {
+			s.log.Warn("skip workflow with undecodable spec", "workflow", w.Name, "err", err)
+			continue
+		}
+		out = append(out, spec)
+	}
+	return out, nil
+}
+
 // DeleteWorkflow removes a workflow definition (runs are kept).
 func (s *Service) DeleteWorkflow(ctx context.Context, name string) error {
-	w, err := s.store.GetWorkflow(ctx, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return ErrNotFound
-	}
+	w, err := s.lookup(ctx, name)
 	if err != nil {
 		return err
 	}
-	return s.store.DeleteWorkflow(ctx, w.ID)
+	if err := s.store.DeleteWorkflow(ctx, w.ID); err != nil {
+		return err
+	}
+	s.changed()
+	return nil
 }
 
 // SetWorkflowStatus enables or disables a workflow.
@@ -126,22 +157,20 @@ func (s *Service) SetWorkflowStatus(ctx context.Context, name, status string) er
 	if status != store.WorkflowActive && status != store.WorkflowDisabled {
 		return badRequest("status must be active or disabled")
 	}
-	w, err := s.store.GetWorkflow(ctx, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return ErrNotFound
-	}
+	w, err := s.lookup(ctx, name)
 	if err != nil {
 		return err
 	}
-	return s.store.SetWorkflowStatus(ctx, w.ID, status)
+	if err := s.store.SetWorkflowStatus(ctx, w.ID, status); err != nil {
+		return err
+	}
+	s.changed()
+	return nil
 }
 
 // ListWorkflowVersions returns version history, newest first.
 func (s *Service) ListWorkflowVersions(ctx context.Context, name string) ([]VersionInfo, error) {
-	w, err := s.store.GetWorkflow(ctx, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, ErrNotFound
-	}
+	w, err := s.lookup(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -151,17 +180,14 @@ func (s *Service) ListWorkflowVersions(ctx context.Context, name string) ([]Vers
 	}
 	out := make([]VersionInfo, 0, len(vs))
 	for _, v := range vs {
-		out = append(out, VersionInfo{Version: v.Version, Actor: v.Actor, CreatedAt: v.CreatedAt.UTC().Format("2006-01-02T15:04:05Z")})
+		out = append(out, VersionInfo{Version: v.Version, Actor: v.Actor, CreatedAt: v.CreatedAt.UTC().Format(tsFormat)})
 	}
 	return out, nil
 }
 
 // GetWorkflowVersion returns one version with its YAML.
 func (s *Service) GetWorkflowVersion(ctx context.Context, name string, version int) (*VersionInfo, error) {
-	w, err := s.store.GetWorkflow(ctx, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, ErrNotFound
-	}
+	w, err := s.lookup(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -172,25 +198,30 @@ func (s *Service) GetWorkflowVersion(ctx context.Context, name string, version i
 	if err != nil {
 		return nil, err
 	}
-	return &VersionInfo{Version: v.Version, Actor: v.Actor, CreatedAt: v.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"), YAML: v.SpecYAML}, nil
+	return &VersionInfo{Version: v.Version, Actor: v.Actor, CreatedAt: v.CreatedAt.UTC().Format(tsFormat), YAML: v.SpecYAML}, nil
 }
 
-func (s *Service) info(w *store.Workflow, wf *workflow.Workflow, full bool) *WorkflowInfo {
-	if wf == nil {
-		wf = &workflow.Workflow{}
-		_ = json.Unmarshal([]byte(w.SpecJSON), wf)
+func decodeSpec(specJSON string) (*workflow.Spec, error) {
+	var spec workflow.Spec
+	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
+		return nil, err
 	}
-	info := &WorkflowInfo{
-		Name: w.Name, Description: wf.Description, Version: w.Version, Status: w.Status, WebhookToken: w.WebhookToken,
-		CreatedAt: w.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"), UpdatedAt: w.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-	}
-	for _, st := range wf.Steps {
-		info.Steps = append(info.Steps, st.Name)
-	}
-	if wf.On != nil {
-		for _, sc := range wf.On.Schedule {
-			info.Schedules = append(info.Schedules, sc.Cron)
+	return &spec, nil
+}
+
+func (s *Service) info(w *store.Workflow, spec *workflow.Spec, full bool) *WorkflowInfo {
+	if spec == nil {
+		spec, _ = decodeSpec(w.SpecJSON)
+		if spec == nil {
+			spec = &workflow.Spec{}
 		}
+	}
+	req, opt := workflow.TriggerFields(spec)
+	info := &WorkflowInfo{
+		Name: w.Name, Description: spec.Description, Version: w.Version, Status: w.Status,
+		Concurrency: spec.ConcurrencyPolicy(), Triggers: spec.Triggers, Steps: spec.StepIDs(),
+		TriggerFields: TriggerFields{Required: orEmpty(req), Optional: orEmpty(opt)},
+		CreatedAt:     w.CreatedAt.UTC().Format(tsFormat), UpdatedAt: w.UpdatedAt.UTC().Format(tsFormat),
 	}
 	if full {
 		info.YAML = w.SpecYAML
@@ -199,15 +230,17 @@ func (s *Service) info(w *store.Workflow, wf *workflow.Workflow, full bool) *Wor
 	return info
 }
 
-// stepNames extracts step names from stored spec JSON.
-func stepNames(specJSON string) ([]string, *workflow.Workflow, error) {
-	var wf workflow.Workflow
-	if err := json.Unmarshal([]byte(specJSON), &wf); err != nil {
-		return nil, nil, err
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
 	}
-	names := make([]string, len(wf.Steps))
-	for i, st := range wf.Steps {
-		names[i] = st.Name
+	return s
+}
+
+func tsp(t *time.Time) *string {
+	if t == nil {
+		return nil
 	}
-	return names, &wf, nil
+	v := t.UTC().Format(time.RFC3339)
+	return &v
 }

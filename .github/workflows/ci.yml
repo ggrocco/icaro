@@ -41,7 +41,17 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go generate ./... && git diff --exit-code
+      - name: CLI reference is up to date
+        run: go run ./hack/gendocs -check
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
+      # The latency target (ADR 0020) is skipped under -race; check it here.
+      - name: memory search latency (10k documents)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -count=1 -run QueryLatency10k ./internal/memory
+      # Phase 11 load budget at full size: 500 runs x 5 steps, 200 SSE streams.
+      - name: load tests
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -count=1 -tags load -run Load ./internal/workflow/engine ./internal/api
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - uses: actions/upload-artifact@v4
@@ -60,6 +70,58 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: cd web && npm ci && npm run typecheck && npm test && npm run build
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: npm production dependency licenses
+        run: go run ./hack/licenses -npm web -out web/THIRD_PARTY_LICENSES.md -check
+
+  audit:
+    # Dependency/license audit (Phase 11): every module linked into the
+    # binary has an allowed license and THIRD_PARTY_LICENSES.md is current;
+    # govulncheck reports known vulnerabilities in reachable code.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Go module licenses
+        run: go run ./hack/licenses -check
+      # Vulnerabilities are checked against the current patch release, the
+      # toolchain releases should be built with.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  e2e:
+    # Critical flows only (05-engineering): create, run and cancel a
+    # workflow from the UI against a real daemon and Docker engine.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make web build
+      - name: quickstart (docs/quickstart.md against a real daemon and Docker)
+        run: go test -count=1 -tags e2e ./hack/quickstart
+      - run: cd web && npx playwright install --with-deps chromium
+      - run: cd web && npx playwright test
+      - name: session spine (worktree -> container -> preview -> memory)
+        run: go test -count=1 -tags e2e ./hack/e2e/
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: web/test-results
 
   build:
     runs-on: ubuntu-latest

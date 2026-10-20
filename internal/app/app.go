@@ -16,13 +16,18 @@ import (
 
 	"icaro/internal/api"
 	"icaro/internal/config"
+	"icaro/internal/container"
 	"icaro/internal/container/docker"
+	"icaro/internal/creds"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
+	"icaro/internal/mcp"
+	"icaro/internal/memory"
 	"icaro/internal/paths"
-	"icaro/internal/runner"
+	"icaro/internal/preview"
 	"icaro/internal/secrets"
 	"icaro/internal/service"
+	"icaro/internal/session"
 	"icaro/internal/store"
 )
 
@@ -40,10 +45,24 @@ type App struct {
 	Layout  paths.Layout
 	Store   *store.Store
 	Key     *crypto.Key
+	KeyInfo secrets.KeyInfo
 	Docker  *docker.Engine
 	Secrets *secrets.Store
-	Service *service.Service
-	API     *api.Server
+	// Sessions is the session spine (wired by internal/app/sessions.go).
+	Sessions *session.Manager
+	Egress   *container.DockerEgress
+	Images   *container.Images
+	Homes    *creds.Homes
+	Service  *service.Service
+	API      *api.Server
+	// Previews is nil when previews.enabled is false. It implements
+	// session.PreviewHook for the session manager.
+	Previews *preview.Manager
+	Memory   *memory.Engine
+	MCP      *mcp.Server // host MCP server at /mcp; Phase 4 adds authoring tools
+	// Workflows holds the workflow engine and the collaborators earlier
+	// wirers provide to it (see internal/app/workflows.go).
+	Workflows WorkflowWiring
 
 	components []Component
 	checks     []doctor.Check
@@ -67,12 +86,16 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		_ = a.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	key, err := crypto.LoadMasterKey(a.Layout.Secrets(), true)
+	// The daemon cannot prompt: the fallback file needs ICARO_PASSWORD.
+	key, keyInfo, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: a.Layout.Secrets(), Keyring: secrets.DefaultKeyring(nil), Create: true})
 	if err != nil {
 		_ = a.Close()
 		return nil, err
 	}
-	a.Key = key
+	a.Key, a.KeyInfo = key, keyInfo
+	if keyInfo.Warning != "" {
+		log.Warn("master key", "warning", keyInfo.Warning)
+	}
 
 	eng, err := docker.New(cfg.Docker.Host)
 	if err != nil {
@@ -82,20 +105,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	a.Docker = eng
 	a.closers = append(a.closers, eng.Close)
 
-	rn := runner.New(runner.Config{
-		RunnerID:      "daemon",
-		Concurrency:   cfg.Workflows.Concurrency,
-		StepTimeout:   cfg.Limits.Timeout,
-		MemoryBytes:   cfg.Limits.MemoryMB << 20,
-		NanoCPUs:      int64(cfg.Limits.CPUs * 1e9),
-		Pids:          cfg.Limits.Pids,
-		NoFile:        cfg.Limits.NoFile,
-		StrictRuntime: cfg.Docker.StrictRuntime,
-		LogsDir:       a.Layout.Logs(),
-	}, st, eng, nil, nil, log)
-	a.Service = service.New(service.Options{Store: st, Key: key, Runner: rn, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Log: log})
+	// The workflow engine is attached by the "workflows" wirer
+	// (internal/app/workflows.go).
+	a.Service = service.New(service.Options{Store: st, Key: key, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Log: log})
 	a.API = api.New(a.Service, log)
-	a.Add(&dockerGated{name: "workflow-runner", docker: eng, log: log, run: rn.Run})
 
 	a.checks = append(a.checks, BaseChecks(cfg, st, eng)...)
 	for _, w := range sortedWirers() {

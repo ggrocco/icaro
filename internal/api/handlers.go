@@ -36,7 +36,7 @@ func (s *Server) handleApplyWorkflow(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	info, err := s.svc.ApplyWorkflow(r.Context(), yaml, "token:"+TokenFrom(r.Context()).Name)
+	info, err := s.svc.ApplyWorkflow(r.Context(), yaml, actor(r))
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -124,20 +124,27 @@ func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-func (s *Server) handleEnqueueRun(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Input map[string]any `json:"input"`
+		Trigger map[string]any `json:"trigger"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		s.writeError(w, err)
 		return
 	}
-	run, err := s.svc.EnqueueRun(r.Context(), r.PathValue("name"), in.Input, service.EnqueueOptions{})
+	run, err := s.svc.StartRun(r.Context(), r.PathValue("name"), in.Trigger, actor(r))
 	if err != nil {
 		s.writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)
+}
+
+func actor(r *http.Request) string {
+	if t := TokenFrom(r.Context()); t != nil {
+		return "token:" + t.Name
+	}
+	return ""
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
@@ -171,52 +178,19 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+// handleStepLogs serves a step attempt's log as text: ?attempt= (default
+// latest), ?offset= to continue from a byte offset, ?tail= for the last N
+// bytes. X-Icaro-Log-Offset / X-Icaro-Log-Size describe the slice.
 func (s *Server) handleStepLogs(w http.ResponseWriter, r *http.Request) {
-	idx, err := strconv.Atoi(r.PathValue("idx"))
-	if err != nil {
-		s.writeError(w, &service.BadRequest{Msg: "step index must be an integer"})
-		return
-	}
-	b, err := s.svc.StepLogs(r.Context(), r.PathValue("id"), idx, int64(queryInt(r, "tail", 0)))
+	page, err := s.svc.StepLogs(r.Context(), r.PathValue("id"), r.PathValue("step"),
+		queryInt(r, "attempt", 0), int64(queryInt(r, "offset", 0)), int64(queryInt(r, "tail", 0)))
 	if err != nil {
 		s.writeError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write(b)
-}
-
-func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
-	out, err := s.svc.ListConnections(r.Context())
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"connections": out})
-}
-
-func (s *Server) handleUpsertConnection(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name   string            `json:"name"`
-		Type   string            `json:"type"`
-		Fields map[string]string `json:"fields"`
-	}
-	if err := readJSON(r, &in); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	info, err := s.svc.UpsertConnection(r.Context(), in.Name, in.Type, in.Fields)
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, info)
-}
-
-func (s *Server) handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.DeleteConnection(r.Context(), r.PathValue("name")); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("X-Icaro-Log-Offset", strconv.FormatInt(page.Offset, 10))
+	w.Header().Set("X-Icaro-Log-Size", strconv.FormatInt(page.Size, 10))
+	w.Header().Set("X-Icaro-Log-Attempt", strconv.Itoa(page.Attempt))
+	_, _ = w.Write(page.Data)
 }

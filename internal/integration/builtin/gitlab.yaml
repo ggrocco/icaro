@@ -1,0 +1,90 @@
+# GitLab: project webhooks (shared secret X-Gitlab-Token) and REST actions.
+# Credentials: gitlab.webhook_secret, gitlab.token (personal/project access
+# token, bound to gitlab.com or your instance).
+version: 1
+name: gitlab
+description: GitLab merge requests, pushes and notes.
+hosts: [gitlab.com]
+config:
+  base_url:
+    default: https://gitlab.com/api/v4
+    description: API base URL; set integrations.gitlab.base_url for a self-managed instance.
+auth:
+  token: { kind: header, header: PRIVATE-TOKEN, credential: token }
+triggers:
+  verify: { kind: shared-secret, header: X-Gitlab-Token }
+  delivery_id: "${{ headers['x-gitlab-event-uuid'] }}"
+  events:
+    merge_request.opened:
+      description: A merge request was opened.
+      match: "body.object_kind == 'merge_request' && body.object_attributes.action == 'open'"
+      payload: &mr
+        action: "${{ body.object_attributes.action }}"
+        project: "${{ body.project.path_with_namespace }}"
+        project_id: "${{ body.project.id }}"
+        mr_iid: "${{ body.object_attributes.iid }}"
+        title: "${{ body.object_attributes.title }}"
+        source_branch: "${{ body.object_attributes.source_branch }}"
+        target_branch: "${{ body.object_attributes.target_branch }}"
+        sha: "${{ body.object_attributes.last_commit.id }}"
+        author: "${{ body.user.username }}"
+        url: "${{ body.object_attributes.url }}"
+    merge_request.updated:
+      description: A merge request was updated (new commits, title, labels...).
+      match: "body.object_kind == 'merge_request' && body.object_attributes.action == 'update'"
+      payload: *mr
+    merge_request.merged:
+      description: A merge request was merged.
+      match: "body.object_kind == 'merge_request' && body.object_attributes.action == 'merge'"
+      payload: *mr
+    merge_request.closed:
+      description: A merge request was closed without merging.
+      match: "body.object_kind == 'merge_request' && body.object_attributes.action == 'close'"
+      payload: *mr
+    push:
+      description: Commits were pushed.
+      match: "body.object_kind == 'push'"
+      payload:
+        project: "${{ body.project.path_with_namespace }}"
+        project_id: "${{ body.project.id }}"
+        ref: "${{ body.ref }}"
+        before: "${{ body.before }}"
+        after: "${{ body.after }}"
+        user: "${{ body.user_username }}"
+        commit_count: "${{ body.total_commits_count }}"
+    note.created:
+      description: A comment was added to a commit, issue, merge request or snippet.
+      match: "body.object_kind == 'note'"
+      payload: &note
+        project: "${{ body.project.path_with_namespace }}"
+        project_id: "${{ body.project.id }}"
+        noteable_type: "${{ body.object_attributes.noteable_type }}"
+        note: "${{ body.object_attributes.note }}"
+        author: "${{ body.user.username }}"
+        url: "${{ body.object_attributes.url }}"
+    note.merge_request:
+      description: A comment was added to a merge request.
+      match: "body.object_kind == 'note' && body.object_attributes.noteable_type == 'MergeRequest'"
+      payload:
+        project: "${{ body.project.path_with_namespace }}"
+        project_id: "${{ body.project.id }}"
+        mr_iid: "${{ body.merge_request.iid }}"
+        note: "${{ body.object_attributes.note }}"
+        author: "${{ body.user.username }}"
+        url: "${{ body.object_attributes.url }}"
+actions:
+  create-mr-note:
+    description: Comment on a merge request.
+    inputs:
+      project_id: { type: number, required: true, description: Numeric project id (trigger.project_id). }
+      mr_iid: { type: number, required: true }
+      body: { type: string, required: true }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/projects/${{ input.project_id }}/merge_requests/${{ input.mr_iid }}/notes"
+      auth: token
+      body:
+        json: { body: "${{ input.body }}" }
+    expect_status: [201]
+    outputs:
+      id: "${{ response.body.id }}"

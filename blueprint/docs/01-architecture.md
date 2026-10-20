@@ -116,7 +116,7 @@ Images are free to choose; the engine never bakes credentials into them. Agent c
 | Channel | Mechanism |
 |---|---|
 | Inputs | `ICARO_INPUT_<NAME>` environment variables plus `/icaro/input.json`, holding the step's resolved `input` |
-| Outputs | The step writes a JSON object to `/icaro/output.json`, capped at 1 MiB. Each declared `outputs` entry says how its value is captured, per the schema (a JSON path into that file, stdout, or another file) |
+| Outputs | The step writes a JSON object to `/icaro/output.json`, capped at 1 MiB. Each declared `outputs` entry names its source: `json:<path>` into that file, `stdout`, `stdout:last-line`, or `file:<path under /workspace>` ([ADR 0013](adr/0013-workflow-execution-semantics.md)) |
 | Files | `/workspace` — the run's worktree, shared by the steps of that run |
 | Status | Exit code `0` = success |
 | Logs | stdout/stderr, captured and secret-redacted |
@@ -124,7 +124,7 @@ Images are free to choose; the engine never bakes credentials into them. Agent c
 
 Agent CLIs run headless in workflows: non-interactive mode, prompt in, transcript to the logs, structured result to `/icaro/output.json`.
 
-Two contract details are still open (see [open items](02-decisions-risks.md#open-items)): the `when` grammar, and how an `image` step maps onto a session.
+The `when` grammar is [ADR 0009](adr/0009-expression-language.md), the mapping of an `image` step onto a session is [ADR 0010](adr/0010-run-sessions.md), and dependency, retry, restart and concurrency semantics are [ADR 0013](adr/0013-workflow-execution-semantics.md).
 
 Executor:
 
@@ -137,11 +137,11 @@ Executor:
 ## 7. Previews
 
 - A watcher observes the configured root; each directory with a `compose.yaml` or `docker-compose.yml` becomes a candidate.
-- Safe name: a slug of the path plus a short hash to avoid collisions; a human-readable hostname `slug.test` only when it does not collide.
+- Safe name: a slug of the path plus a short hash to avoid collisions; a human-readable hostname `slug.localhost` (or `slug.<previews.domain>`) only when it does not collide ([ADR 0018](adr/0018-preview-naming-and-lint-overrides.md)).
 - Proxy: Traefik as a container managed by Ícaro, connected to a dedicated external network `icaro-preview`.
 - Port discovery: requires the `icaro.preview.port` label; falls back to `80` only if unambiguous. Do not guess exposed ports.
-- Routing: Ícaro generates a Compose override with Traefik labels, without editing the user's compose. The compose file itself must pass the [compose lint](03-security.md#mandatory-policies).
-- `.test`: installs local resolution via dnsmasq/CoreDNS only with consent; a predictable alternative is `http://localhost:<port>`.
+- Routing: Ícaro generates a Compose override that joins the routed service to `icaro-preview` under a stable alias, without editing the user's compose, and writes a Traefik file-provider route for it; Traefik never sees the Docker socket ([ADR 0017](adr/0017-preview-proxy-file-provider.md)). The compose file itself must pass the [compose lint](03-security.md#mandatory-policies).
+- Hostnames default to `*.localhost`, which resolves to loopback without setup; `.test` is opt-in (`previews.domain: test`) and needs a resolver the user configures, which `icaro doctor` checks. `curl -H 'Host: <host>' http://127.0.0.1:<port>/` always works.
 - Public HTTPS: a custom domain + a supported DNS provider; a wildcard cert with DNS-01. Never promise Let's Encrypt for `.test`.
 
 **Container↔preview seam** (the hardest integration, owned by `session`). When the agent edits code inside its own container, the preview must reflect the change:

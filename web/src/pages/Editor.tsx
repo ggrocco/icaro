@@ -36,7 +36,7 @@ export function Editor({ name, initial, onSaved }: Props) {
   const [saveError, setSaveError] = useState<Error | undefined>();
   const [saved, setSaved] = useState(false);
   const schema = useLoad(api.schema, []);
-  const integrations = useLoad(api.integrations, []);
+  const integrations = useLoad(api.integrationDetails, []);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {

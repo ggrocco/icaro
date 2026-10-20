@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
-	"icaro/internal/logs"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
+	"icaro/internal/workflow/engine"
+	"icaro/internal/workflow/events"
 )
 
 // RunInfo is the API view of a run.
@@ -18,8 +22,12 @@ type RunInfo struct {
 	Workflow    string          `json:"workflow"`
 	Version     int             `json:"version"`
 	Status      string          `json:"status"`
-	Trigger     string          `json:"trigger"`
-	Input       json.RawMessage `json:"input"`
+	TriggerKind string          `json:"trigger_kind"`
+	Trigger     json.RawMessage `json:"trigger"`
+	Concurrency string          `json:"concurrency"`
+	SessionID   string          `json:"session_id,omitempty"`
+	DeliveryID  string          `json:"delivery_id,omitempty"`
+	Actor       string          `json:"actor,omitempty"`
 	RootRunID   string          `json:"root_run_id"`
 	ParentRunID string          `json:"parent_run_id,omitempty"`
 	Error       string          `json:"error,omitempty"`
@@ -29,10 +37,11 @@ type RunInfo struct {
 	Steps       []StepInfo      `json:"steps,omitempty"`
 }
 
-// StepInfo is the API view of a run step.
+// StepInfo is the API view of a step of a run.
 type StepInfo struct {
-	Idx        int             `json:"idx"`
-	Name       string          `json:"name"`
+	ID         string          `json:"id"`
+	Kind       string          `json:"kind"`
+	Needs      []string        `json:"needs"`
 	Status     string          `json:"status"`
 	Attempt    int             `json:"attempt"`
 	ExitCode   *int            `json:"exit_code,omitempty"`
@@ -43,80 +52,139 @@ type StepInfo struct {
 	FinishedAt *string         `json:"finished_at,omitempty"`
 }
 
-// EnqueueOptions parameterize a new run.
-type EnqueueOptions struct {
-	Trigger string
-	Parent  *store.Run
+// Terminal reports whether a run status is final.
+func Terminal(status string) bool {
+	switch status {
+	case store.RunSucceeded, store.RunFailed, store.RunCancelled:
+		return true
+	}
+	return false
 }
 
-// EnqueueRun validates input against the workflow's declared inputs and
-// creates a queued run.
-func (s *Service) EnqueueRun(ctx context.Context, name string, input map[string]any, opts EnqueueOptions) (*RunInfo, error) {
-	w, err := s.store.GetWorkflow(ctx, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, ErrNotFound
-	}
+// EnqueueRun starts a run (workflow.Enqueuer). It deduplicates on the
+// idempotency key and applies the workflow's concurrency policy: forbid
+// skips while a run is active, queue waits for the active run, replace
+// cancels active runs first, allow runs side by side.
+func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (workflow.EnqueueResult, error) {
+	w, err := s.lookup(ctx, req.Workflow)
 	if err != nil {
-		return nil, err
+		return workflow.EnqueueResult{}, err
 	}
 	if w.Status != store.WorkflowActive {
-		return nil, badRequest("workflow %q is %s", name, w.Status)
+		return workflow.EnqueueResult{}, badRequest("workflow %q is %s", w.Name, w.Status)
 	}
-	names, wf, err := stepNames(w.SpecJSON)
-	if err != nil {
-		return nil, err
-	}
-	if input == nil {
-		input = map[string]any{}
-	}
-	if err := applyInputs(wf, input); err != nil {
-		return nil, err
-	}
-	in, err := json.Marshal(input)
-	if err != nil {
-		return nil, err
-	}
-	trigger := opts.Trigger
-	if trigger == "" {
-		trigger = store.TriggerAPI
-	}
-	run := &store.Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: w.Version, TriggerKind: trigger, InputJSON: string(in)}
-	if opts.Parent != nil {
-		run.ParentRunID = opts.Parent.ID
-		run.RootRunID = opts.Parent.RootRunID
-		run.Depth = opts.Parent.Depth + 1
-		if run.Depth > 5 {
-			return nil, badRequest("run chain depth exceeds 5")
+	if req.IdempotencyKey != "" {
+		if prev, err := s.store.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
+			return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true}, nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return workflow.EnqueueResult{}, err
 		}
 	}
-	if err := s.store.CreateRun(ctx, run, names); err != nil {
-		return nil, err
+	spec, err := decodeSpec(w.SpecJSON)
+	if err != nil {
+		return workflow.EnqueueResult{}, err
+	}
+	policy := spec.ConcurrencyPolicy()
+	switch policy {
+	case workflow.ConcurrencyForbid:
+		active, err := s.store.ActiveRuns(ctx, w.ID)
+		if err != nil {
+			return workflow.EnqueueResult{}, err
+		}
+		if len(active) > 0 {
+			reason := fmt.Sprintf("concurrency forbid: run %s is %s", active[0].ID, active[0].Status)
+			s.log.Info("run skipped", "workflow", w.Name, "reason", reason)
+			return workflow.EnqueueResult{Skipped: reason}, nil
+		}
+	case workflow.ConcurrencyReplace:
+		active, err := s.store.ActiveRuns(ctx, w.ID)
+		if err != nil {
+			return workflow.EnqueueResult{}, err
+		}
+		for _, r := range active {
+			if _, err := s.CancelRun(ctx, r.ID); err != nil {
+				return workflow.EnqueueResult{}, err
+			}
+		}
+	}
+	steps, err := engine.StepInits(spec)
+	if err != nil {
+		return workflow.EnqueueResult{}, err
+	}
+	trigger := req.Trigger
+	if trigger == nil {
+		trigger = map[string]any{}
+	}
+	tj, err := json.Marshal(trigger)
+	if err != nil {
+		return workflow.EnqueueResult{}, badRequest("trigger payload: %v", err)
+	}
+	kind := req.TriggerKind
+	if kind == "" {
+		kind = workflow.RunTriggerManual
+	}
+	run := &store.Run{
+		WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: w.Version, TriggerKind: kind, TriggerJSON: string(tj),
+		IdempotencyKey: req.IdempotencyKey, Concurrency: policy, DeliveryID: req.DeliveryID, Actor: req.Actor,
+	}
+	if err := s.store.CreateRun(ctx, run, steps); err != nil {
+		if errors.Is(err, store.ErrConflict) && req.IdempotencyKey != "" {
+			if prev, err := s.store.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
+				return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true}, nil
+			}
+		}
+		return workflow.EnqueueResult{}, err
 	}
 	if s.runner != nil {
 		s.runner.Wake()
 	}
-	s.log.Info("run queued", "run", run.ID, "workflow", w.Name, "trigger", trigger)
-	return s.GetRun(ctx, run.ID)
+	s.events.Publish(events.Event{Type: events.TypeRun, RunID: run.ID, Status: store.RunQueued})
+	s.log.Info("run queued", "run", run.ID, "workflow", w.Name, "trigger", kind, "policy", policy)
+	return workflow.EnqueueResult{RunID: run.ID}, nil
 }
 
-// applyInputs fills defaults and checks required inputs.
-func applyInputs(wf *workflow.Workflow, input map[string]any) error {
-	for name, def := range wf.Inputs {
-		if _, ok := input[name]; ok {
-			continue
-		}
-		if def.Default != nil {
-			input[name] = def.Default
-			continue
-		}
-		if def.Required {
-			return badRequest("missing required input %q", name)
+// MissingTriggerFieldsError lists required trigger fields a manual run
+// did not supply.
+type MissingTriggerFieldsError struct {
+	Fields []string
+}
+
+func (e *MissingTriggerFieldsError) Error() string {
+	return "missing trigger field(s): " + strings.Join(e.Fields, ", ")
+}
+
+// StartRun is a manual run: every trigger.* field the workflow requires
+// must be supplied (the CLI prompts for them).
+func (s *Service) StartRun(ctx context.Context, name string, trigger map[string]any, actor string) (*RunInfo, error) {
+	w, err := s.lookup(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := decodeSpec(w.SpecJSON)
+	if err != nil {
+		return nil, err
+	}
+	req, _ := workflow.TriggerFields(spec)
+	var missing []string
+	for _, f := range req {
+		if _, ok := trigger[f]; !ok {
+			missing = append(missing, f)
 		}
 	}
-	return nil
+	if len(missing) > 0 {
+		return nil, &MissingTriggerFieldsError{Fields: missing}
+	}
+	res, err := s.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: name, TriggerKind: workflow.RunTriggerManual, Trigger: trigger, Actor: actor})
+	if err != nil {
+		return nil, err
+	}
+	if res.Skipped != "" {
+		return nil, &Conflict{Msg: res.Skipped}
+	}
+	return s.GetRun(ctx, res.RunID)
 }
 
-// GetRun returns a run with its steps.
+// GetRun returns a run with its steps in plan order.
 func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 	r, err := s.store.GetRun(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -125,15 +193,23 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	steps, err := s.store.GetRunSteps(ctx, id)
+	steps, err := s.store.GetStepRuns(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	needs := map[string][]string{}
+	if v, err := s.store.GetWorkflowVersion(ctx, r.WorkflowID, r.WorkflowVersion); err == nil {
+		if spec, _, err := workflow.Parse([]byte(v.SpecYAML), workflow.Options{}); err == nil && spec != nil {
+			for _, st := range spec.Steps {
+				needs[st.ID] = st.Needs
+			}
+		}
 	}
 	info := runInfo(r)
 	for _, st := range steps {
 		info.Steps = append(info.Steps, StepInfo{
-			Idx: st.Idx, Name: st.Name, Status: st.Status, Attempt: st.Attempt, ExitCode: st.ExitCode,
-			Outputs: json.RawMessage(orJSON(st.OutputJSON)), Error: st.Error, LogSize: st.LogSize,
+			ID: st.StepID, Kind: st.Kind, Needs: orEmpty(needs[st.StepID]), Status: st.Status, Attempt: st.Attempt, ExitCode: st.ExitCode,
+			Outputs: json.RawMessage(orJSON(st.OutputsJSON)), Error: st.Error, LogSize: st.LogSize,
 			StartedAt: tsp(st.StartedAt), FinishedAt: tsp(st.FinishedAt),
 		})
 	}
@@ -144,10 +220,7 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 func (s *Service) ListRuns(ctx context.Context, workflowName, status string, limit int) ([]*RunInfo, error) {
 	f := store.RunFilter{Status: status, Limit: limit}
 	if workflowName != "" {
-		w, err := s.store.GetWorkflow(ctx, workflowName)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, ErrNotFound
-		}
+		w, err := s.lookup(ctx, workflowName)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +237,7 @@ func (s *Service) ListRuns(ctx context.Context, workflowName, status string, lim
 	return out, nil
 }
 
-// CancelRun requests cancellation.
+// CancelRun requests cancellation; the engine kills running containers.
 func (s *Service) CancelRun(ctx context.Context, id string) (*RunInfo, error) {
 	r, err := s.store.RequestCancel(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -176,50 +249,97 @@ func (s *Service) CancelRun(ctx context.Context, id string) (*RunInfo, error) {
 	if r.Status == store.RunRunning && s.runner != nil {
 		s.runner.Cancel(id)
 	}
+	if r.Status == store.RunCancelled {
+		s.events.Publish(events.Event{Type: events.TypeRun, RunID: id, Status: store.RunCancelled})
+	}
 	return s.GetRun(ctx, id)
 }
 
-// StepLogs returns up to tailBytes from the end of a step's log.
-func (s *Service) StepLogs(ctx context.Context, id string, idx int, tailBytes int64) ([]byte, error) {
-	st, err := s.store.GetRunStep(ctx, id, idx)
+// LogPage is a slice of a step attempt's log.
+type LogPage struct {
+	Data    []byte
+	Offset  int64 // file offset of Data[0]
+	Size    int64 // file size when read
+	Attempt int
+}
+
+// StepLogs reads a step attempt's log (attempt 0 = latest) from offset,
+// or its last tail bytes when tail > 0.
+func (s *Service) StepLogs(ctx context.Context, runID, stepID string, attempt int, offset, tail int64) (*LogPage, error) {
+	st, err := s.store.GetStepRun(ctx, runID, stepID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if st.LogPath == "" {
-		return nil, nil
+	if attempt <= 0 {
+		attempt = st.Attempt
 	}
-	if tailBytes <= 0 {
-		tailBytes = 1 << 20
+	page := &LogPage{Attempt: attempt}
+	if attempt <= 0 || st.LogPath == "" {
+		return page, nil
 	}
-	b, err := logs.Tail(st.LogPath, tailBytes)
+	path := st.LogPath
+	if attempt != st.Attempt {
+		path = strings.TrimSuffix(path, fmt.Sprintf(".%d.log", st.Attempt)) + fmt.Sprintf(".%d.log", attempt)
+	}
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return page, nil
 	}
-	return b, err
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	page.Size = fi.Size()
+	const maxPage = 4 << 20
+	start := offset
+	if tail > 0 {
+		start = max(page.Size-tail, 0)
+	}
+	if start < 0 || start > page.Size {
+		start = page.Size
+	}
+	n := min(page.Size-start, maxPage)
+	page.Offset = start
+	page.Data = make([]byte, n)
+	if _, err := f.ReadAt(page.Data, start); err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if tail > 0 && start > 0 {
+		// Start at a line boundary.
+		if i := strings.IndexByte(string(page.Data), '\n'); i >= 0 {
+			page.Data, page.Offset = page.Data[i+1:], start+int64(i+1)
+		}
+	}
+	return page, nil
+}
+
+// SubscribeRun follows a run's events.
+func (s *Service) SubscribeRun(runID string) (*events.Subscription, error) {
+	if s.events == nil {
+		return nil, errors.New("run events are not available")
+	}
+	return s.events.Subscribe(runID), nil
 }
 
 func runInfo(r *store.Run) *RunInfo {
 	return &RunInfo{
-		ID: r.ID, Workflow: r.WorkflowName, Version: r.WorkflowVersion, Status: r.Status, Trigger: r.TriggerKind,
-		Input: json.RawMessage(orJSON(r.InputJSON)), RootRunID: r.RootRunID, ParentRunID: r.ParentRunID, Error: r.Error,
+		ID: r.ID, Workflow: r.WorkflowName, Version: r.WorkflowVersion, Status: r.Status, TriggerKind: r.TriggerKind,
+		Trigger: json.RawMessage(orJSON(r.TriggerJSON)), Concurrency: r.Concurrency, SessionID: r.SessionID,
+		DeliveryID: r.DeliveryID, Actor: r.Actor, RootRunID: r.RootRunID, ParentRunID: r.ParentRunID, Error: r.Error,
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), StartedAt: tsp(r.StartedAt), FinishedAt: tsp(r.FinishedAt),
 	}
 }
 
 func orJSON(s string) string {
-	if s == "" {
+	if s == "" || s == "null" {
 		return "{}"
 	}
 	return s
-}
-
-func tsp(t *time.Time) *string {
-	if t == nil {
-		return nil
-	}
-	v := t.UTC().Format(time.RFC3339)
-	return &v
 }

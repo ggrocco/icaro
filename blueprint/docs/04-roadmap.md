@@ -43,22 +43,53 @@ Each phase file lists only its objective, deliverables, and acceptance criteria.
 - **Exit (review checkpoint):** do not advance until every acceptance criterion is green.
 - **Decisions:** record new decisions as an ADR in [`adr/`](adr/) and add a row to the [decision index](02-decisions-risks.md#decision-index).
 
+## Status
+
+State of each phase against its acceptance criteria. Each phase file ticks what is done and annotates what is open.
+
+| Phase | State | Open |
+|---|---|---|
+| [0 — Foundation](phases/00-foundation.md) | Done | Domain coverage is below the 95% target in several packages; exceptions are not yet justified one by one |
+| [1 — Container and CLI](phases/01-container-cli.md) | Done on Linux | The macOS half of "`icaro sh` preserves the UID" and the Keychain backend have not run on a Mac; the agent base image is built and pushed by the release workflow but no release has run yet |
+| [2 — Workflow core](phases/02-workflow-core.md) | Done | — |
+| [3 — Integrations](phases/03-workflow-integrations.md) | Done | Spike S8: the bundled manifests are checked against documented payload fixtures, not the live APIs |
+| [4 — Workflow UI and agent authoring](phases/04-workflow-ui.md) | Done | The run graph is read-only; drag/drop editing is deferred, as planned |
+| [5 — Previews](phases/05-previews.md) | Done on Linux | An agent-container edit reaching the preview is verified on Linux (`hack/e2e`); macOS is not (spike S1); DNS-01/TLS is deferred |
+| [6 — Shared memory](phases/06-memory.md) | Done | The importers are prototypes over assumed export formats |
+| [7 — macOS app](phases/07-macos.md) | Partial | Only launch at login (`icaro service install`) is done. The Wails app, tray, notifications, tray-only mode, Apple signing/notarization and the clean-install smoke test need macOS hardware (spike S9) |
+| [8 — Distribution](phases/08-distribution.md) | Done on Linux | A fresh install on macOS, and an end-to-end "update re-attaches a running session" test |
+| [9 — Usage](phases/09-usage.md) (optional) | Done in the CLI | A usage panel in the web UI |
+| [10 — Docs and landing page](phases/10-docs-landing.md) | Done | — |
+| [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
+
+Open spikes:
+
+- S1: macOS file propagation.
+- S4: every agent CLI authenticates from the seeded home alone. This needs real logins.
+- S5: microVM isolation (optional).
+- S6: heterogeneous compose projects.
+- S7: `.test` resolution with VPNs.
+- S8: manifests against the live APIs.
+- S9: Wails v3.
+
+S2 (home overlay, on Linux) and S3 (MCP transport, [ADR 0019](adr/0019-memory-mcp-transport.md)) have passed.
+
 ## Existing code
 
-The Go code in the repository was built from the superseded `docs/` plan ([ADR 0008](adr/0008-blueprint-supersedes-engine-design.md)). It already provides the CLI, config, migrations, an API, and a container executor, but under the old model. Each phase migrates the rows assigned to it:
+The first Go code was built from the superseded `docs/` plan ([ADR 0008](adr/0008-blueprint-supersedes-engine-design.md)). Each phase migrated the rows assigned to it; every row is now migrated:
 
 | Area | Code today | Blueprint target | Phase |
 |---|---|---|---|
-| Process & transport | `icaro serve --role all\|server\|runner`; REST on TCP `127.0.0.1:8787` | One daemon with lock/socket/PID; Unix socket by default, TCP only with `--listen` + token | 0 |
-| Secret storage | `master.key` file or `ICARO_MASTER_KEY` | OS keychain / secret store; encrypted-file fallback only after an explicit password | 1 |
-| Workspace & sessions | Per-run named volume at `/workspace`; runs re-attach by container label | Session worktree bind mount; `sessions` table + startup reconciliation | 1 |
-| Sandbox selection | Per-step `sandbox: standard\|strict`, `network: egress\|none` | Per-profile policy with a mandatory egress allowlist (O2) | 1–2 |
-| Step forms | `run` (script/command) and `http` | `image` + `command`; `uses:` integration actions | 2 (`image`), 3 (`uses`) |
-| Interpolation & gating | Go `text/template` `{{ }}`, `if:` | `${{ }}`, `when` (O3) | 2 |
-| Step graph & retry | Linear sequence, `continue_on_error`, `retry: {attempts, backoff}` | DAG with `needs`; integer `retry` per the schema | 2 |
-| Schema | Generated `schema/workflow.schema.json` | Generated output equal to the [blueprint contract](schemas/workflow.schema.json) (drift test) | 2 |
-| Triggers | `on.webhook` at `/hooks/{workflow}/{token}` with the raw body as input; `on.schedule` | `triggers:` (`manual`, `cron`, integration events) at `/hooks/<integration>` with normalized `trigger.*` | 3 |
-| Credentials | Named connections injected as `ICARO_CONN_*`; `http` auth from a connection | `${{ secrets.* }}`; host-bound integration credentials; agent creds in the profile home | 1 (home), 3 (integrations) |
+| Process & transport | **Done (Phase 0):** one daemon per user (`internal/daemon`: flock lock, PID, `0600` Unix socket); TCP only with `--listen` and a token, plus the on-demand loopback UI listener ([ADR 0023](adr/0023-browser-access.md)) | One daemon with lock/socket/PID; Unix socket by default, TCP only with `--listen` + token | 0 |
+| Secret storage | **Done (Phase 1):** master key in the macOS Keychain / Secret Service, password-protected file fallback; `ICARO_MASTER_KEY` stays as a headless override | OS keychain / secret store; encrypted-file fallback only after an explicit password | 1 |
+| Workspace & sessions | **Done (Phases 1–2):** session worktrees bind-mounted at `/workspace`, `sessions` table with startup reconciliation, one run session per workflow run ([ADR 0010](adr/0010-run-sessions.md)) | Session worktree bind mount; `sessions` table + startup reconciliation | 1 |
+| Sandbox selection | **Done (Phases 1–2):** per-profile egress allowlist on an internal network with a proxy ([ADR 0012](adr/0012-egress-proxy-and-home-layers.md)); workflow steps use `workflows.profile` | Per-profile policy with a mandatory egress allowlist (O2) | 1–2 |
+| Step forms | **Done (Phase 2):** `image` + `command`; `uses` steps run through the integration action executor | `image` + `command`; `uses:` integration actions | 2 (`image`), 3 (`uses`) |
+| Interpolation & gating | **Done (Phase 2):** `${{ }}` and `when` ([ADR 0009](adr/0009-expression-language.md)) | `${{ }}`, `when` (O3) | 2 |
+| Step graph & retry | **Done (Phase 2):** DAG with `needs`, integer `retry` ([ADR 0013](adr/0013-workflow-execution-semantics.md)) | DAG with `needs`; integer `retry` per the schema | 2 |
+| Schema | **Done (Phase 2):** generated from the Go types, drift-tested against the contract | Generated output equal to the [blueprint contract](schemas/workflow.schema.json) (drift test) | 2 |
+| Triggers | ~~`on.webhook` at `/hooks/{workflow}/{token}` with the raw body as input; `on.schedule`~~ Done: `internal/integration` serves `/hooks/<integration>` and `/hooks/webhook/<token>` with normalized `trigger.*`, and `internal/scheduler` fires `cron` triggers ([ADR 0015](adr/0015-manifest-schema-webhook-pipeline.md), [0016](adr/0016-pack-loading-action-execution.md)) | `triggers:` (`manual`, `cron`, integration events) at `/hooks/<integration>` with normalized `trigger.*` | 3 |
+| Credentials | ~~Named connections injected as `ICARO_CONN_*`~~ (removed). Done: Phase 1 stores agent credentials in profile homes and Phase 2 resolves `${{ secrets.* }}` in image steps; Phase 3: `icaro credential add` stores host-bound `<integration>.<name>` secrets used only by the action executor | `${{ secrets.* }}`; host-bound integration credentials; agent creds in the profile home | 1 (home), 3 (integrations) |
 
 Kept as is: the SQLite + Postgres store with portable SQL and per-dialect migrations, the sandbox hardening flags, log scrubbing, hashed API tokens, run-lineage columns, and the image-step I/O contract (`hack/spike-io` checks it against a read-only root filesystem).
 

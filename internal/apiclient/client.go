@@ -3,6 +3,7 @@
 package apiclient
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -48,6 +49,8 @@ type Error struct {
 	Status int
 	Msg    string
 	Issues workflow.Issues
+	// Fields lists missing trigger fields (manual runs).
+	Fields []string
 }
 
 func (e *Error) Error() string {
@@ -55,6 +58,19 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("%s:\n  %s", e.Msg, strings.ReplaceAll(e.Issues.Error(), "; ", "\n  "))
 	}
 	return fmt.Sprintf("%s (HTTP %d)", e.Msg, e.Status)
+}
+
+func decodeError(status int, data []byte) error {
+	e := &Error{Status: status, Msg: http.StatusText(status)}
+	var eb struct {
+		Error  string          `json:"error"`
+		Issues workflow.Issues `json:"issues"`
+		Fields []string        `json:"fields"`
+	}
+	if json.Unmarshal(data, &eb) == nil && eb.Error != "" {
+		e.Msg, e.Issues, e.Fields = eb.Error, eb.Issues, eb.Fields
+	}
+	return e
 }
 
 // IsNotFound reports a 404.
@@ -84,15 +100,7 @@ func (c *Client) do(ctx context.Context, method, path string, contentType string
 		return err
 	}
 	if resp.StatusCode >= 400 {
-		e := &Error{Status: resp.StatusCode, Msg: http.StatusText(resp.StatusCode)}
-		var eb struct {
-			Error  string          `json:"error"`
-			Issues workflow.Issues `json:"issues"`
-		}
-		if json.Unmarshal(data, &eb) == nil && eb.Error != "" {
-			e.Msg, e.Issues = eb.Error, eb.Issues
-		}
-		return e
+		return decodeError(resp.StatusCode, data)
 	}
 	if out == nil || len(data) == 0 {
 		return nil
@@ -197,10 +205,10 @@ func (c *Client) GetVersion(ctx context.Context, name string, version int) (*ser
 	return &out, err
 }
 
-// Run starts a run.
-func (c *Client) Run(ctx context.Context, name string, input map[string]any) (*service.RunInfo, error) {
+// Run starts a manual run with a trigger payload.
+func (c *Client) Run(ctx context.Context, name string, trigger map[string]any) (*service.RunInfo, error) {
 	var out service.RunInfo
-	err := c.doJSON(ctx, http.MethodPost, "/api/v1/workflows/"+url.PathEscape(name)+"/runs", map[string]any{"input": input}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/workflows/"+url.PathEscape(name)+"/runs", map[string]any{"trigger": trigger}, &out)
 	return &out, err
 }
 
@@ -237,15 +245,78 @@ func (c *Client) CancelRun(ctx context.Context, id string) (*service.RunInfo, er
 	return &out, err
 }
 
-// StepLogs fetches the tail of a step log.
-func (c *Client) StepLogs(ctx context.Context, id string, idx int, tailBytes int) ([]byte, error) {
-	path := fmt.Sprintf("/api/v1/runs/%s/steps/%d/logs", url.PathEscape(id), idx)
-	if tailBytes > 0 {
-		path += "?tail=" + strconv.Itoa(tailBytes)
+// StepLogs fetches a step's log: attempt 0 is the latest; tailBytes > 0
+// returns only the end.
+func (c *Client) StepLogs(ctx context.Context, id, step string, attempt, tailBytes int) ([]byte, error) {
+	q := url.Values{}
+	if attempt > 0 {
+		q.Set("attempt", strconv.Itoa(attempt))
 	}
+	if tailBytes > 0 {
+		q.Set("tail", strconv.Itoa(tailBytes))
+	}
+	path := fmt.Sprintf("/api/v1/runs/%s/steps/%s/logs?%s", url.PathEscape(id), url.PathEscape(step), q.Encode())
 	var raw []byte
 	err := c.do(ctx, http.MethodGet, path, "", nil, &raw)
 	return raw, err
+}
+
+// Event is one Server-Sent Event from a run stream.
+type Event struct {
+	Name string          // snapshot, step, log, resync, end
+	Data json.RawMessage // RunInfo for snapshot/end, events.Event otherwise
+}
+
+// Events follows a run's SSE stream, calling fn per event until the run
+// ends (event "end"), fn returns false, or ctx ends. withLogs includes log
+// lines.
+func (c *Client) Events(ctx context.Context, id string, withLogs bool, fn func(Event) bool) error {
+	path := "/api/v1/runs/" + url.PathEscape(id) + "/events"
+	if withLogs {
+		path += "?logs=1"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	hc := *c.HTTP
+	hc.Timeout = 0 // streams outlive request timeouts
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return decodeError(resp.StatusCode, data)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64<<10), 8<<20)
+	var ev Event
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case line == "":
+			if ev.Name != "" {
+				if !fn(ev) || ev.Name == "end" {
+					return nil
+				}
+			}
+			ev = Event{}
+		case strings.HasPrefix(line, "event: "):
+			ev.Name = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			ev.Data = json.RawMessage(strings.TrimPrefix(line, "data: "))
+		}
+	}
+	if err := sc.Err(); err != nil && ctx.Err() == nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 // WaitRun polls until the run reaches a terminal state or ctx ends.
@@ -258,8 +329,7 @@ func (c *Client) WaitRun(ctx context.Context, id string, interval time.Duration)
 		if err != nil {
 			return nil, err
 		}
-		switch run.Status {
-		case "succeeded", "failed", "cancelled":
+		if service.Terminal(run.Status) {
 			return run, nil
 		}
 		select {
@@ -268,25 +338,4 @@ func (c *Client) WaitRun(ctx context.Context, id string, interval time.Duration)
 		case <-time.After(interval):
 		}
 	}
-}
-
-// UpsertConnection creates or replaces a connection.
-func (c *Client) UpsertConnection(ctx context.Context, name, typ string, fields map[string]string) (*service.ConnectionInfo, error) {
-	var out service.ConnectionInfo
-	err := c.doJSON(ctx, http.MethodPost, "/api/v1/connections", map[string]any{"name": name, "type": typ, "fields": fields}, &out)
-	return &out, err
-}
-
-// ListConnections lists connections (no values).
-func (c *Client) ListConnections(ctx context.Context) ([]*service.ConnectionInfo, error) {
-	var out struct {
-		Connections []*service.ConnectionInfo `json:"connections"`
-	}
-	err := c.doJSON(ctx, http.MethodGet, "/api/v1/connections", nil, &out)
-	return out.Connections, err
-}
-
-// DeleteConnection deletes a connection.
-func (c *Client) DeleteConnection(ctx context.Context, name string) error {
-	return c.doJSON(ctx, http.MethodDelete, "/api/v1/connections/"+url.PathEscape(name), nil, nil)
 }

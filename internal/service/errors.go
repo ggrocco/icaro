@@ -34,3 +34,12 @@ func (e *BadRequest) Error() string { return e.Msg }
 func badRequest(format string, args ...any) error {
 	return &BadRequest{Msg: fmt.Sprintf(format, args...)}
 }
+
+// Conflict is a 409 with a message (e.g. a concurrency policy refusal).
+type Conflict struct {
+	Msg string
+}
+
+func (e *Conflict) Error() string { return e.Msg }
+
+func (e *Conflict) Is(target error) bool { return target == ErrConflict }

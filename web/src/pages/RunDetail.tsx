@@ -15,23 +15,40 @@ export function RunDetail({ id }: { id: string }) {
   const [logs, setLogs] = useState<Record<string, string>>({});
   const [live, setLive] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
+  // Once the stream reports the final state, late responses (e.g. to a
+  // Cancel click) must not overwrite it with an earlier status.
+  const finalRef = useRef(false);
+  const apply = (r: RunInfo, final = false) => {
+    if (finalRef.current && !final) return;
+    if (final || terminal(r.status)) finalRef.current = true;
+    setRun(r);
+  };
 
   useEffect(() => {
     let closed = false;
+    finalRef.current = false;
     api
       .getRun(id)
       .then((r) => {
         if (closed) return;
-        setRun(r);
+        apply(r);
         return api.version(r.workflow, r.version).then((v) => !closed && setYaml(v.yaml));
       })
       .catch(setError);
     const stop = subscribeRun(
       id,
       (e) => {
+        if (e.type === "status") {
+          apply(e.run, e.final);
+          setLive(!e.final);
+          if (e.final) return;
+        } else if (e.type === "step") {
+          if (finalRef.current) return;
+          setRun((r) => r && { ...r, steps: r.steps?.map((s) => (s.id === e.step ? { ...s, status: e.status, attempt: e.attempt || s.attempt } : s)) });
+        } else {
+          setLogs((l) => ({ ...l, [e.step]: (l[e.step] ?? "") + e.line + "\n" }));
+        }
         setLive(true);
-        if (e.type === "status") setRun(e.run);
-        else setLogs((l) => ({ ...l, [e.step]: (l[e.step] ?? "") + e.text }));
       },
       () => setLive(false),
     );
@@ -40,15 +57,6 @@ export function RunDetail({ id }: { id: string }) {
       stop();
     };
   }, [id]);
-
-  // Load the persisted log once when a step is selected; SSE appends.
-  useEffect(() => {
-    if (!selected || logs[selected] !== undefined) return;
-    api
-      .stepLogs(id, selected)
-      .then((t) => setLogs((l) => ({ ...l, [selected]: t })))
-      .catch(() => setLogs((l) => ({ ...l, [selected]: "" })));
-  }, [id, selected, logs]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -72,17 +80,17 @@ export function RunDetail({ id }: { id: string }) {
         </h1>
         <div className="actions">
           {!terminal(run.status) && (
-            <button className="danger" onClick={() => api.cancel(run.id).then(setRun).catch(setError)}>
+            <button className="danger" onClick={() => api.cancel(run.id).then((r) => apply(r)).catch(setError)}>
               Cancel
             </button>
           )}
           {terminal(run.status) && (
-            <button onClick={() => api.rerun(run.id).then((r) => go("runs", r.id)).catch(setError)}>Re-run</button>
+            <button onClick={() => api.rerun(run).then((r) => go("runs", r.id)).catch(setError)}>Re-run</button>
           )}
         </div>
       </header>
       <p>
-        <a href={href("workflows", run.workflow)}>{run.workflow}</a> v{run.version} · trigger {run.trigger} · started <When ts={run.started_at} />
+        <a href={href("workflows", run.workflow)}>{run.workflow}</a> v{run.version} · trigger {run.trigger_kind} · started <When ts={run.started_at} />
         {run.finished_at && (
           <>
             {" "}
@@ -132,7 +140,7 @@ export function RunDetail({ id }: { id: string }) {
               <pre className="code">{JSON.stringify(step.outputs ?? {}, null, 2)}</pre>
               <h3 className="h4">Logs</h3>
               <pre className="code logs" ref={logRef} aria-live="polite" aria-label={`Logs for ${step.id}`}>
-                {logs[step.id] ?? "…"}
+                {logs[step.id] || (step.log_size ? "…" : "(no output)")}
               </pre>
             </>
           )}

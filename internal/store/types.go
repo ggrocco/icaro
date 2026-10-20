@@ -25,13 +25,7 @@ const (
 	StepSucceeded = "succeeded"
 	StepFailed    = "failed"
 	StepSkipped   = "skipped"
-)
-
-// Trigger kinds.
-const (
-	TriggerAPI      = "api"
-	TriggerWebhook  = "webhook"
-	TriggerSchedule = "schedule"
+	StepCancelled = "cancelled"
 )
 
 // Token scopes, ordered by privilege.
@@ -66,13 +60,14 @@ type WorkflowVersion struct {
 
 // Run is one execution of a workflow version.
 type Run struct {
-	ID                string
-	WorkflowID        string
-	WorkflowName      string
-	WorkflowVersion   int
-	Status            string
-	TriggerKind       string
-	InputJSON         string
+	ID              string
+	WorkflowID      string
+	WorkflowName    string
+	WorkflowVersion int
+	Status          string
+	TriggerKind     string
+	// TriggerJSON is the normalized ${{ trigger.* }} payload.
+	TriggerJSON       string
 	RootRunID         string
 	ParentRunID       string
 	Depth             int
@@ -86,34 +81,45 @@ type Run struct {
 	CancelRequestedAt *time.Time
 	Error             string
 	CreatedAt         time.Time
+	// IdempotencyKey deduplicates enqueues (webhook deliveries, cron fires).
+	IdempotencyKey string
+	// Concurrency is the workflow's policy, copied at enqueue time.
+	Concurrency string
+	SessionID   string
+	DeliveryID  string
+	Actor       string
 }
 
-// RunStep is the persisted state of one step of a run.
-type RunStep struct {
+// StepRun is the persisted state of one step of a run, keyed by step id.
+type StepRun struct {
 	RunID       string
-	Idx         int
-	Name        string
+	StepID      string
+	Idx         int // position in the plan's topological order
+	Kind        string
 	Status      string
 	Attempt     int
+	SessionID   string
 	ContainerID string
 	ExitCode    *int
-	OutputJSON  string
+	OutputsJSON string
 	LogPath     string
 	LogSize     int64
+	LogLines    int64
 	StartedAt   *time.Time
 	FinishedAt  *time.Time
 	Error       string
 }
 
-// Connection is a named, typed credential bundle (fields encrypted).
-type Connection struct {
-	ID         string
-	Name       string
-	Type       string
-	FieldsCT   []byte
-	FieldNames []string
+// LogChunk indexes a step attempt's log file: after flush Seq the file
+// was FileOffset bytes long and held LineCount lines.
+type LogChunk struct {
+	RunID      string
+	StepID     string
+	Attempt    int
+	Seq        int
+	FileOffset int64
+	LineCount  int64
 	CreatedAt  time.Time
-	UpdatedAt  time.Time
 }
 
 // APIToken is a bearer token record (hash only).

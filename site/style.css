@@ -1,0 +1,65 @@
+:root {
+  --bg: #fbf8f3;
+  --fg: #1d1a16;
+  --muted: #5d564c;
+  --accent: #b5651d;
+  --sun: #f2b33d;
+  --card: #ffffff;
+  --border: #e6dfd3;
+  --code: #f1ebe1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14120f;
+    --fg: #f1ece4;
+    --muted: #b3aa9c;
+    --accent: #f0a35e;
+    --card: #1d1a16;
+    --border: #322d26;
+    --code: #262119;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14120f;
+  --fg: #f1ece4;
+  --muted: #b3aa9c;
+  --accent: #f0a35e;
+  --card: #1d1a16;
+  --border: #322d26;
+  --code: #262119;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main, header, footer { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+header { display: flex; align-items: center; gap: 12px; padding-top: 20px; }
+header a { color: var(--fg); text-decoration: none; font-weight: 600; }
+header nav { margin-left: auto; display: flex; gap: 16px; font-size: 15px; }
+header nav a { color: var(--muted); font-weight: 500; }
+.hero { display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: center; padding: 48px 0 32px; }
+.hero img { width: 100%; height: auto; color: var(--fg); }
+h1 { font-size: clamp(32px, 6vw, 52px); line-height: 1.1; margin: 0 0 12px; letter-spacing: -0.02em; }
+h2 { font-size: 24px; margin: 40px 0 12px; }
+p.lede { font-size: 20px; color: var(--muted); margin: 0 0 20px; }
+a { color: var(--accent); }
+pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+pre { background: var(--code); padding: 14px 16px; border-radius: 8px; overflow-x: auto; }
+.cta { display: inline-block; background: var(--accent); color: var(--bg); padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.spine { counter-reset: s; list-style: none; padding: 0; }
+.spine li { counter-increment: s; padding: 8px 0 8px 40px; position: relative; border-bottom: 1px solid var(--border); }
+.spine li::before { content: counter(s); position: absolute; left: 0; top: 8px; width: 26px; height: 26px; border-radius: 50%; background: var(--sun); color: #1d1a16; text-align: center; font-weight: 700; font-size: 14px; line-height: 26px; }
+footer { color: var(--muted); font-size: 14px; padding: 40px 16px 32px; }
+@media (max-width: 640px) {
+  .hero { grid-template-columns: 1fr; padding-top: 24px; }
+  .hero img { max-width: 280px; }
+  header nav { gap: 10px; }
+}

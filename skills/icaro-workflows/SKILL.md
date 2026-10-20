@@ -52,7 +52,9 @@ steps:
   - id: checks
     image: mirror.gcr.io/library/alpine:3.20
     repository: { ref: "${{ trigger.repo_url }}", revision: "${{ trigger.head_sha }}" }
-    command: ./scripts/check.sh > /icaro/out.txt; printf '{"ok":true}' > /icaro/output.json
+    command: |
+      ./scripts/check.sh > /icaro/out.txt
+      printf '{"ok":true}' > /icaro/output.json
     outputs:
       ok: json:ok
     timeout: 10m
@@ -80,6 +82,19 @@ steps:
   string number has`. A missing key is an error; guard optional fields
   with `has(trigger.x)`.
 - `${{ secrets.NAME }}` is resolved by the daemon and redacted from logs.
+- **Never interpolate `trigger.*` or step outputs straight into `command`.**
+  They can carry text an outsider controls (a PR title, an issue body),
+  and the command is a shell script. Pass them through `env` and quote the
+  variable instead:
+
+  ```yaml
+  env:
+    TITLE: ${{ trigger.title }}
+  command: |
+    echo "reviewing: $TITLE"
+  ```
+- Write multi-line or `#`-containing commands as a block scalar (`|`): in
+  plain YAML ` #` starts a comment and silently truncates the command.
 - Image steps read `/icaro/input.json` (the step's `input`) and
   `ICARO_INPUT_<NAME>`, write `/icaro/output.json` (a JSON object, at most
   1 MiB), share `/workspace` with the other steps of the run, and succeed

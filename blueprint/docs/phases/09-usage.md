@@ -6,14 +6,16 @@
 
 ## Deliverables
 
-- [ ] Define a usage provider interface.
-- [ ] Start with explicit parsing of supported sources (local agent logs such as `~/.claude/`).
-- [ ] Save snapshots and expose limits/alerts.
-- [ ] Add a usage UI.
-- [ ] Never infer cost as fact without provider metadata.
+- [x] Define a usage provider interface.
+- [x] Start with explicit parsing of supported sources (local agent logs such as `~/.claude/`).
+- [x] Save snapshots and expose limits/alerts (`usage_snapshots`, `usage.daily_limit_usd`).
+- [ ] Add a usage UI. *The CLI view (`icaro usage`, `--json`) is done; a web UI panel belongs with the Phase 4 UI.*
+- [x] Never infer cost as fact without provider metadata.
 
 ## Acceptance criteria
 
-- [ ] An unavailable provider does not break an agent run.
-- [ ] Data shows its source and confidence.
-- [ ] Alerts respect the configured timezone and limit.
+- [x] An unavailable provider does not break an agent run.
+- [x] Data shows its source and confidence.
+- [x] Alerts respect the configured timezone and limit.
+
+Decisions: [ADR 0022](../adr/0022-usage-from-local-logs.md). Only Claude Code transcripts are parsed so far; other CLIs wait on spike S10.

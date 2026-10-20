@@ -8,11 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"icaro/internal/service"
 	"icaro/internal/workflow"
 )
 
@@ -33,7 +31,6 @@ func init() {
 	register(newWorkflowCmd)
 	register(newRunCmd)
 	register(newRunsCmd)
-	register(newConnectionCmd)
 	register(func(*rootOpts) *cobra.Command { return newSchemaCmd() })
 }
 
@@ -63,8 +60,8 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 				return printJSON(cmd.OutOrStdout(), info)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "applied %s version %d\n", info.Name, info.Version)
-			if info.WebhookToken != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "webhook token: %s\n", info.WebhookToken)
+			if len(info.TriggerFields.Required) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "manual runs need: --set %s\n", strings.Join(info.TriggerFields.Required, "=... --set ")+"=...")
 			}
 			return nil
 		},
@@ -141,14 +138,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "NAME\tVERSION\tSTATUS\tSTEPS\tTRIGGERS\tUPDATED")
 			for _, w := range ws {
-				var trig []string
-				if w.WebhookToken != "" {
-					trig = append(trig, "webhook")
-				}
-				for _, s := range w.Schedules {
-					trig = append(trig, "cron("+s+")")
-				}
-				fmt.Fprintf(tw, "%s\t%d\t%s\t%d\t%s\t%s\n", w.Name, w.Version, w.Status, len(w.Steps), strings.Join(trig, ","), w.UpdatedAt)
+				fmt.Fprintf(tw, "%s\t%d\t%s\t%d\t%s\t%s\n", w.Name, w.Version, w.Status, len(w.Steps), triggerSummary(w.Triggers), w.UpdatedAt)
 			}
 			return tw.Flush()
 		},
@@ -228,84 +218,6 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 	return cmd
 }
 
-func newRunCmd(opts *rootOpts) *cobra.Command {
-	var inputPath, inputJSON string
-	var wait, asJSON bool
-	cmd := &cobra.Command{
-		Use:   "run NAME",
-		Short: "Start a workflow run",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			input := map[string]any{}
-			switch {
-			case inputPath != "":
-				b, err := readInputArg(inputPath)
-				if err != nil {
-					return err
-				}
-				if err := json.Unmarshal(b, &input); err != nil {
-					return fmt.Errorf("input file: %w", err)
-				}
-			case inputJSON != "":
-				if err := json.Unmarshal([]byte(inputJSON), &input); err != nil {
-					return fmt.Errorf("--input: %w", err)
-				}
-			}
-			c, err := opts.client(cmd.Context())
-			if err != nil {
-				return err
-			}
-			run, err := c.Run(cmd.Context(), args[0], input)
-			if err != nil {
-				return err
-			}
-			if wait {
-				run, err = c.WaitRun(cmd.Context(), run.ID, time.Second)
-				if err != nil {
-					return err
-				}
-			}
-			if asJSON {
-				return printJSON(cmd.OutOrStdout(), run)
-			}
-			printRun(cmd.OutOrStdout(), run)
-			if wait && run.Status != "succeeded" {
-				return fmt.Errorf("run %s", run.Status)
-			}
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&inputJSON, "input", "", "input payload as JSON")
-	cmd.Flags().StringVar(&inputPath, "input-file", "", "input payload from a JSON file (- for stdin)")
-	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the run to finish")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
-	return cmd
-}
-
-func printRun(w io.Writer, run *service.RunInfo) {
-	fmt.Fprintf(w, "run %s  workflow=%s v%d  status=%s  trigger=%s\n", run.ID, run.Workflow, run.Version, run.Status, run.Trigger)
-	if run.Error != "" {
-		fmt.Fprintf(w, "error: %s\n", run.Error)
-	}
-	if len(run.Steps) == 0 {
-		return
-	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  STEP\tSTATUS\tATTEMPT\tEXIT\tOUTPUTS\tERROR")
-	for _, st := range run.Steps {
-		exit := "-"
-		if st.ExitCode != nil {
-			exit = strconv.Itoa(*st.ExitCode)
-		}
-		out := string(st.Outputs)
-		if len(out) > 60 {
-			out = out[:57] + "..."
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%d\t%s\t%s\t%s\n", st.Name, st.Status, st.Attempt, exit, out, st.Error)
-	}
-	_ = tw.Flush()
-}
-
 func newRunsCmd(opts *rootOpts) *cobra.Command {
 	cmd := &cobra.Command{Use: "runs", Short: "Inspect runs"}
 	var asJSON bool
@@ -331,7 +243,7 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "ID\tWORKFLOW\tSTATUS\tTRIGGER\tCREATED\tERROR")
 			for _, r := range runs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.Workflow, r.Status, r.Trigger, r.CreatedAt, r.Error)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.Workflow, r.Status, r.TriggerKind, r.CreatedAt, r.Error)
 			}
 			return tw.Flush()
 		},
@@ -361,33 +273,57 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 		},
 	}
 
-	var tail int
+	var tail, attempt int
+	var follow bool
 	logs := &cobra.Command{
 		Use:   "logs ID [STEP]",
-		Short: "Print a step's log (step index, default 0)",
+		Short: "Print a step's log (default: every step, in plan order); --follow streams",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			idx := 0
-			if len(args) == 2 {
-				n, err := strconv.Atoi(args[1])
-				if err != nil {
-					return fmt.Errorf("step must be an index")
-				}
-				idx = n
-			}
 			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
-			b, err := c.StepLogs(cmd.Context(), args[0], idx, tail)
-			if err != nil {
+			step := ""
+			if len(args) == 2 {
+				step = args[1]
+			}
+			if follow {
+				_, err := followRun(cmd.Context(), c, args[0], step, cmd.OutOrStdout())
 				return err
 			}
-			_, err = cmd.OutOrStdout().Write(b)
-			return err
+			steps := []string{step}
+			if step == "" {
+				run, err := c.GetRun(cmd.Context(), args[0])
+				if err != nil {
+					return err
+				}
+				steps = steps[:0]
+				for _, st := range run.Steps {
+					if st.Attempt > 0 {
+						steps = append(steps, st.ID)
+					}
+				}
+			}
+			for _, id := range steps {
+				b, err := c.StepLogs(cmd.Context(), args[0], id, attempt, tail)
+				if err != nil {
+					return err
+				}
+				if len(steps) > 1 || step == "" {
+					writePrefixed(cmd.OutOrStdout(), id, b)
+					continue
+				}
+				if _, err := cmd.OutOrStdout().Write(b); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 	logs.Flags().IntVar(&tail, "tail", 0, "only the last N bytes")
+	logs.Flags().IntVar(&attempt, "attempt", 0, "attempt number (default: latest)")
+	logs.Flags().BoolVarP(&follow, "follow", "f", false, "stream until the run ends")
 
 	cancel := &cobra.Command{
 		Use:   "cancel ID",
@@ -407,81 +343,6 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(list, get, logs, cancel)
-	return cmd
-}
-
-func newConnectionCmd(opts *rootOpts) *cobra.Command {
-	cmd := &cobra.Command{Use: "connection", Short: "Manage connections (credentials)"}
-	var typ string
-	var fields []string
-	create := &cobra.Command{
-		Use:   "create NAME --type TYPE --field key=value [--field ...]",
-		Short: "Create or replace a connection; values are encrypted at rest",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			kv := map[string]string{}
-			for _, f := range fields {
-				k, v, ok := strings.Cut(f, "=")
-				if !ok {
-					return fmt.Errorf("--field must be key=value, got %q", f)
-				}
-				if strings.HasPrefix(v, "@") {
-					b, err := os.ReadFile(v[1:])
-					if err != nil {
-						return err
-					}
-					v = strings.TrimRight(string(b), "\n")
-				}
-				kv[k] = v
-			}
-			c, err := opts.client(cmd.Context())
-			if err != nil {
-				return err
-			}
-			info, err := c.UpsertConnection(cmd.Context(), args[0], typ, kv)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "connection %s (%s) fields: %s\n", info.Name, info.Type, strings.Join(info.FieldNames, ", "))
-			return nil
-		},
-	}
-	create.Flags().StringVar(&typ, "type", "generic", "connection type: generic | bearer | basic")
-	create.Flags().StringArrayVar(&fields, "field", nil, "field as key=value (value @file reads from a file)")
-
-	list := &cobra.Command{
-		Use:   "list",
-		Short: "List connections (names and types only)",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := opts.client(cmd.Context())
-			if err != nil {
-				return err
-			}
-			cs, err := c.ListConnections(cmd.Context())
-			if err != nil {
-				return err
-			}
-			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tTYPE\tFIELDS\tUPDATED")
-			for _, cn := range cs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", cn.Name, cn.Type, strings.Join(cn.FieldNames, ","), cn.UpdatedAt)
-			}
-			return tw.Flush()
-		},
-	}
-	del := &cobra.Command{
-		Use:   "delete NAME",
-		Short: "Delete a connection",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client(cmd.Context())
-			if err != nil {
-				return err
-			}
-			return c.DeleteConnection(cmd.Context(), args[0])
-		},
-	}
-	cmd.AddCommand(create, list, del)
 	return cmd
 }
 

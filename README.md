@@ -1,67 +1,75 @@
-# Icaro
+# Ícaro
 
-Icaro runs workflows whose steps are containers. Every step gets the same
-contract — inputs in, `/icaro/output.json` out, a shared `/workspace`, exit
-code as status — under a hardened sandbox, triggered by API, webhooks or
-schedules, and authored by humans or AI agents against a published JSON
-Schema.
+Ícaro runs **many coding agents in parallel** on your machine. Each agent gets its own **session**:
 
-Design and roadmap: [`blueprint/`](blueprint/README.md). The code below was built
-from an earlier design and is migrating toward the blueprint; see
-[existing code](blueprint/docs/04-roadmap.md#existing-code).
+- a git worktree on its own branch;
+- a hardened container that can reach only its provider's API;
+- a live preview at a predictable URL;
+- a scope in shared, MCP-accessible project memory.
 
-> Status: Phase 1 (engine core). Workflows, runs, connections, tokens,
-> CLI and REST API work; the runner executes `run` steps on Docker.
-> Triggers, the `http` step, MCP server, UI and tray are next.
+**Workflows** orchestrate sessions: DAGs of container steps and declarative integration actions, triggered by hand, on a schedule, or by GitHub, GitLab, Slack, Jira, Linear, Sentry and Datadog events.
+
+```text
+icaro claude  ──►  worktree icaro/<name>  ──►  isolated container (egress allowlist, profile home)
+                          │                              │
+                          ├──► preview  http://<name>.localhost:8780
+                          └──► memory   decisions, findings, handoffs (MCP)
+```
 
 ## Quick start
 
-Requirements: Go 1.26+, a Docker daemon reachable by the server.
-
 ```sh
-make build                                   # bin/icaro
-bin/icaro init                               # data dir, master key, schema
-export ICARO_SERVER__TOKEN=$(bin/icaro token create --name dev --scope admin)
-bin/icaro serve &                            # API on 127.0.0.1:8787 + runner
+curl -fsSL https://github.com/ggrocco/icaro/releases/latest/download/install.sh | sh   # or: brew install ggrocco/tap/icaro
+icaro init && icaro setup          # ~/.icaro, master key in your keychain, profiles and images
+icaro login claude                 # once per profile; never touches your own ~/.claude
 
-bin/icaro workflow validate examples/hello.yaml
-bin/icaro workflow apply examples/hello.yaml
-bin/icaro run hello --input '{"who":"icaro"}' --wait
-bin/icaro runs logs <run-id> 0
+cd ~/src/my-app
+icaro claude                       # an agent in an isolated session on a new worktree
+icaro session list
+
+icaro workflow apply examples/hello.yaml
+icaro run hello --set who=icaro --wait
+icaro ui                           # the web UI, via a one-time loopback sign-in link
 ```
 
-Configuration lives in `icaro.yaml` (see `bin/icaro config show`) and can be
-overridden with `ICARO_*` environment variables, nested keys joined by `__`
-(`ICARO_DATABASE__DRIVER=postgres`).
+The [quickstart](docs/quickstart.md) walks through each step, and CI runs it against a real Docker engine.
 
-## The step contract
+## What you get
 
-| Channel | Mechanism |
-|---|---|
-| Inputs | `ICARO_INPUT_<NAME>` env vars + `/icaro/input.json` (`/icaro/context.json` has inputs, earlier step outputs and run metadata) |
-| Outputs | Write a JSON object to `/icaro/output.json` → `{{ steps.<name>.outputs.<key> }}` |
-| Files | `/workspace` is shared by all steps of a run |
-| Status | Exit code `0` = success |
-| Credentials | `connection: <name>` injects `ICARO_CONN_<FIELD>`; values are scrubbed from logs |
+- **Sessions** ([docs](docs/sessions.md)):
+  - one worktree and container per task;
+  - per-profile persistent homes shared safely by concurrent sessions;
+  - a mandatory egress allowlist and a strict mount policy;
+  - a concurrency cap;
+  - recovery after a restart.
+- **Workflows** ([docs](docs/workflows.md)): a published JSON Schema and a validator whose issues point at the exact field, with nearest-match hints. Steps run in parallel as a DAG, with `${{ }}` data flow, `when` gating, retries, timeouts, cancellation, live logs over SSE, and re-attach after a daemon restart.
+- **Integrations** ([docs](docs/integrations.md)): YAML manifests in git-backed packs. Webhooks are verified and deduplicated, every delivery is recorded and can be redelivered, actions run in the daemon with host-bound credentials and an SSRF guard, and cron triggers persist across restarts.
+- **Previews** ([docs](docs/previews.md)): compose projects routed at `<slug>.localhost`, behind a compose lint that blocks privileged or host-escaping stacks.
+- **Shared memory** ([docs](docs/memory.md)): decisions, findings, tasks and handoffs per project, plus indexed files, symbols, ADRs and commits, served to agents over MCP.
+- **Agents as users** ([docs](docs/agents.md)): MCP authoring tools and the `icaro-workflows` skill (`icaro skill install`).
+- **Web UI** ([docs](docs/ui.md)): form and YAML editors, run graphs with live status, deliveries, and a manifest editor that commits to your local pack.
+- **Operations:** one daemon per user on a Unix socket, `icaro doctor --fix`, signed releases with `icaro update --rollback`, `icaro service install`, and `icaro usage`.
 
-Every container runs with all capabilities dropped, `no-new-privileges`, a
-seccomp profile without `ptrace`/`bpf`/`mount`/namespace/module syscalls, a
-read-only root filesystem (tmpfs `/tmp` and `/home`), pid/memory/cpu limits,
-and only the run's volumes mounted. There is no way to weaken this from a
-workflow file.
+Read [Security](docs/security.md) for what the isolation does and does not cover.
 
-## Verifying the sandbox contract on a Docker host
+## Documentation
 
-```sh
-go run ./hack/spike-io
-```
+- User docs: [`docs/`](docs/README.md), including the [CLI reference](docs/cli.md).
+- Design, decisions and roadmap: [`blueprint/`](blueprint/README.md). The current state of each phase is in the [roadmap status](blueprint/docs/04-roadmap.md#status).
 
 ## Development
 
+Requirements: Go 1.26+, Docker, and Node 22 for the web UI.
+
 ```sh
-make test                 # unit tests (SQLite)
-ICARO_TEST_POSTGRES_DSN=postgres://icaro:icaro@localhost:5432/icaro?sslmode=disable make test
-make test-integration     # needs Docker
-make lint                 # golangci-lint
-go generate ./...         # regenerate schema/workflow.schema.json after editing internal/workflow/spec.go
+make web build                 # embed the UI, build bin/icaro
+make test                      # unit tests (-race, SQLite)
+make test-integration          # needs Docker; set ICARO_TEST_POSTGRES_DSN to add Postgres
+make lint                      # golangci-lint
+go generate ./...              # regenerate schema/workflow.schema.json
+go run ./hack/gendocs          # regenerate docs/cli.md
+go test -tags e2e ./hack/quickstart   # run the quickstart against real Docker
+cd web && npx playwright test  # UI end-to-end tests (after make web build)
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Licensed under the [MIT license](LICENSE).

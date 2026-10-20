@@ -1,0 +1,84 @@
+# Slack: Events API (v0 request signing) and Web API actions.
+# Credentials: slack.webhook_secret (the app's signing secret), slack.bot_token
+# (xoxb-..., bound to slack.com). The url_verification handshake is answered
+# after signature verification without starting any workflow.
+version: 1
+name: slack
+description: Slack channel messages and mentions; post and update messages.
+hosts: [slack.com]
+auth:
+  bot_token: { kind: bearer, credential: bot_token }
+triggers:
+  verify:
+    kind: hmac-sha256
+    header: X-Slack-Signature
+    prefix: "v0="
+    encoding: hex
+    message: "v0:${{ headers['x-slack-request-timestamp'] }}:${{ raw_body }}"
+  timestamp: { header: X-Slack-Request-Timestamp, format: unix, max_skew: 5m }
+  delivery_id: "${{ body.event_id }}"
+  challenges:
+    - match: "body.type == 'url_verification'"
+      body: "${{ body.challenge }}"
+      content_type: text/plain
+  events:
+    message:
+      description: A user posted a message in a channel the app is in (bot and edited messages excluded).
+      match: "body.type == 'event_callback' && body.event.type == 'message' && !has(body.event.subtype)"
+      payload: &msg
+        team: "${{ body.team_id }}"
+        channel: "${{ body.event.channel }}"
+        user: "${{ body.event.user }}"
+        text: "${{ body.event.text }}"
+        ts: "${{ body.event.ts }}"
+    app_mention:
+      description: A user mentioned the app.
+      match: "body.type == 'event_callback' && body.event.type == 'app_mention'"
+      payload: *msg
+actions:
+  post-message:
+    description: Post a message to a channel.
+    inputs:
+      channel: { type: string, required: true, description: Channel id (C...) or name. }
+      text: { type: string, required: true }
+    request:
+      method: POST
+      url: https://slack.com/api/chat.postMessage
+      headers: { Content-Type: application/json; charset=utf-8 }
+      auth: bot_token
+      body:
+        json: { channel: "${{ input.channel }}", text: "${{ input.text }}" }
+    success: "response.body.ok == true"
+    outputs:
+      ts: "${{ response.body.ts }}"
+      channel: "${{ response.body.channel }}"
+  post-reply:
+    description: Reply in a message's thread.
+    inputs:
+      channel: { type: string, required: true }
+      thread_ts: { type: string, required: true }
+      text: { type: string, required: true }
+    request:
+      method: POST
+      url: https://slack.com/api/chat.postMessage
+      auth: bot_token
+      body:
+        json: { channel: "${{ input.channel }}", thread_ts: "${{ input.thread_ts }}", text: "${{ input.text }}" }
+    success: "response.body.ok == true"
+    outputs:
+      ts: "${{ response.body.ts }}"
+  update-message:
+    description: Replace the text of a message the app posted.
+    inputs:
+      channel: { type: string, required: true }
+      ts: { type: string, required: true }
+      text: { type: string, required: true }
+    request:
+      method: POST
+      url: https://slack.com/api/chat.update
+      auth: bot_token
+      body:
+        json: { channel: "${{ input.channel }}", ts: "${{ input.ts }}", text: "${{ input.text }}" }
+    success: "response.body.ok == true"
+    outputs:
+      ts: "${{ response.body.ts }}"

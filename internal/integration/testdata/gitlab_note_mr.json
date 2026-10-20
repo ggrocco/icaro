@@ -1,0 +1,1 @@
+{"object_kind":"note","event_type":"note","user":{"username":"root"},"project_id":15,"project":{"id":15,"path_with_namespace":"acme/app"},"object_attributes":{"id":1244,"note":"LGTM","noteable_type":"MergeRequest","url":"https://gitlab.com/acme/app/-/merge_requests/12#note_1244"},"merge_request":{"id":99,"iid":12,"title":"Add feature"}}

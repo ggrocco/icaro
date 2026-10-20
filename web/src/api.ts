@@ -51,13 +51,23 @@ async function request<T>(method: string, path: string, body?: unknown, raw = fa
   return (await res.json()) as T;
 }
 
+export interface TriggerSpec {
+  type?: string;
+  cron?: string;
+  integration?: string;
+  event?: string;
+  filter?: string;
+}
+
 export interface WorkflowInfo {
   name: string;
   description?: string;
   version: number;
   status: string;
+  concurrency?: string;
   steps: string[];
-  triggers?: string[];
+  triggers?: TriggerSpec[];
+  trigger_fields?: { required: string[]; optional: string[] };
   created_at: string;
   updated_at: string;
   yaml?: string;
@@ -73,6 +83,8 @@ export interface VersionInfo {
 
 export interface StepInfo {
   id: string;
+  kind?: string;
+  needs?: string[];
   status: string;
   attempt: number;
   exit_code?: number;
@@ -88,8 +100,8 @@ export interface RunInfo {
   workflow: string;
   version: number;
   status: string;
-  trigger: string;
-  trigger_payload?: Record<string, unknown>;
+  trigger_kind: string;
+  trigger?: Record<string, unknown>;
   error?: string;
   created_at: string;
   started_at?: string;
@@ -125,26 +137,37 @@ export interface EventInfo {
   fields: string[];
 }
 
+// IntegrationInfo is a loaded integration; the detail call adds the typed
+// events/actions and the manifest source.
 export interface IntegrationInfo {
   name: string;
   pack: string;
+  file?: string;
   description?: string;
-  events: EventInfo[];
-  actions: ActionInfo[];
-  hosts?: string[];
-  error?: string;
-  shadowed?: string;
+  hosts: string[];
+  auth?: string[];
+  verify?: string;
+  events: string[];
+  actions: string[];
+  shadows_builtin?: boolean;
+  event_details?: Record<string, EventInfo>;
+  action_details?: Record<string, ActionInfo>;
+  manifest?: string;
 }
 
 export interface Delivery {
   id: string;
   integration: string;
-  event?: string;
+  workflow?: string;
+  status: string;
+  error?: string;
   verified: boolean;
   verify_error?: string;
   received_at: string;
-  matches?: { workflow: string; run_id?: string; skipped?: string; deduplicated?: boolean; filtered?: boolean }[];
-  headers?: Record<string, string>;
+  redelivery_of?: string;
+  events: { event: string; payload?: Record<string, unknown>; error?: string }[];
+  results: { workflow: string; event: string; run_id?: string; skipped?: string; deduplicated?: boolean; filtered?: boolean; error?: string }[];
+  headers?: Record<string, string[]>;
   body?: string;
 }
 
@@ -170,14 +193,18 @@ export const api = {
     request<{ runs: RunInfo[] }>("GET", `/api/v1/runs${workflow ? `?workflow=${encodeURIComponent(workflow)}` : ""}`).then((r) => r.runs ?? []),
   getRun: (id: string) => request<RunInfo>("GET", `/api/v1/runs/${id}`),
   cancel: (id: string) => request<RunInfo>("POST", `/api/v1/runs/${id}/cancel`),
-  rerun: (id: string) => request<RunInfo>("POST", `/api/v1/runs/${id}/rerun`),
+  // A re-run starts the same workflow with the same trigger payload.
+  rerun: (run: RunInfo) => api.run(run.workflow, run.trigger ?? {}),
   stepLogs: (id: string, step: string) => request<string>("GET", `/api/v1/runs/${id}/steps/${encodeURIComponent(step)}/logs`, undefined, true),
 
   integrations: () => request<{ integrations: IntegrationInfo[] }>("GET", "/api/v1/integrations").then((r) => r.integrations ?? []),
-  manifest: (name: string) => request<{ yaml: string; pack: string; writable: boolean }>("GET", `/api/v1/integrations/${encodeURIComponent(name)}/manifest`),
+  integration: (name: string) => request<IntegrationInfo>("GET", `/api/v1/integrations/${encodeURIComponent(name)}`),
+  // integrationDetails loads typed actions/events for every integration
+  // (forms for uses: steps, event pickers for triggers).
+  integrationDetails: async () => Promise.all((await api.integrations()).map((i) => api.integration(i.name))),
   saveManifest: (name: string, yaml: string) =>
-    request<{ commit: string }>("PUT", `/api/v1/integrations/${encodeURIComponent(name)}/manifest`, { yaml }),
-  pushPack: (pack: string) => request<{ output: string }>("POST", `/api/v1/packs/${encodeURIComponent(pack)}/push`),
+    request<{ pack: string; commit: string; changed: boolean }>("PUT", `/api/v1/integrations/${encodeURIComponent(name)}/manifest`, yaml),
+  pushPack: (pack: string) => request<{ pushed: boolean }>("POST", `/api/v1/packs/${encodeURIComponent(pack)}/push`),
 
   deliveries: () => request<{ deliveries: Delivery[] }>("GET", "/api/v1/deliveries").then((r) => r.deliveries ?? []),
   delivery: (id: string) => request<Delivery>("GET", `/api/v1/deliveries/${id}`),
@@ -185,15 +212,33 @@ export const api = {
 };
 
 export type RunEvent =
-  | { type: "status"; run: RunInfo }
-  | { type: "log"; step: string; attempt: number; offset: number; text: string };
+  | { type: "status"; run: RunInfo; final: boolean }
+  | { type: "step"; step: string; attempt: number; status: string }
+  | { type: "log"; step: string; attempt: number; offset: number; line: string };
 
-// subscribeRun opens the per-run SSE stream; the browser reconnects with
-// Last-Event-ID, so the stream resumes instead of polling.
+// subscribeRun follows a run over SSE (one stream per run): a snapshot
+// with the log backlog, then step/log events, then "end". The stream is
+// closed on "end" so the browser does not reconnect to a finished run.
 export function subscribeRun(id: string, onEvent: (e: RunEvent) => void, onError?: () => void): () => void {
-  const es = new EventSource(`/api/v1/runs/${id}/events`, { withCredentials: true });
-  es.addEventListener("status", (m) => onEvent({ type: "status", run: JSON.parse((m as MessageEvent).data) }));
-  es.addEventListener("log", (m) => onEvent({ type: "log", ...JSON.parse((m as MessageEvent).data) }));
+  const es = new EventSource(`/api/v1/runs/${id}/events?logs=1`, { withCredentials: true });
+  const data = (m: Event) => JSON.parse((m as MessageEvent).data);
+  es.addEventListener("snapshot", (m) => onEvent({ type: "status", run: data(m), final: false }));
+  es.addEventListener("end", (m) => {
+    onEvent({ type: "status", run: data(m), final: true });
+    es.close();
+  });
+  es.addEventListener("step", (m) => {
+    const d = data(m);
+    onEvent({ type: "step", step: d.step, attempt: d.attempt, status: d.status });
+  });
+  es.addEventListener("log", (m) => {
+    const d = data(m);
+    onEvent({ type: "log", step: d.step, attempt: d.attempt, offset: d.offset, line: d.line ?? "" });
+  });
+  es.addEventListener("resync", () => {
+    es.close();
+    onError?.();
+  });
   if (onError) es.onerror = onError;
   return () => es.close();
 }

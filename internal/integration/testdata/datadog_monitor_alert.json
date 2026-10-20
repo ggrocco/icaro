@@ -1,0 +1,1 @@
+{"id":"7238479238482734","event_type":"query_alert_monitor","alert_transition":"Triggered","title":"[Triggered] High error rate on api","monitor_id":"123456","priority":"P2","link":"https://app.datadoghq.com/event/event?id=7238479238482734","tags":"env:prod,service:api","date":"1760954400000"}

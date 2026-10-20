@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -60,6 +61,12 @@ type DaemonConfig struct {
 	URL string `koanf:"url" yaml:"url"`
 	// Token is the API token clients send over TCP.
 	Token string `koanf:"token" yaml:"token"`
+	// UIListen is the loopback address `icaro ui` opens for the browser
+	// (ADR 0023). It must be a loopback address.
+	UIListen string `koanf:"ui_listen" yaml:"ui_listen"`
+	// Pprof serves net/http/pprof under /debug/pprof on the Unix socket
+	// only (never TCP), for profiling (ADR 0024).
+	Pprof bool `koanf:"pprof" yaml:"pprof"`
 	// PublicURL is the externally reachable base URL (webhook URLs).
 	PublicURL string `koanf:"public_url" yaml:"public_url"`
 }
@@ -75,6 +82,9 @@ type DockerConfig struct {
 	Host string `koanf:"host" yaml:"host"` // empty => DOCKER_HOST / default socket
 	// StrictRuntime is an optional OCI runtime (e.g. runsc) for untrusted profiles.
 	StrictRuntime string `koanf:"strict_runtime" yaml:"strict_runtime"`
+	// HelperImage contains /icaro and runs Ícaro's helper containers (the
+	// egress proxy). Empty: on Linux, built from the running binary.
+	HelperImage string `koanf:"helper_image" yaml:"helper_image"`
 }
 
 // Limits are the resource ceilings applied to every container Ícaro
@@ -92,6 +102,8 @@ type SessionsConfig struct {
 	// MaxActive caps concurrently running sessions (O1); 0 derives it from RAM.
 	MaxActive      int    `koanf:"max_active" yaml:"max_active"`
 	DefaultProfile string `koanf:"default_profile" yaml:"default_profile"`
+	// HomeMode picks how profile homes are layered: auto | overlay | copy.
+	HomeMode string `koanf:"home_mode" yaml:"home_mode"`
 }
 
 // ProfileConfig is one agent profile: image, agent CLI, egress allowlist
@@ -126,6 +138,9 @@ type PreviewsConfig struct {
 	HTTPPort     int           `koanf:"http_port" yaml:"http_port"`
 	TraefikImage string        `koanf:"traefik_image" yaml:"traefik_image"`
 	Debounce     time.Duration `koanf:"debounce" yaml:"debounce"`
+	// Roots are extra directories watched for compose projects, in
+	// addition to the session worktrees.
+	Roots []string `koanf:"roots" yaml:"roots"`
 }
 
 // MemoryConfig tunes shared memory.
@@ -181,6 +196,7 @@ func Defaults() map[string]any {
 		"version":                  CurrentVersion,
 		"home":                     paths.Default().Root,
 		"database.driver":          "sqlite",
+		"daemon.ui_listen":         "127.0.0.1:8787",
 		"limits.timeout":           "30m",
 		"limits.memory_mb":         2048,
 		"limits.cpus":              2.0,
@@ -283,6 +299,9 @@ func (c *Config) Validate() error {
 	if c.Database.Driver == "postgres" && c.Database.DSN == "" {
 		errs = append(errs, errors.New("database.dsn is required for postgres"))
 	}
+	if c.Daemon.UIListen != "" && !isLoopback(c.Daemon.UIListen) {
+		errs = append(errs, fmt.Errorf("daemon.ui_listen %q must be a loopback address (use --listen for anything else)", c.Daemon.UIListen))
+	}
 	if c.Workflows.Concurrency < 1 {
 		errs = append(errs, errors.New("workflows.concurrency must be >= 1"))
 	}
@@ -361,4 +380,16 @@ func expandHome(p string) string {
 		}
 	}
 	return p
+}
+
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

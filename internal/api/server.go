@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -72,17 +73,14 @@ func (s *Server) routes() {
 	m.Handle("POST /api/v1/workflows/{name}/disable", s.auth(store.ScopeWrite, s.handleSetStatus(store.WorkflowDisabled)))
 	m.Handle("GET /api/v1/workflows/{name}/versions", s.auth(store.ScopeRead, s.handleListVersions))
 	m.Handle("GET /api/v1/workflows/{name}/versions/{version}", s.auth(store.ScopeRead, s.handleGetVersion))
-	m.Handle("POST /api/v1/workflows/{name}/runs", s.auth(store.ScopeWrite, s.handleEnqueueRun))
+	m.Handle("POST /api/v1/workflows/{name}/runs", s.auth(store.ScopeWrite, s.handleStartRun))
 	m.Handle("GET /api/v1/workflows/{name}/runs", s.auth(store.ScopeRead, s.handleListRuns))
 
 	m.Handle("GET /api/v1/runs", s.auth(store.ScopeRead, s.handleListRuns))
 	m.Handle("GET /api/v1/runs/{id}", s.auth(store.ScopeRead, s.handleGetRun))
 	m.Handle("POST /api/v1/runs/{id}/cancel", s.auth(store.ScopeWrite, s.handleCancelRun))
-	m.Handle("GET /api/v1/runs/{id}/steps/{idx}/logs", s.auth(store.ScopeRead, s.handleStepLogs))
-
-	m.Handle("GET /api/v1/connections", s.auth(store.ScopeRead, s.handleListConnections))
-	m.Handle("POST /api/v1/connections", s.auth(store.ScopeAdmin, s.handleUpsertConnection))
-	m.Handle("DELETE /api/v1/connections/{name}", s.auth(store.ScopeAdmin, s.handleDeleteConnection))
+	m.Handle("GET /api/v1/runs/{id}/events", s.auth(store.ScopeRead, s.handleRunEvents))
+	m.Handle("GET /api/v1/runs/{id}/steps/{step}/logs", s.auth(store.ScopeRead, s.handleStepLogs))
 }
 
 type ctxKey int
@@ -127,6 +125,27 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.Handler {
 		}
 		h := r.Header.Get("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
+			// The web UI authenticates with a cookie session; mutations also
+			// need the CSRF header, which a cross-site page cannot send
+			// without a preflight the daemon never answers (ADR 0023).
+			if c, err := r.Cookie(SessionCookie); err == nil {
+				p, err := s.svc.UISession(r.Context(), c.Value)
+				if err != nil {
+					s.writeError(w, err)
+					return
+				}
+				if !safeMethod(r.Method) && r.Header.Get(CSRFHeader) != "1" {
+					s.writeError(w, fmt.Errorf("%w: missing %s header", service.ErrForbidden, CSRFHeader))
+					return
+				}
+				if !service.ScopeAllows(p.Scope, scope) {
+					s.writeError(w, service.ErrForbidden)
+					return
+				}
+				tok := &store.APIToken{ID: "ui:" + p.Name, Name: p.Name, Scope: p.Scope}
+				next(w, r.WithContext(context.WithValue(r.Context(), tokenKey, tok)))
+				return
+			}
 			w.Header().Set("WWW-Authenticate", `Bearer realm="icaro"`)
 			s.writeError(w, service.ErrUnauthorized)
 			return
@@ -170,6 +189,16 @@ type statusWriter struct {
 	status int
 }
 
+// Flush lets streaming handlers (SSE) flush through the wrapper.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
@@ -179,6 +208,8 @@ func (w *statusWriter) WriteHeader(code int) {
 type errorBody struct {
 	Error  string          `json:"error"`
 	Issues workflow.Issues `json:"issues,omitempty"`
+	// Fields lists missing trigger fields for a manual run.
+	Fields []string `json:"fields,omitempty"`
 }
 
 func (s *Server) writeError(w http.ResponseWriter, err error) {
@@ -186,7 +217,14 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	body := errorBody{Error: err.Error()}
 	var ve *service.ValidationError
 	var br *service.BadRequest
+	var mt *service.MissingTriggerFieldsError
+	var conflict *service.Conflict
 	switch {
+	case errors.As(err, &mt):
+		status = http.StatusBadRequest
+		body.Fields = mt.Fields
+	case errors.As(err, &conflict):
+		status = http.StatusConflict
 	case errors.As(err, &ve):
 		status = http.StatusUnprocessableEntity
 		body.Error = "validation failed"

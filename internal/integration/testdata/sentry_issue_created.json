@@ -1,0 +1,1 @@
+{"action":"created","installation":{"uuid":"a8e5d37a-696c-4c54-adb5-b3f28d64c7de"},"data":{"issue":{"id":"1170820242","title":"ZeroDivisionError: division by zero","culprit":"billing.views in invoice","level":"error","web_url":"https://acme.sentry.io/issues/1170820242/","project":{"id":"1","slug":"backend"}}},"actor":{"type":"application","name":"Sentry"}}
