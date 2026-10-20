@@ -46,6 +46,10 @@ jobs:
       - name: memory search latency (10k documents)
         if: matrix.os == 'ubuntu-latest'
         run: go test -count=1 -run QueryLatency10k ./internal/memory
+      # Phase 11 load budget at full size: 500 runs x 5 steps, 200 SSE streams.
+      - name: load tests
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -count=1 -tags load -run Load ./internal/workflow/engine ./internal/api
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - uses: actions/upload-artifact@v4
