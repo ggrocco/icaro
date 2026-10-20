@@ -19,4 +19,4 @@
 - [x] Removing a worktree runs an idempotent cleanup.
 - [x] Two worktrees with the same slug do not collide.
 - [x] A dangerous compose file is blocked and explains why.
-- [x] An agent editing code inside its container produces a visible change in the preview (compose project with a declared port) on both macOS and Linux. *(A worktree edit is visible through the preview on Linux (integration test); the agent-container path and macOS still need checking.)*
+- [ ] An agent editing code inside its container produces a visible change in the preview (compose project with a declared port) on both macOS and Linux. *(Linux: verified, an edit made inside the agent container reaches the preview (`hack/e2e`). macOS: not yet run (spike S1).)*
