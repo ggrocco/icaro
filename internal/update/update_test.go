@@ -87,7 +87,7 @@ func (f *fixture) updater(t *testing.T, exe string) *Updater {
 func currentBinary(t *testing.T) string {
 	t.Helper()
 	exe := filepath.Join(t.TempDir(), "icaro")
-	if err := os.WriteFile(exe, []byte("old-binary"), 0o755); err != nil {
+	if err := os.WriteFile(exe, []byte("old-binary"), 0o700); err != nil { //nolint:gosec // fixture binary must be executable
 		t.Fatal(err)
 	}
 	return exe
@@ -183,7 +183,7 @@ func TestUpdateRefusesTamperedArtifacts(t *testing.T) {
 
 func TestRealSmokeTest(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "icaro")
-	_ = os.WriteFile(p, []byte("#!/bin/sh\necho v9\n"), 0o755)
+	_ = os.WriteFile(p, []byte("#!/bin/sh\necho v9\n"), 0o700) //nolint:gosec // fixture binary must be executable
 	out, err := runVersion(context.Background(), p)
 	if err != nil || strings.TrimSpace(out) != "v9" {
 		t.Fatalf("%q %v", out, err)

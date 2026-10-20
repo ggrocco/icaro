@@ -26,6 +26,8 @@
 | Scheduler | A small in-house engine based on `time` + a well-established external cron parser | Control over persistence and recovery | The scheduler cannot be the single source; persist next-run and leases |
 | Workflow UI | A React Flow canvas, only in the web module | Complex drag/drop is not worth implementing from scratch | The schema is the source of truth; the UI is only an editor |
 | Updates | Brew for macOS; a signed/checksummed release for the install script | Conventional distribution | Updates only download signed/checksummed artifacts |
+| Release signing | ed25519 detached signature over `checksums.txt` (offline-verifiable by `install.sh` and `icaro update`) plus cosign keyless; staged update with smoke test, atomic swap, `icaro.prev` rollback ([ADR 0021](adr/0021-release-signing-and-updates.md)) | Verification needs no extra tools; one key pinned in the binary | Key rotation needs a release signed by the old key; macOS notarization still pending |
+| Usage sources | Local agent logs per provider, each row with source and confidence; cost only as a list-price estimate ([ADR 0022](adr/0022-usage-from-local-logs.md)) | Offline, no provider credentials, covers subscriptions | Only as complete as local logs; pricing table needs upkeep |
 
 ## Mandatory MVP cuts
 

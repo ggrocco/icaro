@@ -6,14 +6,14 @@
 
 ## Deliverables
 
-- [ ] Build a static, lightweight GitHub Pages landing page.
-- [ ] Write quickstart, security, workflows, previews, and FAQ.
-- [ ] Use the Ícaro artwork with a license and alt text.
+- [x] Build a static, lightweight GitHub Pages landing page ([`site/`](../../../site/index.html), [`pages.yml`](../../../.github/workflows/pages.yml)).
+- [ ] Write quickstart, security, workflows, previews, and FAQ. *Index stub and [upgrading guide](../../../docs/upgrading.md) exist; the rest waits for the final CLI and APIs.*
+- [x] Use the Ícaro artwork with a license and alt text ([`site/icaro.svg`](../../../site/icaro.svg), CC BY 4.0).
 - [ ] Create reproducible examples.
-- [ ] Add CONTRIBUTING, CODEOWNERS, SECURITY, and a roadmap.
+- [x] Add CONTRIBUTING, CODEOWNERS, SECURITY, and a roadmap ([CONTRIBUTING](../../../CONTRIBUTING.md), [CODEOWNERS](../../../.github/CODEOWNERS), [SECURITY](../../../SECURITY.md), [roadmap](../04-roadmap.md)).
 
 ## Acceptance criteria
 
 - [ ] The quickstart passes in the CI/documentation test.
-- [ ] No broken links.
+- [x] No broken links (`hack/linkcheck` runs in the [docs workflow](../../../.github/workflows/docs.yml) on every PR).
 - [ ] Examples use images pinned by digest.

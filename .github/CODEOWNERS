@@ -1,0 +1,11 @@
+# Default owner for everything.
+* @ggrocco
+
+# Security boundaries need the owner's review (blueprint/docs/03-security.md).
+/internal/container/ @ggrocco
+/internal/creds/ @ggrocco
+/internal/secrets/ @ggrocco
+/internal/update/ @ggrocco
+/install.sh @ggrocco
+/.goreleaser.yaml @ggrocco
+/.github/workflows/ @ggrocco

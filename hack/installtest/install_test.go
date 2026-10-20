@@ -39,6 +39,7 @@ func newMirror(t *testing.T, version string, tamper ...func(files map[string][]b
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireRawinEd25519(t, pem, priv)
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(zw)
@@ -72,13 +73,28 @@ func newMirror(t *testing.T, version string, tamper ...func(files map[string][]b
 	return m
 }
 
+// requireRawinEd25519 skips when the local openssl cannot verify ed25519
+// with -rawin (macOS ships LibreSSL, which cannot; install.sh then tells
+// the user to install OpenSSL 3).
+func requireRawinEd25519(t *testing.T, pem string, priv ed25519.PrivateKey) {
+	t.Helper()
+	dir := t.TempDir()
+	data, key, sig := filepath.Join(dir, "d"), filepath.Join(dir, "k.pem"), filepath.Join(dir, "s")
+	_ = os.WriteFile(data, []byte("probe"), 0o600)
+	_ = os.WriteFile(key, []byte(pem), 0o600)
+	_ = os.WriteFile(sig, ed25519.Sign(priv, []byte("probe")), 0o600)
+	if err := exec.Command("openssl", "pkeyutl", "-verify", "-pubin", "-inkey", key, "-rawin", "-in", data, "-sigfile", sig).Run(); err != nil { //nolint:gosec // fixed probe command
+		t.Skipf("openssl cannot verify ed25519 with -rawin (needs OpenSSL 3.0+): %v", err)
+	}
+}
+
 func (m *mirror) install(t *testing.T, binDir string, extraEnv []string, args ...string) (string, error) {
 	t.Helper()
 	script, err := filepath.Abs("../../install.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", append([]string{script, "--base-url", m.srv.URL, "--bin-dir", binDir}, args...)...)
+	cmd := exec.Command("sh", append([]string{script, "--base-url", m.srv.URL, "--bin-dir", binDir}, args...)...) //nolint:gosec // test runs the repo's install.sh
 	cmd.Env = append(os.Environ(), extraEnv...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -94,7 +110,7 @@ func TestInstallVerifiesAndInstalls(t *testing.T) {
 	if !strings.Contains(out, "signature OK") || !strings.Contains(out, "checksum OK") {
 		t.Fatalf("checks not reported:\n%s", out)
 	}
-	got, err := exec.Command(filepath.Join(bin, "icaro")).Output()
+	got, err := exec.Command(filepath.Join(bin, "icaro")).Output() //nolint:gosec // the binary this test just installed
 	if err != nil || strings.TrimSpace(string(got)) != "v0.4.0" {
 		t.Fatalf("installed binary: %q %v", got, err)
 	}

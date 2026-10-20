@@ -108,7 +108,7 @@ func (m *Manager) Install(ctx context.Context) (Unit, error) {
 	if err != nil {
 		return u, err
 	}
-	if err := os.MkdirAll(filepath.Dir(u.Path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(u.Path), 0o750); err != nil {
 		return u, err
 	}
 	if err := os.WriteFile(u.Path, u.Content, 0o644); err != nil { //nolint:gosec // service managers require readable units
