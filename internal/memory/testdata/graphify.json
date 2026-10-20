@@ -1,0 +1,13 @@
+{
+  "directed": true,
+  "nodes": [
+    {"id": "auth.login", "label": "login()", "type": "function", "source_file": "src/auth.py", "source_location": "L12", "description": "Validates credentials against the session store", "community": 3},
+    {"id": "auth.py", "label": "src/auth.py", "type": "file", "source_file": "src/auth.py"},
+    {"id": "jwt-choice", "label": "Use short-lived JWTs", "type": "decision", "description": "Sessions use 15 minute JWTs with refresh rotation"}
+  ],
+  "links": [
+    {"source": "auth.py", "target": "auth.login", "relation": "contains"},
+    {"source": "auth.login", "target": "jwt-choice", "relation": "rationale_for"},
+    {"source": "auth.login", "target": "external.bcrypt", "relation": "calls"}
+  ]
+}

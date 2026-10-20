@@ -1,0 +1,4 @@
+{"memories": [
+  {"id": "a1", "title": "Prefer pgx over lib/pq", "content": "pgx is maintained and supports COPY", "tags": ["decision", "db"], "namespace": "icaro", "tier": "long", "created_at": "2026-01-02T03:04:05Z", "related": ["a2"]},
+  {"id": "a2", "title": "Migrations run per dialect", "content": "goose with sqlite and postgres dirs", "tags": ["db"], "tier": "mid"}
+]}
