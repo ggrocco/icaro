@@ -7,12 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"icaro/internal/paths"
 )
 
 func TestAcquireIsExclusiveAndCleansUp(t *testing.T) {
-	l := paths.New(filepath.Join(t.TempDir(), "root"))
+	l := paths.New(shortTempDir(t))
 	inst, err := Acquire(l)
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +31,7 @@ func TestAcquireIsExclusiveAndCleansUp(t *testing.T) {
 	if err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("socket mode: %v %v", fi, err)
 	}
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })}
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })}
 	go func() { _ = srv.Serve(ln) }()
 	ctx := context.Background()
 	if err := Ping(ctx, l); err != nil {
@@ -81,4 +82,16 @@ func TestOrphanDetectionAndCleanup(t *testing.T) {
 	if st.Orphaned() {
 		t.Fatalf("still orphaned: %+v", st)
 	}
+}
+
+// shortTempDir keeps socket paths under the 104-byte sun_path limit on
+// macOS, where t.TempDir() lives under a long /var/folders path.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	d, err := os.MkdirTemp("/tmp", "icaro-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return filepath.Join(d, "r")
 }

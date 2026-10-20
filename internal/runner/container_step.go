@@ -191,7 +191,10 @@ func (r *Runner) runContainerStep(ctx context.Context, rc *runCtx, step *workflo
 
 	// Drain logs (bounded) and finalize the file.
 	select {
-	case <-logDone:
+	case lerr := <-logDone:
+		if lerr != nil {
+			r.log.Warn("log capture ended with an error", "run", rc.run.ID, "step", step.Name, "err", lerr)
+		}
 	case <-time.After(10 * time.Second):
 	}
 	_ = scrub.Flush()

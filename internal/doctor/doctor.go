@@ -78,10 +78,10 @@ func Run(ctx context.Context, checks []Check, fix bool) []Report {
 func Worst(reports []Report) Severity {
 	worst := OK
 	for _, r := range reports {
-		switch {
-		case r.Severity == Error:
+		switch r.Severity {
+		case Error:
 			return Error
-		case r.Severity == Warning:
+		case Warning:
 			worst = Warning
 		}
 	}

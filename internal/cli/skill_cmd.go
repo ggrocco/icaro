@@ -121,13 +121,13 @@ func copyFS(src fs.FS, dest string) error {
 		}
 		target := filepath.Join(dest, filepath.FromSlash(p))
 		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			return os.MkdirAll(target, 0o750)
 		}
 		b, err := fs.ReadFile(src, p)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o644)
+		return os.WriteFile(target, b, 0o600)
 	})
 }
 
@@ -154,7 +154,7 @@ func mergeJSONServer(path, section, name string, server map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	return os.WriteFile(path, append(out, '\n'), 0o600)
@@ -170,7 +170,7 @@ func appendTOMLServer(path, exe string) error {
 	if strings.Contains(string(b), "[mcp_servers.icaro]") {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	block := fmt.Sprintf("\n[mcp_servers.icaro]\ncommand = %q\nargs = [\"mcp\"]\n", exe)

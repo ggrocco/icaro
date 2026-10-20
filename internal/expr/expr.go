@@ -183,9 +183,10 @@ func findClose(s string) int {
 		c := s[i]
 		switch {
 		case quote != 0:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == quote {
+			case quote:
 				quote = 0
 			}
 		case c == '\'' || c == '"':

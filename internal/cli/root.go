@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -147,6 +146,3 @@ func newVersionCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&long, "long", false, "include platform and Go version")
 	return cmd
 }
-
-// requestTimeout bounds one-shot client calls.
-const requestTimeout = 60 * time.Second

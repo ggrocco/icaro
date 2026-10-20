@@ -55,10 +55,17 @@ func Acquire(l paths.Layout) (*Instance, error) {
 	return &Instance{layout: l, lock: lock}, nil
 }
 
+// maxSocketPath is the portable sun_path limit (104 on macOS, 108 on
+// Linux, minus the terminator).
+const maxSocketPath = 103
+
 // ListenUnix binds the daemon socket (0600). A leftover socket from a dead
 // daemon is safe to remove because we hold the lock.
 func (i *Instance) ListenUnix() (net.Listener, error) {
 	p := i.layout.Socket()
+	if len(p) > maxSocketPath {
+		return nil, fmt.Errorf("socket path %s is %d bytes, over the %d-byte Unix limit; use a shorter ICARO_HOME", p, len(p), maxSocketPath)
+	}
 	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}

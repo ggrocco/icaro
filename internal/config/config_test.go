@@ -38,7 +38,7 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Profiles["claude"].Egress == nil || len(cfg.Profiles["claude"].Egress) == 0 {
+	if len(cfg.Profiles["claude"].Egress) == 0 {
 		t.Fatal("claude profile must ship an egress allowlist")
 	}
 }

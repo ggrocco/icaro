@@ -34,9 +34,9 @@ func TestPermissionsCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := filepath.Join(l.ConfigDir(), "icaro.db")
-	_ = os.WriteFile(f, nil, 0o644)
+	_ = os.WriteFile(f, nil, 0o644) //nolint:gosec // deliberately insecure fixture
 	// User content below worktrees is not policed.
-	_ = os.MkdirAll(filepath.Join(l.Worktrees(), "p", "src"), 0o755)
+	_ = os.MkdirAll(filepath.Join(l.Worktrees(), "p", "src"), 0o755) //nolint:gosec // user content may be world-readable
 	ctx := context.Background()
 	reps := Run(ctx, []Check{PermissionsCheck(l)}, false)
 	if reps[0].Severity != Error {
