@@ -57,8 +57,8 @@ The Go code in the repository was built from the superseded `docs/` plan ([ADR 0
 | Interpolation & gating | Go `text/template` `{{ }}`, `if:` | `${{ }}`, `when` (O3) | 2 |
 | Step graph & retry | Linear sequence, `continue_on_error`, `retry: {attempts, backoff}` | DAG with `needs`; integer `retry` per the schema | 2 |
 | Schema | Generated `schema/workflow.schema.json` | Generated output equal to the [blueprint contract](schemas/workflow.schema.json) (drift test) | 2 |
-| Triggers | `on.webhook` at `/hooks/{workflow}/{token}` with the raw body as input; `on.schedule` | `triggers:` (`manual`, `cron`, integration events) at `/hooks/<integration>` with normalized `trigger.*` | 3 |
-| Credentials | Named connections injected as `ICARO_CONN_*`; `http` auth from a connection | `${{ secrets.* }}`; host-bound integration credentials; agent creds in the profile home | 1 (home), 3 (integrations) |
+| Triggers | ~~`on.webhook` at `/hooks/{workflow}/{token}` with the raw body as input; `on.schedule`~~ Done: `internal/integration` serves `/hooks/<integration>` and `/hooks/webhook/<token>` with normalized `trigger.*`, and `internal/scheduler` fires `cron` triggers ([ADR 0015](adr/0015-manifest-schema-webhook-pipeline.md), [0016](adr/0016-pack-loading-action-execution.md)) | `triggers:` (`manual`, `cron`, integration events) at `/hooks/<integration>` with normalized `trigger.*` | 3 |
+| Credentials | Named connections injected as `ICARO_CONN_*`; `http` auth from a connection. Phase 3 part done: `icaro credential add` stores host-bound `<integration>.<name>` secrets used only by the action executor | `${{ secrets.* }}`; host-bound integration credentials; agent creds in the profile home | 1 (home), 3 (integrations) |
 
 Kept as is: the SQLite + Postgres store with portable SQL and per-dialect migrations, the sandbox hardening flags, log scrubbing, hashed API tokens, run-lineage columns, and the image-step I/O contract (`hack/spike-io` checks it against a read-only root filesystem).
 
