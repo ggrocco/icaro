@@ -298,9 +298,10 @@ func (m *Manager) project(ctx context.Context, info RepoInfo) (*store.Project, e
 	if name == "" {
 		name = "project"
 	}
-	p, err := m.o.Store.UpsertProject(ctx, &store.Project{Name: name, RootPath: info.Root, Remote: info.Remote})
+	id := ProjectIDForRoot(info.Root)
+	p, err := m.o.Store.UpsertProject(ctx, &store.Project{ID: id, Name: name, RootPath: info.Root, Remote: info.Remote})
 	if errors.Is(err, store.ErrConflict) {
-		p, err = m.o.Store.UpsertProject(ctx, &store.Project{Name: name + "-" + repoKey(info.Root)[len(repoKey(info.Root))-6:], RootPath: info.Root, Remote: info.Remote})
+		p, err = m.o.Store.UpsertProject(ctx, &store.Project{ID: id, Name: name + "-" + repoKey(info.Root)[len(repoKey(info.Root))-6:], RootPath: info.Root, Remote: info.Remote})
 	}
 	return p, err
 }

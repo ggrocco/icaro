@@ -42,6 +42,10 @@ jobs:
           go-version-file: go.mod
       - run: go generate ./... && git diff --exit-code
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
+      # The latency target (ADR 0020) is skipped under -race; check it here.
+      - name: memory search latency (10k documents)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -count=1 -run QueryLatency10k ./internal/memory
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - uses: actions/upload-artifact@v4

@@ -21,6 +21,8 @@ import (
 	"icaro/internal/creds"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
+	"icaro/internal/mcp"
+	"icaro/internal/memory"
 	"icaro/internal/paths"
 	"icaro/internal/preview"
 	"icaro/internal/runner"
@@ -57,6 +59,8 @@ type App struct {
 	// Previews is nil when previews.enabled is false. It implements
 	// session.PreviewHook for the session manager.
 	Previews *preview.Manager
+	Memory   *memory.Engine
+	MCP      *mcp.Server // host MCP server at /mcp; Phase 4 adds authoring tools
 
 	components []Component
 	checks     []doctor.Check

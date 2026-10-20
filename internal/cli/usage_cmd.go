@@ -37,7 +37,7 @@ a day's estimated spend reaches usage.daily_limit_usd, in usage.timezone.`,
 			if err != nil {
 				return fmt.Errorf("usage.timezone: %w", err)
 			}
-			since, err := parseSince(sinceFlag, time.Now().In(loc))
+			since, err := parseUsageSince(sinceFlag, time.Now().In(loc))
 			if err != nil {
 				return err
 			}
@@ -101,8 +101,8 @@ func printUsage(w interface{ Write([]byte) (int, error) }, recs []usage.Record) 
 	_ = tw.Flush()
 }
 
-// parseSince accepts "Nd" or a YYYY-MM-DD date in now's location.
-func parseSince(s string, now time.Time) (time.Time, error) {
+// parseUsageSince accepts "Nd" or a YYYY-MM-DD date in now's location.
+func parseUsageSince(s string, now time.Time) (time.Time, error) {
 	if strings.HasSuffix(s, "d") {
 		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
 		if err == nil && n >= 0 {
