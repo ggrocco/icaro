@@ -64,7 +64,7 @@ func wireWorkflows(_ context.Context, a *App) error {
 		},
 		Profile: profile,
 		Allow:   p.Egress,
-		User:    containerUser(),
+		User:    stepUser(a),
 		LogsDir: a.Layout.Logs(),
 		RunsDir: a.Layout.Runs(),
 	}, deps)
@@ -79,6 +79,16 @@ func wireWorkflows(_ context.Context, a *App) error {
 	}
 	a.Add(&dockerGated{name: "workflow-engine", docker: a.Docker, log: a.Log, run: w.Engine.Run})
 	return nil
+}
+
+// stepUser is the uid:gid step containers run as. With the session spine
+// it is the user the run workspace is owned by (never root, so a root
+// daemon still produces non-root steps that can write /workspace).
+func stepUser(a *App) string {
+	if a.Sessions != nil {
+		return a.Sessions.User()
+	}
+	return containerUser()
 }
 
 // containerUser runs step containers as the daemon's user on Linux so

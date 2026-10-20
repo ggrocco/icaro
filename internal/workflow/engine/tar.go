@@ -11,6 +11,9 @@ type tarFile struct {
 	Name string
 	Mode int64
 	Data []byte
+	// UID/GID own the file inside the container, so a non-root step can
+	// rewrite /icaro/output.json.
+	UID, GID int
 }
 
 // tarball builds an in-memory tar of flat files (no directories).
@@ -22,7 +25,7 @@ func tarball(files []tarFile) *bytes.Buffer {
 		if mode == 0 {
 			mode = 0o644
 		}
-		_ = tw.WriteHeader(&tar.Header{Name: f.Name, Mode: mode, Size: int64(len(f.Data)), Typeflag: tar.TypeReg})
+		_ = tw.WriteHeader(&tar.Header{Name: f.Name, Mode: mode, Size: int64(len(f.Data)), Typeflag: tar.TypeReg, Uid: f.UID, Gid: f.GID})
 		_, _ = tw.Write(f.Data)
 	}
 	_ = tw.Close()

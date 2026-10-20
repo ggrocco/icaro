@@ -286,7 +286,8 @@ func (rx *runExec) createContainer(ctx context.Context, st *workflow.StepSpec, r
 		}
 	}
 	inputJSON, _ := json.Marshal(r.input)
-	files := []tarFile{{Name: outputFile, Data: []byte("{}\n")}, {Name: inputFile, Data: inputJSON}}
+	uid, gid := parseUser(e.cfg.User)
+	files := []tarFile{{Name: outputFile, Data: []byte("{}\n"), UID: uid, GID: gid}, {Name: inputFile, Data: inputJSON, UID: uid, GID: gid}}
 	if err := e.d.Docker.CopyIn(ctx, id, sandbox.IOPath, tarball(files)); err != nil {
 		return fmt.Errorf("copy inputs: %w", err)
 	}
@@ -416,4 +417,18 @@ func mapKeys[V any](m map[string]V) []string {
 func sortStrings(s []string) []string {
 	sort.Strings(s)
 	return s
+}
+
+// parseUser reads "uid:gid" (or "uid"); anything else owns files as root.
+func parseUser(u string) (int, int) {
+	uidS, gidS, _ := strings.Cut(u, ":")
+	uid, err := strconv.Atoi(uidS)
+	if err != nil {
+		return 0, 0
+	}
+	gid, err := strconv.Atoi(gidS)
+	if err != nil {
+		gid = uid
+	}
+	return uid, gid
 }
