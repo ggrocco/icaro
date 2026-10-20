@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,22 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"icaro/internal/apiclient"
 	"icaro/internal/service"
+	"icaro/internal/workflow"
 )
-
-// client builds an API client from config (server.url / server.token) and
-// the ICARO_SERVER__TOKEN style environment overrides.
-func (o *rootOpts) client() (*apiclient.Client, error) {
-	cfg, err := o.loadConfig()
-	if err != nil {
-		return nil, err
-	}
-	if cfg.Server.Token == "" {
-		return nil, errors.New("no API token configured: set server.token in icaro.yaml or ICARO_SERVER__TOKEN")
-	}
-	return apiclient.New(cfg.Server.URL, cfg.Server.Token), nil
-}
 
 func readInputArg(path string) ([]byte, error) {
 	if path == "-" {
@@ -41,6 +27,14 @@ func printJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+func init() {
+	register(newWorkflowCmd)
+	register(newRunCmd)
+	register(newRunsCmd)
+	register(newConnectionCmd)
+	register(func(*rootOpts) *cobra.Command { return newSchemaCmd() })
 }
 
 func newWorkflowCmd(opts *rootOpts) *cobra.Command {
@@ -57,7 +51,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -70,8 +64,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "applied %s version %d\n", info.Name, info.Version)
 			if info.WebhookToken != "" {
-				cfg, _ := opts.loadConfig()
-				fmt.Fprintf(cmd.OutOrStdout(), "webhook: POST %s/hooks/%s/%s\n", cfg.Server.URL, info.Name, info.WebhookToken)
+				fmt.Fprintf(cmd.OutOrStdout(), "webhook token: %s\n", info.WebhookToken)
 			}
 			return nil
 		},
@@ -86,7 +79,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -113,7 +106,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 		Short: "Show a workflow (YAML by default)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -134,7 +127,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 		Use:   "list",
 		Short: "List workflows",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -166,7 +159,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 		Short: "Delete a workflow (runs are kept)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -180,7 +173,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			Short: strings.ToUpper(use[:1]) + use[1:] + " a workflow",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				c, err := opts.client()
+				c, err := opts.client(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -199,7 +192,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 		Short: "List versions, or print one version's YAML",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -258,7 +251,7 @@ func newRunCmd(opts *rootOpts) *cobra.Command {
 					return fmt.Errorf("--input: %w", err)
 				}
 			}
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -324,7 +317,7 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 		Use:   "list",
 		Short: "List runs",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -352,7 +345,7 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 		Short: "Show a run and its steps",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -382,7 +375,7 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 				}
 				idx = n
 			}
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -401,7 +394,7 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 		Short: "Cancel a run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -441,7 +434,7 @@ func newConnectionCmd(opts *rootOpts) *cobra.Command {
 				}
 				kv[k] = v
 			}
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -460,7 +453,7 @@ func newConnectionCmd(opts *rootOpts) *cobra.Command {
 		Use:   "list",
 		Short: "List connections (names and types only)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -481,7 +474,7 @@ func newConnectionCmd(opts *rootOpts) *cobra.Command {
 		Short: "Delete a connection",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := opts.client()
+			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -497,7 +490,7 @@ func newSchemaCmd() *cobra.Command {
 		Use:   "schema",
 		Short: "Print the workflow JSON Schema",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := cmd.OutOrStdout().Write(schemaJSON())
+			_, err := cmd.OutOrStdout().Write(workflow.SchemaJSON())
 			return err
 		},
 	}

@@ -31,6 +31,18 @@ func New(baseURL, token string) *Client {
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{Timeout: 60 * time.Second}}
 }
 
+// NewWithHTTP creates a client over a custom transport (e.g. the daemon's
+// Unix socket).
+func NewWithHTTP(baseURL, token string, hc *http.Client) *Client {
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: hc}
+}
+
+// Do performs a raw request against the API; out may be *[]byte for raw
+// bodies. Exposed for commands added by other packages.
+func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {
+	return c.doJSON(ctx, method, path, in, out)
+}
+
 // Error is an API error response.
 type Error struct {
 	Status int

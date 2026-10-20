@@ -4,38 +4,40 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"icaro/internal/app"
 	"icaro/internal/config"
 	"icaro/internal/crypto"
 	"icaro/internal/store"
 )
 
-// openStore opens the configured database, creating the data directory.
+func init() {
+	register(newInitCmd)
+	register(newMigrateCmd)
+	register(newTokenCmd)
+}
+
+// openStore opens the configured database, creating the state root.
 func openStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
-	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-		return nil, err
-	}
-	dsn := cfg.Database.DSN
-	if cfg.Database.Driver == "sqlite" {
-		dsn = cfg.SQLitePath()
-	}
-	return store.Open(ctx, store.Dialect(cfg.Database.Driver), dsn)
+	return app.OpenStore(ctx, cfg)
 }
 
 func newInitCmd(opts *rootOpts) *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Create the data directory, master key and database schema",
+		Short: "Create ~/.icaro, the master key and the database schema",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := opts.loadConfig()
 			if err != nil {
 				return err
 			}
-			if _, err := crypto.LoadMasterKey(cfg.DataDir, true); err != nil {
+			if err := cfg.Layout().Ensure(); err != nil {
+				return err
+			}
+			if _, err := crypto.LoadMasterKey(cfg.Layout().Secrets(), true); err != nil {
 				return err
 			}
 			s, err := openStore(cmd.Context(), cfg)
@@ -46,11 +48,8 @@ func newInitCmd(opts *rootOpts) *cobra.Command {
 			if err := s.Migrate(cmd.Context()); err != nil {
 				return err
 			}
-			if err := os.MkdirAll(cfg.LogsDir(), 0o700); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "initialized %s (%s)\n", cfg.DataDir, cfg.Database.Driver)
-			fmt.Fprintln(cmd.OutOrStdout(), "next: icaro token create --name dev --scope admin")
+			fmt.Fprintf(cmd.OutOrStdout(), "initialized %s (%s)\n", cfg.Home, cfg.Database.Driver)
+			fmt.Fprintln(cmd.OutOrStdout(), "next: icaro setup, then icaro session create")
 			return nil
 		},
 	}
@@ -78,7 +77,7 @@ func newMigrateCmd(opts *rootOpts) *cobra.Command {
 func newTokenCmd(opts *rootOpts) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
-		Short: "Manage API tokens (direct database access)",
+		Short: "Manage API tokens for TCP clients and the web UI (direct database access)",
 	}
 	var name, scope string
 	create := &cobra.Command{

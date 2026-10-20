@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +36,22 @@ func New(svc *service.Service, log *slog.Logger) *Server {
 	s.routes()
 	return s
 }
+
+// Mux exposes the router so other components can register routes; every
+// route must wrap its handler with Auth.
+func (s *Server) Mux() *http.ServeMux { return s.mux }
+
+// Auth wraps a handler with token/local authentication at a scope.
+func (s *Server) Auth(scope string, next http.HandlerFunc) http.Handler { return s.auth(scope, next) }
+
+// WriteError writes the standard JSON error envelope.
+func (s *Server) WriteError(w http.ResponseWriter, err error) { s.writeError(w, err) }
+
+// WriteJSON writes v as JSON.
+func WriteJSON(w http.ResponseWriter, status int, v any) { writeJSON(w, status, v) }
+
+// ReadJSON decodes a size-capped JSON body, rejecting unknown fields.
+func ReadJSON(r *http.Request, v any) error { return readJSON(r, v) }
 
 // Handler returns the root handler with logging and recovery.
 func (s *Server) Handler() http.Handler {
@@ -70,7 +87,30 @@ func (s *Server) routes() {
 
 type ctxKey int
 
-const tokenKey ctxKey = 1
+const (
+	tokenKey ctxKey = iota + 1
+	localKey
+)
+
+// LocalPrincipal is the identity of requests arriving on the daemon's Unix
+// socket. The socket is 0600 inside a 0700 directory, so only the owning
+// user can connect (architecture §3).
+var LocalPrincipal = &store.APIToken{ID: "local", Name: "local", Scope: store.ScopeAdmin}
+
+// ConnContext marks connections accepted on a Unix socket as local; use it
+// as http.Server.ConnContext.
+func ConnContext(ctx context.Context, c net.Conn) context.Context {
+	if _, ok := c.(*net.UnixConn); ok {
+		return context.WithValue(ctx, localKey, true)
+	}
+	return ctx
+}
+
+// IsLocal reports whether the request came over the Unix socket.
+func IsLocal(ctx context.Context) bool {
+	v, _ := ctx.Value(localKey).(bool)
+	return v
+}
 
 // TokenFrom returns the authenticated token for a request.
 func TokenFrom(ctx context.Context) *store.APIToken {
@@ -81,6 +121,10 @@ func TokenFrom(ctx context.Context) *store.APIToken {
 // auth enforces a bearer token with at least the given scope.
 func (s *Server) auth(scope string, next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsLocal(r.Context()) {
+			next(w, r.WithContext(context.WithValue(r.Context(), tokenKey, LocalPrincipal)))
+			return
+		}
 		h := r.Header.Get("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="icaro"`)

@@ -11,9 +11,9 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 
-	"icaro/internal/runner/docker"
-	"icaro/internal/runner/logs"
-	"icaro/internal/runner/sandbox"
+	"icaro/internal/container/docker"
+	"icaro/internal/container/sandbox"
+	"icaro/internal/logs"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 )
@@ -191,7 +191,10 @@ func (r *Runner) runContainerStep(ctx context.Context, rc *runCtx, step *workflo
 
 	// Drain logs (bounded) and finalize the file.
 	select {
-	case <-logDone:
+	case lerr := <-logDone:
+		if lerr != nil {
+			r.log.Warn("log capture ended with an error", "run", rc.run.ID, "step", step.Name, "err", lerr)
+		}
 	case <-time.After(10 * time.Second):
 	}
 	_ = scrub.Flush()

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"icaro/internal/runner/docker"
-	"icaro/internal/runner/logs"
+	"icaro/internal/container/docker"
+	"icaro/internal/logs"
 	"icaro/internal/store"
 )
 
