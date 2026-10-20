@@ -6,7 +6,7 @@
 
 ## Deliverables
 
-- [ ] Implement a repository cache keyed by ref/revision. *(Moved to the session spine: `internal/session` owns worktrees and the repository cache.)*
+- [x] Implement a repository cache keyed by ref/revision. *(Moved to the session spine: `internal/session` owns worktrees and the repository cache; `RunSessions.RepoWorktree`.)*
 - [x] Add a persistent scheduler and a concurrency policy. *(`internal/scheduler`; the policy itself is applied by the engine's `EnqueueRun`.)*
 - [x] Define and version the **manifest schema** (triggers: verify/match/payload normalization; actions: typed inputs, HTTP request template, auth reference, output extraction).
 - [x] Implement **pack management**: embedded read-only `builtin` pack; `icaro integration add/update/push` over git; auto-initialized `local` pack; shadow rules; watch + reload keeping the last good version of an invalid manifest.
@@ -19,7 +19,7 @@
 
 ## Acceptance criteria
 
-- [ ] The same repo is not cloned twice within a single run.
+- [x] The same repo is not cloned twice within a single run. *(`internal/session/manager_test.go`: the same ref and revision resolve to one worktree per run.)*
 - [x] A repeated webhook does not duplicate execution; any recorded delivery can be redelivered.
 - [x] A cron missed during a restart fires exactly once.
 - [x] Secrets do not appear in logs, including HTTP response bodies from actions.

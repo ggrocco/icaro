@@ -11,7 +11,7 @@
 - [x] Create Traefik label overrides and a dedicated network. *(As a network-alias override plus file-provider routes, [ADR 0017](../adr/0017-preview-proxy-file-provider.md).)*
 - [x] Bring compose up/down per worktree and record state; restart only on configuration change (compose/env/lockfile).
 - [ ] Resolve optional `.test` and a later DNS-01 domain/TLS. *(`*.localhost` default and `.test` opt-in with a doctor check are done ([ADR 0018](../adr/0018-preview-naming-and-lint-overrides.md)); DNS-01/TLS is still deferred.)*
-- [ ] Wire the **container↔preview seam** through `session`: the agent's `/workspace` and the preview's build context resolve to the same worktree, with polling watch configured on macOS. *(`preview.Manager` implements `session.PreviewHook` and the macOS polling env; the session manager still has to call it.)*
+- [x] Wire the **container↔preview seam** through `session`: the agent's `/workspace` and the preview's build context resolve to the same worktree, with polling watch configured on macOS. *(`preview.Manager` implements `session.PreviewHook`, and the daemon hooks it into the session manager in `internal/app/previews.go`.)*
 
 ## Acceptance criteria
 
