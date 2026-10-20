@@ -1,31 +1,33 @@
 # Ícaro documentation
 
-User documentation. The design lives in [`blueprint/`](../blueprint/README.md); these pages describe how to use what is built.
+These pages describe how to use what is built. The design (architecture, decisions, security model, roadmap) lives in [`blueprint/`](../blueprint/README.md).
 
 ## Get started
 
-- Install — `install.sh`, Homebrew, or a release archive (see [Upgrading](upgrading.md) for verification and updates)
-- Quickstart — *to be written against the final CLI*
+- [Quickstart](quickstart.md): install, first session, first workflow, the web UI
+- [Installing, upgrading and rolling back](upgrading.md)
 
 ## Use
 
-- Sessions and agents — *to be written*
-- Workflows — *to be written*
-- Previews — *to be written*
-- Shared memory — *to be written*
-- Integrations — *to be written*
-- Usage tracking — `icaro usage` (see [Usage tracking](#usage-tracking) below)
+- [Sessions and agents](sessions.md): worktrees, profiles, profile homes and `icaro login`, the egress allowlist, mounts, the concurrency cap
+- [Workflows](workflows.md): the v1 format, steps, outputs, expressions, secrets, runs, concurrency, cron
+- [Integrations](integrations.md): built-in integrations, credentials, webhooks and deliveries, actions, packs
+- [Previews](previews.md): per-worktree preview URLs and the compose lint
+- [Shared memory](memory.md): what agents remember and how they reach it
+- [Agents and MCP](agents.md): `icaro mcp`, the authoring tools, `icaro skill install`
+- [Web UI](ui.md): `icaro ui`, sign-in, what the UI shows
+- [Usage tracking](#usage-tracking)
+- [CLI reference](cli.md) (generated)
 
 ## Operate
 
-- [Upgrading and rollback](upgrading.md)
-- Start at login — `icaro service install` (see [Start at login](#start-at-login) below)
-- Security — [SECURITY.md](../SECURITY.md) and the [security model](../blueprint/docs/03-security.md)
-- FAQ — *to be written*
+- [Security](security.md): what you can rely on, what you cannot, and `icaro doctor`
+- [Start at login](#start-at-login)
+- [FAQ](faq.md)
 
 ## Usage tracking
 
-`icaro usage` reads the Claude Code transcripts written in each profile home (and, with `--host-claude`, your own `~/.claude`, read-only) and prints tokens per day and model. Every row names its source and confidence. Costs are list-price estimates and are left blank for models without a price entry; they never come from the provider. Set `usage.daily_limit_usd` to get an alert when a day's estimated spend reaches it; days follow `usage.timezone`. An unreadable source shows as an `unavailable` row and never fails the command.
+`icaro usage` reads the Claude Code transcripts written in each profile home and prints tokens per day and model. With `--host-claude` it also reads your own `~/.claude`, read-only. Every row names its source and confidence. Costs are list-price estimates; models without a price entry show no cost, and no cost comes from the provider. Set `usage.daily_limit_usd` to get an alert when a day's estimated spend reaches it; days follow `usage.timezone`. An unreadable source shows as an `unavailable` row and never fails the command.
 
 ## Start at login
 

@@ -225,6 +225,10 @@ func printRun(w io.Writer, run *service.RunInfo) {
 			exit = strconv.Itoa(*st.ExitCode)
 		}
 		out := string(st.Outputs)
+		var compact bytes.Buffer
+		if json.Compact(&compact, st.Outputs) == nil {
+			out = compact.String()
+		}
 		if len(out) > 60 {
 			out = out[:57] + "..."
 		}

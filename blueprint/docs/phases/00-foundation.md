@@ -6,16 +6,16 @@
 
 ## Deliverables
 
-- [ ] Set up a Go + web monorepo and a Makefile.
-- [ ] Define small interfaces and ownership per goroutine/channel.
-- [ ] Implement versioned config and migrations.
-- [ ] Implement lock/socket/PID and clean shutdown.
-- [ ] Add CI: fmt, vet, staticcheck, tests, coverage, and cross-platform build.
-- [ ] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase.
+- [x] Set up a Go + web monorepo and a Makefile.
+- [x] Define small interfaces and ownership per goroutine/channel.
+- [x] Implement versioned config and migrations.
+- [x] Implement lock/socket/PID and clean shutdown.
+- [x] Add CI: fmt, vet, staticcheck, tests, coverage, and cross-platform build.
+- [x] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase.
 
 ## Acceptance criteria
 
-- [ ] `icaro version` works on macOS/Linux.
-- [ ] A duplicate `icaro serve` fails deterministically.
-- [ ] Killing the process and running `icaro doctor` detects and cleans up orphaned state.
-- [ ] Domain coverage meets the [target](../05-engineering.md#coverage); exceptions justified.
+- [x] `icaro version` works on macOS/Linux.
+- [x] A duplicate `icaro serve` fails deterministically.
+- [x] Killing the process and running `icaro doctor` detects and cleans up orphaned state.
+- [ ] Domain coverage meets the [target](../05-engineering.md#coverage); exceptions justified. *(CI reports coverage per package; most domain packages are at 70–90%, below the 95% target, and the exceptions are not yet justified one by one.)*

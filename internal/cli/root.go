@@ -63,6 +63,10 @@ func Main(args []string) int {
 	return 0
 }
 
+// Tree returns the full command tree (used by hack/gendocs to write the
+// CLI reference).
+func Tree() *cobra.Command { return newRootCmd() }
+
 func newRootCmd() *cobra.Command {
 	opts := &rootOpts{}
 	root := &cobra.Command{

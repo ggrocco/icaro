@@ -41,6 +41,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go generate ./... && git diff --exit-code
+      - name: CLI reference is up to date
+        run: go run ./hack/gendocs -check
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
       # The latency target (ADR 0020) is skipped under -race; check it here.
       - name: memory search latency (10k documents)
@@ -80,6 +82,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: make web build
+      - name: quickstart (docs/quickstart.md against a real daemon and Docker)
+        run: go test -count=1 -tags e2e ./hack/quickstart
       - run: cd web && npx playwright install --with-deps chromium
       - run: cd web && npx playwright test
       - name: session spine (worktree -> container -> preview -> memory)
