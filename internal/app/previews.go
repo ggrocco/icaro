@@ -22,6 +22,11 @@ func init() {
 		// The manager runs even while Docker is down: its API answers and
 		// compose failures surface as preview errors.
 		a.Add(a.Previews)
+		if a.Sessions != nil {
+			// The container↔preview seam: sessions report the worktrees they
+			// create and remove (architecture §7).
+			a.Sessions.SetPreviewHook(a.Previews)
+		}
 		api.RegisterPreviews(a.API, a.Previews)
 		for _, c := range PreviewChecks(context.Background(), a.Cfg, a.Store, a.Docker) {
 			a.AddCheck(c)

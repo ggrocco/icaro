@@ -6,23 +6,25 @@
 
 ## Deliverables
 
-- [ ] Create a non-root base Dockerfile with asdf.
-- [ ] Implement image-by-digest, profile, and mount policy.
-- [ ] Implement an idempotent setup with diff preview and overwrite confirmation.
-- [ ] Implement `icaro sh`, `icaro claude`, the CLI adapter, and TTY passthrough.
-- [ ] Install Ícaro inside the image for internal commands.
-- [ ] Implement the **per-profile persistent home** ([ADR 0005](../adr/0005-persistent-home-egress.md)): login seeding, golden seed layer + per-session writable overlay, and the mandatory egress allowlist locked to provider endpoints.
-- [ ] Stand up `internal/session/` and **worktree lifecycle**; an agent runs against a session's worktree ([ADR 0002](../adr/0002-session-spine.md)).
-- [ ] Persist sessions in the `sessions` table and reconcile them on startup ([ADR 0006](../adr/0006-session-persistence-recovery.md)).
-- [ ] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase.
+- [x] Create a non-root base Dockerfile with asdf (`images/agent-base/Dockerfile`, `make image-agent`).
+- [x] Implement image-by-digest, profile, and mount policy ([ADR 0011](../adr/0011-mount-policy.md)).
+- [x] Implement an idempotent setup with diff preview and overwrite confirmation.
+- [x] Implement `icaro sh`, `icaro claude`, the CLI adapter, and TTY passthrough.
+- [x] Install Ícaro inside the image for internal commands.
+- [x] Implement the **per-profile persistent home** ([ADR 0005](../adr/0005-persistent-home-egress.md), [ADR 0012](../adr/0012-egress-proxy-and-home-layers.md)): login seeding, golden seed layer + per-session writable overlay, and the mandatory egress allowlist locked to provider endpoints.
+- [x] Stand up `internal/session/` and **worktree lifecycle**; an agent runs against a session's worktree ([ADR 0002](../adr/0002-session-spine.md)).
+- [x] Persist sessions in the `sessions` table and reconcile them on startup ([ADR 0006](../adr/0006-session-persistence-recovery.md)).
+- [x] Migrate the [existing-code](../04-roadmap.md#existing-code) rows assigned to this phase: the master key moved to the OS secret store (password file fallback); agent sessions bind-mount their worktree and live in the `sessions` table; agents get the per-profile home and egress policy. Workflow steps adopt run sessions with the Phase 2 engine (`session.RunSessions` is ready).
 
 ## Acceptance criteria
 
-- [ ] Running `icaro setup` twice changes nothing without consent.
-- [ ] A file outside the allowlist is not mounted.
-- [ ] `icaro sh` preserves the UID and the expected workspace on both macOS and Linux.
-- [ ] The CLI agent receives a TTY and the correct exit code.
-- [ ] The egress allowlist confines every credential present in the agent container: a request to a non-allowlisted host fails. The host's real `~/.claude` is never mounted.
-- [ ] Two sessions sharing a profile use the seeded login concurrently without corrupting each other's `~/.claude`.
-- [ ] Two sessions on two worktrees run concurrently without interfering.
-- [ ] After a daemon restart, a running session is re-attached or marked `orphaned`, never left ambiguous.
+Verified by tests on Linux; the macOS halves need a Docker Desktop host (CI's macOS job runs the unit tests only).
+
+- [x] Running `icaro setup` twice changes nothing without consent (`internal/cli/setup_test.go`).
+- [x] A file outside the allowlist is not mounted (`internal/container/mounts_test.go`, `TestDisallowedMountFailsStart`).
+- [x] `icaro sh` preserves the UID and the expected workspace on Linux (`TestAgentContainerBaseline`, `TestSessionSpineDocker`, `TestCLISessionTTY`). macOS: pending a Docker Desktop run.
+- [x] The CLI agent receives a TTY and the correct exit code (`TestCLISessionTTY` drives the binary under a pseudo-terminal).
+- [x] The egress allowlist confines every credential present in the agent container: a request to a non-allowlisted host fails (`TestEgressConfinement`). The host's real `~/.claude` is never mounted (mount policy + profile homes).
+- [x] Two sessions sharing a profile use the seeded login concurrently without corrupting each other's `~/.claude` (`TestOverlayHomesConcurrent`, `TestCopyModeIsolatesSessions`).
+- [x] Two sessions on two worktrees run concurrently without interfering (`TestTwoSessionsOnTwoWorktrees`, `TestSessionSpineDocker`).
+- [x] After a daemon restart, a running session is re-attached or marked `orphaned`, never left ambiguous (`TestReconcileAfterRestart`, `TestSessionSpineDocker`).

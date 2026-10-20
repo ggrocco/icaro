@@ -75,6 +75,9 @@ type DockerConfig struct {
 	Host string `koanf:"host" yaml:"host"` // empty => DOCKER_HOST / default socket
 	// StrictRuntime is an optional OCI runtime (e.g. runsc) for untrusted profiles.
 	StrictRuntime string `koanf:"strict_runtime" yaml:"strict_runtime"`
+	// HelperImage contains /icaro and runs Ícaro's helper containers (the
+	// egress proxy). Empty: on Linux, built from the running binary.
+	HelperImage string `koanf:"helper_image" yaml:"helper_image"`
 }
 
 // Limits are the resource ceilings applied to every container Ícaro
@@ -92,6 +95,8 @@ type SessionsConfig struct {
 	// MaxActive caps concurrently running sessions (O1); 0 derives it from RAM.
 	MaxActive      int    `koanf:"max_active" yaml:"max_active"`
 	DefaultProfile string `koanf:"default_profile" yaml:"default_profile"`
+	// HomeMode picks how profile homes are layered: auto | overlay | copy.
+	HomeMode string `koanf:"home_mode" yaml:"home_mode"`
 }
 
 // ProfileConfig is one agent profile: image, agent CLI, egress allowlist
