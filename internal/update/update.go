@@ -78,6 +78,10 @@ func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 		TagName string `json:"tag_name"`
 	}
 	data, err := get(ctx, g.HTTP, g.api()+"/repos/"+g.Repo+"/releases/latest", 1<<20)
+	var se *statusError
+	if errors.As(err, &se) && se.code == http.StatusNotFound {
+		return Release{}, fmt.Errorf("no published release found for %s", g.Repo)
+	}
 	if err != nil {
 		return Release{}, err
 	}
@@ -304,7 +308,7 @@ func get(ctx context.Context, hc *http.Client, url string, limit int64) ([]byte,
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
+		return nil, &statusError{url: url, code: resp.StatusCode}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
@@ -315,6 +319,13 @@ func get(ctx context.Context, hc *http.Client, url string, limit int64) ([]byte,
 	}
 	return data, nil
 }
+
+type statusError struct {
+	url  string
+	code int
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("GET %s: HTTP %d", e.url, e.code) }
 
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)

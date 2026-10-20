@@ -1,0 +1,111 @@
+# Release build (Phase 8, ADR 0021). Run by .github/workflows/release.yml on
+# v* tags. Locally: `goreleaser release --snapshot --clean --skip=sign,sbom`.
+#
+# Required environment in CI:
+#   ICARO_SIGNING_KEY     base64 ed25519 seed (secret) - signs checksums.txt
+#   ICARO_RELEASE_PUBKEY  base64 ed25519 public key - embedded in the binary
+#                         (icaro update) and in the published install.sh
+version: 2
+
+project_name: icaro
+
+before:
+  hooks:
+    - go mod download
+    - mkdir -p build
+    - go run ./hack/sign embed -in install.sh -out build/install.sh
+
+builds:
+  - id: icaro
+    main: ./cmd/icaro
+    binary: icaro
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X icaro/internal/cli.version={{ .Tag }}
+      - -X icaro/internal/update.DefaultPublicKey={{ .Env.ICARO_RELEASE_PUBKEY }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "icaro_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+signs:
+  # Offline-verifiable detached signature used by install.sh and icaro update.
+  - id: ed25519
+    cmd: go
+    args: ["run", "./hack/sign", "sign", "-in", "${artifact}", "-out", "${signature}"]
+    signature: "${artifact}.sig"
+    artifacts: checksum
+    env:
+      - ICARO_SIGNING_KEY={{ .Env.ICARO_SIGNING_KEY }}
+  # Sigstore keyless signature (transparency log), for `cosign verify-blob`.
+  - id: cosign
+    cmd: cosign
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+    signature: "${artifact}.sigstore.json"
+    artifacts: checksum
+
+release:
+  github:
+    owner: ggrocco
+    name: icaro
+  extra_files:
+    - glob: build/install.sh
+
+# Homebrew tap (ggrocco/homebrew-tap): `brew install ggrocco/tap/icaro`.
+homebrew_casks:
+  - name: icaro
+    repository:
+      owner: ggrocco
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/ggrocco/icaro
+    description: Run many coding agents in parallel, each in an isolated session
+    license: MIT
+    binaries: [icaro]
+    caveats: |
+      Ícaro needs Docker. Then run:
+        icaro init && icaro doctor
+      To start the daemon at login: icaro service install
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/icaro"]
+          end
+
+nfpms:
+  - id: packages
+    package_name: icaro
+    formats: [deb, rpm]
+    vendor: Ícaro
+    homepage: https://github.com/ggrocco/icaro
+    maintainer: ggrocco
+    description: Run many coding agents in parallel, each in an isolated session
+    license: MIT
+    file_name_template: "icaro_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

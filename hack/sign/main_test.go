@@ -35,6 +35,19 @@ func TestKeygenSignVerify(t *testing.T) {
 	if err := run([]string{"sign", "-in", in, "-out", sig}, &out); err == nil {
 		t.Fatal("bad key accepted")
 	}
+	tmpl := filepath.Join(dir, "install.sh")
+	_ = os.WriteFile(tmpl, []byte("K='"+placeholder+"'\n"), 0o600)
+	t.Setenv("ICARO_RELEASE_PUBKEY", strings.TrimSpace(pem))
+	dst := filepath.Join(dir, "out.sh")
+	if err := run([]string{"embed", "-in", tmpl, "-out", dst}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); !strings.Contains(string(b), "BEGIN PUBLIC KEY") || strings.Contains(string(b), placeholder) {
+		t.Fatalf("embed: %s", b)
+	}
+	if err := run([]string{"embed", "-in", dst, "-out", dst + "2"}, &out); err == nil {
+		t.Fatal("embed without placeholder must fail")
+	}
 	if err := run(nil, &out); err == nil {
 		t.Fatal("usage")
 	}

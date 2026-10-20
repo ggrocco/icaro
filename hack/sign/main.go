@@ -91,6 +91,39 @@ func run(args []string, stdout io.Writer) error {
 		}
 		fmt.Fprintln(stdout, "signature OK")
 		return nil
+	case "embed":
+		// Writes install.sh with the release public key (PEM) in place of
+		// the placeholder. Without $ICARO_RELEASE_PUBKEY (snapshot builds)
+		// the placeholder is kept and install.sh refuses to verify.
+		fs := flag.NewFlagSet("embed", flag.ContinueOnError)
+		in := fs.String("in", "install.sh", "template")
+		out := fs.String("out", "", "output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(*in)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(data), placeholder) {
+			return fmt.Errorf("%s has no %s placeholder", *in, placeholder)
+		}
+		if raw := strings.TrimSpace(os.Getenv("ICARO_RELEASE_PUBKEY")); raw != "" {
+			pub, err := update.ParsePublicKey(raw)
+			if err != nil {
+				return err
+			}
+			pem, err := update.PublicKeyPEM(pub)
+			if err != nil {
+				return err
+			}
+			data = []byte(strings.Replace(string(data), placeholder, strings.TrimSpace(pem), 1))
+		} else {
+			fmt.Fprintln(os.Stderr, "sign: ICARO_RELEASE_PUBKEY unset; install.sh keeps the placeholder")
+		}
+		return os.WriteFile(*out, data, 0o755) //nolint:gosec // published script
 	}
 	return fmt.Errorf("unknown subcommand %q", args[0])
 }
+
+const placeholder = "__ICARO_RELEASE_PUBKEY__"
