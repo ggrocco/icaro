@@ -35,7 +35,16 @@ func NetworkCheck(e Engine, proxy string) doctor.Check {
 			}
 			return doctor.Result{Severity: doctor.OK, Detail: Network + " exists and " + proxy + " is running"}
 		}
-		return doctor.Result{Severity: doctor.Error, Detail: "the dedicated network " + Network + " is missing", Fix: func(ctx context.Context) (string, error) {
+		// Both are created with the first preview, so a fresh install has
+		// neither; only a proxy without its network is the problem.
+		st, err := e.Inspect(ctx, proxy)
+		if err != nil {
+			return doctor.Result{Severity: doctor.Error, Detail: err.Error()}
+		}
+		if !st.Exists {
+			return doctor.Result{Severity: doctor.OK, Detail: "no preview yet; " + Network + " and " + proxy + " are created with the first one"}
+		}
+		return doctor.Result{Severity: doctor.Error, Detail: proxy + " exists but the dedicated network " + Network + " is missing", Fix: func(ctx context.Context) (string, error) {
 			if _, err := e.EnsureNetwork(ctx, Network, map[string]string{"icaro.managed": "preview"}); err != nil {
 				return "", err
 			}
