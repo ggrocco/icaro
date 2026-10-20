@@ -1,0 +1,380 @@
+:root {
+  --bg: #fbfaf7;
+  --panel: #ffffff;
+  --text: #1d1b16;
+  --muted: #6b665c;
+  --border: #e3dfd5;
+  --accent: #c2410c;
+  --accent-text: #ffffff;
+  --ok: #15803d;
+  --bad: #b91c1c;
+  --warn: #a16207;
+  --run: #1d4ed8;
+  --code: #f4f1ea;
+  --focus: #2563eb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14130f;
+    --panel: #1c1b16;
+    --text: #ece8de;
+    --muted: #a39d90;
+    --border: #34312a;
+    --accent: #fb923c;
+    --accent-text: #1c1b16;
+    --ok: #4ade80;
+    --bad: #f87171;
+    --warn: #facc15;
+    --run: #93c5fd;
+    --code: #24221c;
+    color-scheme: dark;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a {
+  color: var(--accent);
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.skip {
+  position: absolute;
+  left: -999px;
+}
+.skip:focus {
+  left: 8px;
+  top: 8px;
+  background: var(--panel);
+  padding: 8px;
+  z-index: 10;
+}
+.top {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+.top nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.top nav a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 4px 0;
+}
+.top nav a[aria-current="page"] {
+  border-bottom: 2px solid var(--accent);
+}
+.brand {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 18px;
+}
+main {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 22px;
+  margin: 0;
+}
+.h3 {
+  font-size: 16px;
+  margin: 16px 0 8px;
+}
+.h4 {
+  font-size: 14px;
+  margin: 12px 0 6px;
+}
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.actions,
+.row,
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 13px;
+}
+button,
+.button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.primary,
+.button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.ghost {
+  background: transparent;
+}
+.danger {
+  color: var(--bad);
+}
+input,
+select,
+textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  min-width: 0;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+th,
+td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.succeeded,
+.badge.active {
+  color: var(--ok);
+}
+.badge.failed,
+.badge.error {
+  color: var(--bad);
+}
+.badge.running,
+.badge.queued {
+  color: var(--run);
+}
+.badge.cancelled,
+.badge.skipped,
+.badge.disabled,
+.badge.pending {
+  color: var(--muted);
+}
+.notice {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  margin: 8px 0;
+}
+.notice.error {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.empty {
+  text-align: center;
+  padding: 40px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin: 12px 0;
+}
+.tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 6px 12px;
+  color: var(--text);
+  text-decoration: none;
+  text-transform: capitalize;
+}
+.tab.active {
+  border-bottom-color: var(--accent);
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+.pane {
+  min-width: 0;
+}
+.editor {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 480px;
+  height: 60vh;
+  overflow: auto;
+  background: var(--panel);
+}
+.editor-tall .editor {
+  height: 70vh;
+}
+.graph {
+  height: 340px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.code {
+  background: var(--code);
+  padding: 10px;
+  border-radius: 8px;
+  overflow: auto;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-height: 50vh;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.logs {
+  min-height: 160px;
+}
+.diff .add {
+  color: var(--ok);
+}
+.diff .del {
+  color: var(--bad);
+}
+.form fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 0 12px;
+  background: var(--panel);
+}
+.form legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.field .label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.issues {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.issues code {
+  font-size: 12px;
+}
+.steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.step {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 4px;
+}
+.step.active {
+  border-color: var(--accent);
+}
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+}
+.login {
+  max-width: 420px;
+  margin: 12vh auto;
+}
+.login h1 {
+  margin-bottom: 20px;
+  font-size: 28px;
+}

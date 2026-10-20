@@ -3,10 +3,17 @@ PKG      := ./...
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X icaro/internal/cli.version=$(VERSION)
 
-.PHONY: build test test-integration lint generate fmt tidy clean
+.PHONY: build web web-test test test-integration lint generate fmt tidy clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/icaro
+
+# Builds the React UI into web/dist, which the binary embeds.
+web:
+	cd web && npm ci && npm run build
+
+web-test:
+	cd web && npm run typecheck && npm test
 
 test:
 	go test -race -count=1 $(PKG)
@@ -29,3 +36,4 @@ tidy:
 
 clean:
 	rm -rf bin dist coverage.out
+	find web/dist -mindepth 1 ! -name README.txt -delete 2>/dev/null || true
