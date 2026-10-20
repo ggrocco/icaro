@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: gofmt
@@ -22,7 +22,7 @@ jobs:
       # golangci-lint is built from source and needs a toolchain at least as
       # new as the one it was released with, so build it with current stable
       # Go and pin the version (05-engineering: pinned dependencies).
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - uses: golangci/golangci-lint-action@v8
@@ -37,7 +37,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go generate ./... && git diff --exit-code
@@ -70,7 +70,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: cd web && npm ci && npm run typecheck && npm test && npm run build
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: npm production dependency licenses
@@ -83,14 +83,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Go module licenses
         run: go run ./hack/licenses -check
       # Vulnerabilities are checked against the current patch release, the
       # toolchain releases should be built with.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: govulncheck
@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@v4
@@ -131,7 +131,7 @@ jobs:
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o /dev/null ./cmd/icaro
@@ -155,7 +155,7 @@ jobs:
       ICARO_TEST_POSTGRES_DSN: postgres://icaro:icaro@localhost:5432/icaro?sslmode=disable
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: docker version
