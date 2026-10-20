@@ -129,111 +129,154 @@ func TestRunsQueueAndSteps(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, s *Store) {
 		ctx := context.Background()
 		w, _ := s.ApplyWorkflow(ctx, "wf", "x", "{}", "a")
-		mk := func() *Run {
-			r := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, TriggerKind: TriggerAPI, InputJSON: `{"a":1}`}
-			if err := s.CreateRun(ctx, r, []string{"one", "two"}); err != nil {
+		steps := []StepInit{{StepID: "one", Idx: 0, Kind: "image"}, {StepID: "two", Idx: 1, Kind: "uses"}}
+		mk := func(key, policy string) *Run {
+			r := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, TriggerKind: "manual", TriggerJSON: `{"a":1}`,
+				IdempotencyKey: key, Concurrency: policy, Actor: "alice", DeliveryID: "d1"}
+			if err := s.CreateRun(ctx, r, steps); err != nil {
 				t.Fatal(err)
 			}
 			return r
 		}
-		r1, r2 := mk(), mk()
+		r1, r2 := mk("k1", "allow"), mk("", "allow")
 		if r1.RootRunID != r1.ID || r1.Status != RunQueued {
 			t.Fatalf("defaults: %+v", r1)
 		}
+		dup := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, TriggerKind: "manual", IdempotencyKey: "k1"}
+		if err := s.CreateRun(ctx, dup, steps); err != ErrConflict {
+			t.Fatalf("duplicate idempotency key: %v", err)
+		}
+		byKey, err := s.GetRunByIdempotencyKey(ctx, "k1")
+		if err != nil || byKey.ID != r1.ID || byKey.Actor != "alice" || byKey.DeliveryID != "d1" || byKey.TriggerJSON != `{"a":1}` {
+			t.Fatalf("by key: %v %+v", err, byKey)
+		}
+		if _, err := s.GetStepRuns(ctx, dup.ID); err != nil {
+			t.Fatal(err)
+		}
 
-		c1, err := s.ClaimRun(ctx, "runner-a")
-		if err != nil || c1.ID != r1.ID || c1.Status != RunRunning || c1.ClaimedBy != "runner-a" || c1.StartedAt == nil {
+		c1, err := s.ClaimRun(ctx, "daemon")
+		if err != nil || c1.ID != r1.ID || c1.Status != RunRunning || c1.ClaimedBy != "daemon" || c1.StartedAt == nil {
 			t.Fatalf("claim1: %v %+v", err, c1)
 		}
-		c2, err := s.ClaimRun(ctx, "runner-a")
+		// A queue-policy run waits while another run of the workflow runs.
+		r3 := mk("", "queue")
+		c2, err := s.ClaimRun(ctx, "daemon")
 		if err != nil || c2.ID != r2.ID {
 			t.Fatalf("claim2: %v %+v", err, c2)
 		}
-		if _, err := s.ClaimRun(ctx, "runner-a"); err != ErrNotFound {
-			t.Fatalf("empty queue: %v", err)
+		if _, err := s.ClaimRun(ctx, "daemon"); err != ErrNotFound {
+			t.Fatalf("queue policy must wait: %v", err)
+		}
+		_ = s.FinishRun(ctx, r1.ID, RunSucceeded, "")
+		_ = s.FinishRun(ctx, r2.ID, RunSucceeded, "")
+		c3, err := s.ClaimRun(ctx, "daemon")
+		if err != nil || c3.ID != r3.ID {
+			t.Fatalf("claim queued after finish: %v %+v", err, c3)
+		}
+		if err := s.SetRunSession(ctx, r3.ID, "sess1"); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetRun(ctx, r3.ID); got.SessionID != "sess1" || got.Concurrency != "queue" {
+			t.Fatalf("session: %+v", got)
 		}
 
-		steps, err := s.GetRunSteps(ctx, r1.ID)
-		if err != nil || len(steps) != 2 || steps[1].Name != "two" || steps[0].Status != StepPending {
-			t.Fatalf("steps: %v %+v", err, steps)
+		srs, err := s.GetStepRuns(ctx, r1.ID)
+		if err != nil || len(srs) != 2 || srs[1].StepID != "two" || srs[1].Kind != "uses" || srs[0].Status != StepPending {
+			t.Fatalf("steps: %v %+v", err, srs)
 		}
 		now := Now()
 		code := 0
-		st := steps[0]
-		st.Status, st.Attempt, st.ContainerID, st.ExitCode = StepSucceeded, 1, "c123", &code
-		st.OutputJSON, st.LogPath, st.LogSize, st.StartedAt, st.FinishedAt = `{"k":"v"}`, "/l/0.log", 42, &now, &now
-		if err := s.UpdateRunStep(ctx, st); err != nil {
+		st := srs[0]
+		st.Status, st.Attempt, st.ContainerID, st.ExitCode, st.SessionID = StepSucceeded, 1, "c123", &code, "sess"
+		st.OutputsJSON, st.LogPath, st.LogSize, st.LogLines, st.StartedAt, st.FinishedAt = `{"k":"v"}`, "/l/one.1.log", 42, 3, &now, &now
+		if err := s.UpdateStepRun(ctx, st); err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.GetRunStep(ctx, r1.ID, 0)
-		if err != nil || got.Status != StepSucceeded || *got.ExitCode != 0 || got.OutputJSON != `{"k":"v"}` || got.LogSize != 42 || got.StartedAt == nil {
+		got, err := s.GetStepRun(ctx, r1.ID, "one")
+		if err != nil || got.Status != StepSucceeded || *got.ExitCode != 0 || got.OutputsJSON != `{"k":"v"}` || got.LogSize != 42 || got.LogLines != 3 || got.StartedAt == nil {
 			t.Fatalf("step update: %v %+v", err, got)
 		}
-
-		if err := s.Heartbeat(ctx, r1.ID); err != nil {
+		if _, err := s.GetStepRun(ctx, r1.ID, "nope"); err != ErrNotFound {
 			t.Fatal(err)
 		}
-		mine, err := s.ListRunsClaimedBy(ctx, "runner-a")
-		if err != nil || len(mine) != 2 {
-			t.Fatalf("claimed by: %v %d", err, len(mine))
+		if err := s.UpdateStepRun(ctx, &StepRun{RunID: r1.ID, StepID: "nope"}); err != ErrNotFound {
+			t.Fatal(err)
+		}
+
+		// Log index.
+		if _, err := s.LastLogChunk(ctx, r1.ID, "one", 1); err != ErrNotFound {
+			t.Fatal(err)
+		}
+		for i := 1; i <= 3; i++ {
+			if err := s.AddLogChunk(ctx, &LogChunk{RunID: r1.ID, StepID: "one", Attempt: 1, Seq: i, FileOffset: int64(i * 10), LineCount: int64(i)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		last, err := s.LastLogChunk(ctx, r1.ID, "one", 1)
+		if err != nil || last.Seq != 3 || last.FileOffset != 30 {
+			t.Fatalf("last chunk: %v %+v", err, last)
+		}
+		if cs, _ := s.ListLogChunks(ctx, r1.ID, "one", 1); len(cs) != 3 || cs[0].LineCount != 1 {
+			t.Fatalf("chunks %+v", cs)
+		}
+
+		if err := s.Heartbeat(ctx, r3.ID); err != nil {
+			t.Fatal(err)
+		}
+		running, err := s.ListRunsByStatus(ctx, RunRunning)
+		if err != nil || len(running) != 1 || running[0].ID != r3.ID {
+			t.Fatalf("by status: %v %+v", err, running)
 		}
 
 		// Cancel: running run gets flagged, queued run is cancelled outright.
-		r3 := mk()
-		cr, err := s.RequestCancel(ctx, r3.ID)
+		r4 := mk("", "allow")
+		if act, _ := s.ActiveRuns(ctx, w.ID); len(act) != 2 {
+			t.Fatalf("active: %d", len(act))
+		}
+		cr, err := s.RequestCancel(ctx, r4.ID)
 		if err != nil || cr.Status != RunCancelled || cr.FinishedAt == nil {
 			t.Fatalf("cancel queued: %v %+v", err, cr)
 		}
-		cr, err = s.RequestCancel(ctx, r1.ID)
+		if st4, _ := s.GetStepRuns(ctx, r4.ID); st4[0].Status != StepCancelled {
+			t.Fatalf("queued run steps cancelled: %+v", st4[0])
+		}
+		cr, err = s.RequestCancel(ctx, r3.ID)
 		if err != nil || cr.Status != RunRunning || cr.CancelRequestedAt == nil {
 			t.Fatalf("cancel running: %v %+v", err, cr)
 		}
 		if _, err := s.RequestCancel(ctx, "nope"); err != ErrNotFound {
 			t.Fatalf("cancel missing: %v", err)
 		}
-
-		if err := s.FinishRun(ctx, r1.ID, RunFailed, "boom"); err != nil {
+		if err := s.FinishRun(ctx, r3.ID, RunFailed, "boom"); err != nil {
 			t.Fatal(err)
 		}
-		fr, _ := s.GetRun(ctx, r1.ID)
+		fr, _ := s.GetRun(ctx, r3.ID)
 		if fr.Status != RunFailed || fr.Error != "boom" || fr.FinishedAt == nil {
 			t.Fatalf("finish: %+v", fr)
 		}
+		if err := s.FinishRun(ctx, "nope", RunFailed, ""); err != ErrNotFound {
+			t.Fatal(err)
+		}
 
 		list, err := s.ListRuns(ctx, RunFilter{WorkflowID: w.ID})
-		if err != nil || len(list) != 3 || list[0].ID != r3.ID {
+		if err != nil || len(list) != 4 || list[0].ID != r4.ID {
 			t.Fatalf("list: %v %d", err, len(list))
 		}
-		list, _ = s.ListRuns(ctx, RunFilter{Status: RunRunning})
-		if len(list) != 1 || list[0].ID != r2.ID {
+		list, _ = s.ListRuns(ctx, RunFilter{Status: RunFailed, Limit: 5})
+		if len(list) != 1 || list[0].ID != r3.ID {
 			t.Fatalf("filter status: %+v", list)
 		}
 		counts, _ := s.CountRunsByStatus(ctx)
-		if counts[RunRunning] != 1 || counts[RunFailed] != 1 || counts[RunCancelled] != 1 {
+		if counts[RunSucceeded] != 2 || counts[RunFailed] != 1 || counts[RunCancelled] != 1 {
 			t.Fatalf("counts: %v", counts)
 		}
-
-		// Stale release: runner-b's run with an old heartbeat goes back to queued.
-		r4 := mk()
-		if _, err := s.ClaimRun(ctx, "runner-b"); err != nil {
-			t.Fatal(err)
-		}
-		old := ts(Now().Add(-time.Hour))
-		if _, err := s.exec(ctx, `UPDATE runs SET heartbeat_at = ? WHERE id = ?`, old, r4.ID); err != nil {
-			t.Fatal(err)
-		}
-		n, err := s.ReleaseStaleRuns(ctx, "runner-a", 10*time.Minute)
-		if err != nil || n != 1 {
-			t.Fatalf("release: %v %d", err, n)
-		}
-		rr, _ := s.GetRun(ctx, r4.ID)
-		if rr.Status != RunQueued || rr.ClaimedBy != "" {
-			t.Fatalf("released: %+v", rr)
+		if act, _ := s.ActiveWorkflows(ctx); len(act) != 1 {
+			t.Fatal("active workflows")
 		}
 	})
 }
 
-func TestTokensConnectionsMeta(t *testing.T) {
+func TestTokensMeta(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, s *Store) {
 		ctx := context.Background()
 		tok, err := s.CreateToken(ctx, "dev", "hash1", ScopeAdmin)
@@ -258,28 +301,6 @@ func TestTokensConnectionsMeta(t *testing.T) {
 		}
 		if l, _ := s.ListTokens(ctx); len(l) != 1 || l[0].RevokedAt == nil || l[0].LastUsedAt == nil {
 			t.Fatalf("list tokens: %+v", l)
-		}
-
-		c := &Connection{Name: "slack", Type: "generic", FieldsCT: []byte("ct"), FieldNames: []string{"token"}}
-		if err := s.UpsertConnection(ctx, c); err != nil {
-			t.Fatal(err)
-		}
-		c2 := &Connection{Name: "slack", Type: "bearer", FieldsCT: []byte("ct2"), FieldNames: []string{"token", "x"}}
-		if err := s.UpsertConnection(ctx, c2); err != nil {
-			t.Fatal(err)
-		}
-		gc, err := s.GetConnection(ctx, "slack")
-		if err != nil || gc.ID != c.ID || gc.Type != "bearer" || string(gc.FieldsCT) != "ct2" || len(gc.FieldNames) != 2 {
-			t.Fatalf("conn upsert: %v %+v", err, gc)
-		}
-		if l, _ := s.ListConnections(ctx); len(l) != 1 {
-			t.Fatal("list conns")
-		}
-		if err := s.DeleteConnection(ctx, "slack"); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.DeleteConnection(ctx, "slack"); err != ErrNotFound {
-			t.Fatal(err)
 		}
 
 		if _, err := s.GetMeta(ctx, "runner_id"); err != ErrNotFound {

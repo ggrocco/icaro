@@ -116,7 +116,7 @@ Images are free to choose; the engine never bakes credentials into them. Agent c
 | Channel | Mechanism |
 |---|---|
 | Inputs | `ICARO_INPUT_<NAME>` environment variables plus `/icaro/input.json`, holding the step's resolved `input` |
-| Outputs | The step writes a JSON object to `/icaro/output.json`, capped at 1 MiB. Each declared `outputs` entry says how its value is captured, per the schema (a JSON path into that file, stdout, or another file) |
+| Outputs | The step writes a JSON object to `/icaro/output.json`, capped at 1 MiB. Each declared `outputs` entry names its source: `json:<path>` into that file, `stdout`, `stdout:last-line`, or `file:<path under /workspace>` ([ADR 0013](adr/0013-workflow-execution-semantics.md)) |
 | Files | `/workspace` — the run's worktree, shared by the steps of that run |
 | Status | Exit code `0` = success |
 | Logs | stdout/stderr, captured and secret-redacted |
@@ -124,7 +124,7 @@ Images are free to choose; the engine never bakes credentials into them. Agent c
 
 Agent CLIs run headless in workflows: non-interactive mode, prompt in, transcript to the logs, structured result to `/icaro/output.json`.
 
-Two contract details are still open (see [open items](02-decisions-risks.md#open-items)): the `when` grammar, and how an `image` step maps onto a session.
+The `when` grammar is [ADR 0009](adr/0009-expression-language.md), the mapping of an `image` step onto a session is [ADR 0010](adr/0010-run-sessions.md), and dependency, retry, restart and concurrency semantics are [ADR 0013](adr/0013-workflow-execution-semantics.md).
 
 Executor:
 

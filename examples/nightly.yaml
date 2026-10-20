@@ -1,0 +1,13 @@
+# A scheduled workflow. Cron triggers fire from the daemon's scheduler; a
+# fire missed while the daemon was down runs once on restart.
+version: 1
+name: nightly-cleanup
+concurrency: forbid
+triggers:
+  - type: cron
+    cron: "15 3 * * *"
+  - type: manual
+steps:
+  - id: sweep
+    image: alpine:3.20
+    command: echo "sweeping run ${{ run.id }} of ${{ workflow.name }}"
