@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -29,6 +30,13 @@ func newDockerFixture(t *testing.T) (*fixture, *docker.Engine) {
 	t.Cleanup(func() { _ = eng.Close() })
 	f.deps.Docker = eng
 	f.cfg.StepTimeout = 2 * time.Minute
+	// As in the app (Sessions.User): steps run as the daemon's user, or as
+	// a non-root user when the daemon is root — never root, which has no
+	// CAP_DAC_OVERRIDE to write the 0700 workspace.
+	f.cfg.User = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	if os.Getuid() == 0 {
+		f.cfg.User = ""
+	}
 	return f, eng
 }
 

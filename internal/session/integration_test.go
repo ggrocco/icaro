@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -84,9 +85,15 @@ func TestSessionSpineDocker(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	egress := &container.DockerEgress{Engine: eng, HelperBinary: staticIcaro(t), Log: log}
 	homes := &creds.Homes{Layout: cfg.Layout(), Volumes: eng}
+	// A root daemon hands the worktree to an arbitrary container user; a
+	// normal daemon (CI) can only run containers as itself, as in the app.
+	uid := 4321
+	if os.Getuid() != 0 {
+		uid = os.Getuid()
+	}
 	mk := func() *Manager {
 		return New(Options{Store: st, Config: cfg, Engine: eng, Egress: egress, Homes: homes,
-			Images: &container.Images{Engine: eng, Pins: st}, Log: log, MaxActive: 4, UID: 4321, GID: 4321})
+			Images: &container.Images{Engine: eng, Pins: st}, Log: log, MaxActive: 4, UID: uid, GID: uid})
 	}
 	m := mk()
 	runCtx, stop := context.WithCancel(ctx)
@@ -124,7 +131,7 @@ func TestSessionSpineDocker(t *testing.T) {
 		if err != nil {
 			t.Fatalf("session %d exec: %v %s", i, err, out)
 		}
-		if !strings.HasPrefix(out, "4321\n/workspace\nwritten\nicaro-dir") {
+		if !strings.HasPrefix(out, strconv.Itoa(uid)+"\n/workspace\nwritten\nicaro-dir") {
 			t.Fatalf("session %d: %q", i, out)
 		}
 		other := created[1-i]
