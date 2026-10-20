@@ -1,0 +1,1 @@
+{"timestamp":1525698237764,"webhookEvent":"jira:issue_created","issue_event_type_name":"issue_created","user":{"displayName":"Ana"},"issue":{"id":"10001","key":"ENG-12","fields":{"summary":"Login fails on Safari","issuetype":{"name":"Bug"},"project":{"key":"ENG"},"status":{"name":"To Do"}}}}
