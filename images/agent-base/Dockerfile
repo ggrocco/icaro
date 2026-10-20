@@ -40,7 +40,13 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
 
 RUN useradd --create-home --uid 1000 --shell /bin/bash icaro
 
-COPY bin/icaro-linux /usr/local/bin/icaro
+# Multi-arch builds (buildx) provide bin/icaro-linux-<arch>; a local
+# `make image-agent` provides bin/icaro-linux.
+ARG TARGETARCH
+COPY bin/icaro-linux* /tmp/icaro/
+RUN if [ -f "/tmp/icaro/icaro-linux-${TARGETARCH}" ]; then cp "/tmp/icaro/icaro-linux-${TARGETARCH}" /usr/local/bin/icaro; \
+    else cp /tmp/icaro/icaro-linux /usr/local/bin/icaro; fi \
+ && chmod 0755 /usr/local/bin/icaro && rm -rf /tmp/icaro
 
 USER 1000:1000
 WORKDIR /workspace

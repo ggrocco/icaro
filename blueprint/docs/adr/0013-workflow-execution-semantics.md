@@ -25,7 +25,7 @@ Validation rejects any other form. A missing JSON path or file fails the step. `
 
 **Retry and timeout.** `retry: n` allows `n + 1` attempts. The delay before attempt `k + 1` is `2s · 2^(k−1)`, capped at one minute. Each attempt gets the step's `timeout`, or `limits.timeout` when unset. `limits.timeout` is also the ceiling, and validation rejects a larger value. A timed-out container is killed.
 
-**Commands.** An image step's `command` runs as `/bin/sh -c <command>`; without `command`, the image's own entrypoint runs. On Linux, step containers run as the daemon's uid:gid, so files in the bind-mounted workspace keep the user's ownership.
+**Commands.** An image step's `command` runs as `/bin/sh -c <command>`; without `command`, the image's own entrypoint runs. Step containers run as the session user (`Sessions.User()`: the daemon's uid:gid, or 1000:1000 when the daemon runs as root — containers are never root), which also owns the run workspace and the step's `/icaro` files, so files in the bind-mounted workspace keep the user's ownership.
 
 **Restart.** The engine persists a step's container id before starting the container and labels the container with its run, step and attempt. On startup the engine resumes every `running` run:
 - a container that exists and was started is re-attached. Log capture resumes from the last indexed offset, and the step timeout restarts from the moment of re-attach;
