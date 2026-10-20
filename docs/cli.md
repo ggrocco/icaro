@@ -638,6 +638,7 @@ icaro serve [flags]
       --background         start the daemon detached and return once it answers
       --listen string      also listen on TCP (e.g. 127.0.0.1:8787); every TCP request needs an API token
       --log-level string   debug | info | warn | error (default "info")
+      --pprof              serve /debug/pprof on the Unix socket only (also daemon.pprof)
 ```
 
 ## `icaro service`
