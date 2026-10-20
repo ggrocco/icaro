@@ -64,6 +64,31 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: cd web && npm ci && npm run typecheck && npm test && npm run build
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: npm production dependency licenses
+        run: go run ./hack/licenses -npm web -out web/THIRD_PARTY_LICENSES.md -check
+
+  audit:
+    # Dependency/license audit (Phase 11): every module linked into the
+    # binary has an allowed license and THIRD_PARTY_LICENSES.md is current;
+    # govulncheck reports known vulnerabilities in reachable code.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Go module licenses
+        run: go run ./hack/licenses -check
+      # Vulnerabilities are checked against the current patch release, the
+      # toolchain releases should be built with.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   e2e:
     # Critical flows only (05-engineering): create, run and cancel a
