@@ -1,0 +1,80 @@
+# Jira Cloud: webhooks with a secret (X-Hub-Signature, HMAC-SHA256) and REST
+# v2 actions. Set integrations.jira.base_url to https://<site>.atlassian.net.
+# Credentials: jira.webhook_secret, jira.token holding "email:api_token"
+# (basic auth), bound to your site.
+version: 1
+name: jira
+description: Jira issues — react to created/updated issues, create, comment and transition.
+hosts: ["*.atlassian.net"]
+config:
+  base_url:
+    description: Your Jira site, e.g. https://acme.atlassian.net (required for actions).
+auth:
+  token: { kind: basic, credential: token }
+triggers:
+  verify: { kind: hmac-sha256, header: X-Hub-Signature, prefix: "sha256=", encoding: hex }
+  delivery_id: "${{ headers['x-atlassian-webhook-identifier'] }}"
+  events:
+    issue.created:
+      description: An issue was created.
+      match: "body.webhookEvent == 'jira:issue_created'"
+      payload: &issue
+        issue_key: "${{ body.issue.key }}"
+        issue_id: "${{ body.issue.id }}"
+        summary: "${{ body.issue.fields.summary }}"
+        project: "${{ body.issue.fields.project.key }}"
+        status: "${{ body.issue.fields.status.name }}"
+        issue_type: "${{ body.issue.fields.issuetype.name }}"
+    issue.updated:
+      description: An issue was updated.
+      match: "body.webhookEvent == 'jira:issue_updated'"
+      payload: *issue
+actions:
+  create-issue:
+    description: Create an issue.
+    inputs:
+      project: { type: string, required: true, description: "Project key, e.g. ENG." }
+      summary: { type: string, required: true }
+      issue_type: { type: string, default: Task }
+      description: { type: string, default: "" }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/rest/api/2/issue"
+      auth: token
+      body:
+        json:
+          fields:
+            project: { key: "${{ input.project }}" }
+            summary: "${{ input.summary }}"
+            issuetype: { name: "${{ input.issue_type }}" }
+            description: "${{ input.description }}"
+    expect_status: [201]
+    outputs:
+      key: "${{ response.body.key }}"
+      id: "${{ response.body.id }}"
+  add-comment:
+    description: Comment on an issue.
+    inputs:
+      issue: { type: string, required: true, description: "Issue key, e.g. ENG-12." }
+      body: { type: string, required: true }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/rest/api/2/issue/${{ input.issue }}/comment"
+      auth: token
+      body:
+        json: { body: "${{ input.body }}" }
+    expect_status: [201]
+    outputs:
+      id: "${{ response.body.id }}"
+  transition:
+    description: Move an issue through its workflow.
+    inputs:
+      issue: { type: string, required: true }
+      transition_id: { type: string, required: true, description: "Transition id (GET /rest/api/2/issue/<key>/transitions)." }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/rest/api/2/issue/${{ input.issue }}/transitions"
+      auth: token
+      body:
+        json: { transition: { id: "${{ input.transition_id }}" } }
+    expect_status: [204]

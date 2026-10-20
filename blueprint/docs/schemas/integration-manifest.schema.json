@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://icaro.dev/schemas/integration-manifest/v1.json",
+  "title": "Icaro Integration Manifest v1",
+  "description": "A declarative integration (ADR 0007): webhook triggers (verification, event matching, payload normalization into ${{ trigger.* }}) and HTTP actions (typed inputs, request template, auth by reference, output extraction). Manifests execute no code. Expressions use the shared ${{ }} language (ADR 0009).",
+  "type": "object",
+  "required": ["version", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+    "description": {"type": "string", "maxLength": 500},
+    "hosts": {
+      "type": "array",
+      "description": "Complete list of hosts actions may contact (hostname or *.domain). Shown in the permission summary.",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"}
+    },
+    "config": {
+      "type": "object",
+      "description": "Settings with defaults, available to action templates as ${{ config.<key> }}. Only base_url is user-overridable (config integrations.<name>.base_url).",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,62}$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "default": {"type": "string"},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "description": "Named credential references. The credential is the secret <integration>.<credential>, attached only to hosts inside its binding.",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+      "additionalProperties": {"$ref": "#/$defs/authRef"}
+    },
+    "triggers": {"$ref": "#/$defs/triggers"},
+    "actions": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
+      "additionalProperties": {"$ref": "#/$defs/action"}
+    }
+  },
+  "$defs": {
+    "authRef": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["bearer", "header", "basic", "query", "none"]},
+        "credential": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"},
+        "header": {"type": "string", "maxLength": 100},
+        "prefix": {"type": "string", "maxLength": 50},
+        "param": {"type": "string", "maxLength": 100},
+        "username": {"type": "string", "maxLength": 500}
+      }
+    },
+    "triggers": {
+      "type": "object",
+      "required": ["verify", "events"],
+      "additionalProperties": false,
+      "properties": {
+        "verify": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"enum": ["hmac-sha256", "hmac-sha1", "shared-secret", "url-token"]},
+            "header": {"type": "string", "maxLength": 100},
+            "prefix": {"type": "string", "maxLength": 50},
+            "encoding": {"enum": ["hex", "base64"]},
+            "message": {"type": "string", "maxLength": 2000},
+            "credential": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$"}
+          }
+        },
+        "timestamp": {
+          "type": "object",
+          "required": ["header"],
+          "additionalProperties": false,
+          "properties": {
+            "header": {"type": "string", "maxLength": 100},
+            "format": {"enum": ["unix", "unix_ms", "rfc3339"]},
+            "max_skew": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"}
+          }
+        },
+        "delivery_id": {"type": "string", "maxLength": 2000},
+        "challenges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["match", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "match": {"type": "string", "maxLength": 2000},
+              "body": {"type": "string", "maxLength": 2000},
+              "content_type": {"type": "string", "maxLength": 100}
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_.-]{0,99}$"},
+          "additionalProperties": {
+            "type": "object",
+            "required": ["match", "payload"],
+            "additionalProperties": false,
+            "properties": {
+              "description": {"type": "string", "maxLength": 500},
+              "match": {"type": "string", "maxLength": 2000},
+              "payload": {
+                "type": "object",
+                "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,62}$"},
+                "additionalProperties": {"type": "string", "maxLength": 2000}
+              }
+            }
+          }
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["request"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {"type": "string", "maxLength": 500},
+        "inputs": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,62}$"},
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {"enum": ["string", "number", "boolean", "object", "array"]},
+              "required": {"type": "boolean"},
+              "description": {"type": "string", "maxLength": 500},
+              "default": {}
+            }
+          }
+        },
+        "request": {
+          "type": "object",
+          "required": ["method", "url"],
+          "additionalProperties": false,
+          "properties": {
+            "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+            "url": {"type": "string", "maxLength": 2000},
+            "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+            "query": {"type": "object", "additionalProperties": {"type": "string"}},
+            "auth": {"type": "string"},
+            "body": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "json": {},
+                "form": {"type": "object", "additionalProperties": {"type": "string"}},
+                "raw": {"type": "string"},
+                "content_type": {"type": "string"}
+              }
+            }
+          }
+        },
+        "outputs": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,62}$"},
+          "additionalProperties": {"type": "string", "maxLength": 2000}
+        },
+        "expect_status": {"type": "array", "items": {"type": "integer", "minimum": 100, "maximum": 599}},
+        "success": {"type": "string", "maxLength": 2000, "description": "Optional condition over response that must hold for the call to succeed."}
+      }
+    }
+  }
+}

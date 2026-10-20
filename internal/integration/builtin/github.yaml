@@ -1,0 +1,123 @@
+# GitHub: repository webhooks (HMAC X-Hub-Signature-256) and REST actions.
+# Credentials: github.webhook_secret (webhook secret), github.token (PAT or
+# fine-grained token, bound to api.github.com).
+version: 1
+name: github
+description: GitHub repositories, pull requests, issues and commit statuses.
+hosts: [api.github.com]
+config:
+  base_url:
+    default: https://api.github.com
+    description: REST API base URL; set integrations.github.base_url for GitHub Enterprise Server.
+auth:
+  token: { kind: bearer, credential: token }
+triggers:
+  verify: { kind: hmac-sha256, header: X-Hub-Signature-256, prefix: "sha256=", encoding: hex }
+  delivery_id: "${{ headers['x-github-delivery'] }}"
+  events:
+    pull_request.opened:
+      description: A pull request was opened.
+      match: "headers['x-github-event'] == 'pull_request' && body.action == 'opened'"
+      payload: &pr
+        action: "${{ body.action }}"
+        repo: "${{ body.repository.full_name }}"
+        pr_number: "${{ body.pull_request.number }}"
+        title: "${{ body.pull_request.title }}"
+        author: "${{ body.pull_request.user.login }}"
+        head_ref: "${{ body.pull_request.head.ref }}"
+        head_sha: "${{ body.pull_request.head.sha }}"
+        base_ref: "${{ body.pull_request.base.ref }}"
+        url: "${{ body.pull_request.html_url }}"
+        draft: "${{ body.pull_request.draft }}"
+        merged: "${{ body.pull_request.merged }}"
+        sender: "${{ body.sender.login }}"
+    pull_request.synchronize:
+      description: New commits were pushed to a pull request.
+      match: "headers['x-github-event'] == 'pull_request' && body.action == 'synchronize'"
+      payload: *pr
+    pull_request.closed:
+      description: A pull request was closed or merged (see trigger.merged).
+      match: "headers['x-github-event'] == 'pull_request' && body.action == 'closed'"
+      payload: *pr
+    push:
+      description: Commits were pushed to a branch or tag.
+      match: "headers['x-github-event'] == 'push'"
+      payload:
+        repo: "${{ body.repository.full_name }}"
+        ref: "${{ body.ref }}"
+        before: "${{ body.before }}"
+        after: "${{ body.after }}"
+        pusher: "${{ body.pusher.name }}"
+        deleted: "${{ body.deleted }}"
+        commit_count: "${{ length(body.commits) }}"
+        compare_url: "${{ body.compare }}"
+    issue_comment.created:
+      description: A comment was added to an issue or pull request.
+      match: "headers['x-github-event'] == 'issue_comment' && body.action == 'created'"
+      payload:
+        repo: "${{ body.repository.full_name }}"
+        issue_number: "${{ body.issue.number }}"
+        is_pull_request: "${{ has(body.issue.pull_request) }}"
+        comment: "${{ body.comment.body }}"
+        author: "${{ body.comment.user.login }}"
+        url: "${{ body.comment.html_url }}"
+actions:
+  create-issue-comment:
+    description: Comment on an issue or pull request.
+    inputs:
+      repo: { type: string, required: true, description: "owner/name" }
+      number: { type: number, required: true, description: Issue or pull request number. }
+      body: { type: string, required: true, description: Markdown comment body. }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/repos/${{ input.repo }}/issues/${{ input.number }}/comments"
+      headers: { Accept: application/vnd.github+json, X-GitHub-Api-Version: "2022-11-28" }
+      auth: token
+      body:
+        json: { body: "${{ input.body }}" }
+    expect_status: [201]
+    outputs:
+      id: "${{ response.body.id }}"
+      url: "${{ response.body.html_url }}"
+  create-issue:
+    description: Open an issue.
+    inputs:
+      repo: { type: string, required: true, description: "owner/name" }
+      title: { type: string, required: true }
+      body: { type: string, default: "" }
+      labels: { type: array, default: [] }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/repos/${{ input.repo }}/issues"
+      headers: { Accept: application/vnd.github+json, X-GitHub-Api-Version: "2022-11-28" }
+      auth: token
+      body:
+        json: { title: "${{ input.title }}", body: "${{ input.body }}", labels: "${{ input.labels }}" }
+    expect_status: [201]
+    outputs:
+      number: "${{ response.body.number }}"
+      url: "${{ response.body.html_url }}"
+  create-commit-status:
+    description: Set a commit status (pending, success, failure, error).
+    inputs:
+      repo: { type: string, required: true, description: "owner/name" }
+      sha: { type: string, required: true }
+      state: { type: string, required: true, description: "pending | success | failure | error" }
+      context: { type: string, default: icaro }
+      description: { type: string, default: "" }
+      target_url: { type: string, default: "" }
+    request:
+      method: POST
+      url: "${{ config.base_url }}/repos/${{ input.repo }}/statuses/${{ input.sha }}"
+      headers: { Accept: application/vnd.github+json, X-GitHub-Api-Version: "2022-11-28" }
+      auth: token
+      body:
+        json:
+          state: "${{ input.state }}"
+          context: "${{ input.context }}"
+          description: "${{ input.description }}"
+          target_url: "${{ input.target_url }}"
+    expect_status: [201]
+    outputs:
+      id: "${{ response.body.id }}"
+      state: "${{ response.body.state }}"
