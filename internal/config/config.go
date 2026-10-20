@@ -64,6 +64,9 @@ type DaemonConfig struct {
 	// UIListen is the loopback address `icaro ui` opens for the browser
 	// (ADR 0023). It must be a loopback address.
 	UIListen string `koanf:"ui_listen" yaml:"ui_listen"`
+	// Pprof serves net/http/pprof under /debug/pprof on the Unix socket
+	// only (never TCP), for profiling (ADR 0024).
+	Pprof bool `koanf:"pprof" yaml:"pprof"`
 	// PublicURL is the externally reachable base URL (webhook URLs).
 	PublicURL string `koanf:"public_url" yaml:"public_url"`
 }
