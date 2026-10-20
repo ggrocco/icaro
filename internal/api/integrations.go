@@ -69,6 +69,15 @@ func (s *Server) IntegrationRoutes(hub *integration.Hub, creds integration.Crede
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"pack": integration.PackLocal, "commit": commit, "changed": commit != ""})
 	}))
+	// Push stays a manual action (ADR 0007): edits commit locally, and a
+	// human decides when the pack's remote sees them.
+	m.Handle("POST /api/v1/packs/{pack}/push", s.auth(store.ScopeWrite, func(w http.ResponseWriter, r *http.Request) {
+		if err := hub.Packs().Push(r.Context(), r.PathValue("pack")); err != nil {
+			s.writeError(w, &service.BadRequest{Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"pack": r.PathValue("pack"), "pushed": true})
+	}))
 	m.Handle("GET /api/v1/actions/{ref}/schema", s.auth(store.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		schema, ok := hub.Registry().Snapshot().ActionInputSchema(r.PathValue("ref"))
 		if !ok {

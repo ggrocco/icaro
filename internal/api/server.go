@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -124,6 +125,27 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.Handler {
 		}
 		h := r.Header.Get("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
+			// The web UI authenticates with a cookie session; mutations also
+			// need the CSRF header, which a cross-site page cannot send
+			// without a preflight the daemon never answers (ADR 0023).
+			if c, err := r.Cookie(SessionCookie); err == nil {
+				p, err := s.svc.UISession(r.Context(), c.Value)
+				if err != nil {
+					s.writeError(w, err)
+					return
+				}
+				if !safeMethod(r.Method) && r.Header.Get(CSRFHeader) != "1" {
+					s.writeError(w, fmt.Errorf("%w: missing %s header", service.ErrForbidden, CSRFHeader))
+					return
+				}
+				if !service.ScopeAllows(p.Scope, scope) {
+					s.writeError(w, service.ErrForbidden)
+					return
+				}
+				tok := &store.APIToken{ID: "ui:" + p.Name, Name: p.Name, Scope: p.Scope}
+				next(w, r.WithContext(context.WithValue(r.Context(), tokenKey, tok)))
+				return
+			}
 			w.Header().Set("WWW-Authenticate", `Bearer realm="icaro"`)
 			s.writeError(w, service.ErrUnauthorized)
 			return

@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -60,6 +61,9 @@ type DaemonConfig struct {
 	URL string `koanf:"url" yaml:"url"`
 	// Token is the API token clients send over TCP.
 	Token string `koanf:"token" yaml:"token"`
+	// UIListen is the loopback address `icaro ui` opens for the browser
+	// (ADR 0023). It must be a loopback address.
+	UIListen string `koanf:"ui_listen" yaml:"ui_listen"`
 	// PublicURL is the externally reachable base URL (webhook URLs).
 	PublicURL string `koanf:"public_url" yaml:"public_url"`
 }
@@ -189,6 +193,7 @@ func Defaults() map[string]any {
 		"version":                  CurrentVersion,
 		"home":                     paths.Default().Root,
 		"database.driver":          "sqlite",
+		"daemon.ui_listen":         "127.0.0.1:8787",
 		"limits.timeout":           "30m",
 		"limits.memory_mb":         2048,
 		"limits.cpus":              2.0,
@@ -291,6 +296,9 @@ func (c *Config) Validate() error {
 	if c.Database.Driver == "postgres" && c.Database.DSN == "" {
 		errs = append(errs, errors.New("database.dsn is required for postgres"))
 	}
+	if c.Daemon.UIListen != "" && !isLoopback(c.Daemon.UIListen) {
+		errs = append(errs, fmt.Errorf("daemon.ui_listen %q must be a loopback address (use --listen for anything else)", c.Daemon.UIListen))
+	}
 	if c.Workflows.Concurrency < 1 {
 		errs = append(errs, errors.New("workflows.concurrency must be >= 1"))
 	}
@@ -369,4 +377,16 @@ func expandHome(p string) string {
 		}
 	}
 	return p
+}
+
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

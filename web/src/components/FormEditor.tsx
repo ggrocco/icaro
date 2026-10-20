@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { cloneElement, useId, useMemo } from "react";
 import type { ActionInfo, IntegrationInfo } from "../api";
 import { getIn, parse, setIn, stepCount } from "../yamldoc";
 
@@ -17,7 +17,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
   const doc = useMemo(() => parse(yaml), [yaml]);
   const actions = useMemo(() => {
     const m = new Map<string, ActionInfo>();
-    for (const i of integrations) for (const a of i.actions ?? []) m.set(a.ref, a);
+    for (const i of integrations) for (const a of Object.values(i.action_details ?? {})) m.set(a.ref, a);
     return m;
   }, [integrations]);
 
@@ -84,7 +84,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
               <option value="manual">manual</option>
               <option value="cron">cron</option>
               {integrations
-                .filter((x) => x.events?.length)
+                .filter((x) => Object.keys(x.event_details ?? {}).length)
                 .map((x) => (
                   <option key={x.name} value={`int:${x.name}`}>
                     {x.name}
@@ -98,7 +98,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
               <>
                 <select aria-label="Event" value={t.event ?? ""} onChange={(e) => update(["triggers", i, "event"], e.target.value)}>
                   <option value="">choose an event…</option>
-                  {(integrations.find((x) => x.name === t.integration)?.events ?? []).map((ev) => (
+                  {Object.values(integrations.find((x) => x.name === t.integration)?.event_details ?? {}).map((ev) => (
                     <option key={ev.event} value={ev.event} title={ev.description}>
                       {ev.event}
                     </option>
@@ -271,13 +271,23 @@ function fromText(s: string, type: string): unknown {
   return s;
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+// Field labels a control; the hint is linked with aria-describedby so it
+// is announced as a description, not as part of the name.
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactElement<{ "aria-describedby"?: string }> }) {
+  const id = useId();
+  const control = hint ? cloneElement(children, { "aria-describedby": id }) : children;
   return (
-    <label className="field">
-      <span className="label">{label}</span>
-      {children}
-      {hint && <span className="hint">{hint}</span>}
-    </label>
+    <div className="field">
+      <label>
+        <span className="label">{label}</span>
+        {control}
+      </label>
+      {hint && (
+        <span className="hint" id={id}>
+          {hint}
+        </span>
+      )}
+    </div>
   );
 }
 

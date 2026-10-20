@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api, type VersionInfo } from "../api";
+import { api, type RunInfo, type VersionInfo } from "../api";
 import { Editor } from "./Editor";
 import { RunGraph } from "../components/lazy";
 import { Empty, ErrorBox, Loading, Status, When, useLoad } from "../components/common";
@@ -27,7 +27,7 @@ export function WorkflowDetail({ name, tab = "overview" }: { name: string; tab?:
     setBusy(true);
     setErr(undefined);
     try {
-      const fields = triggerFields(spec);
+      const fields = w.trigger_fields?.required ?? triggerFields(spec);
       const trigger: Record<string, unknown> = {};
       for (const f of fields) {
         const v = window.prompt(`trigger.${f}`);
@@ -147,7 +147,7 @@ function Versions({ name, current }: { name: string; current: number }) {
   );
 }
 
-export function RunTable({ runs }: { runs: { id: string; workflow: string; status: string; trigger: string; created_at: string; version: number }[] }) {
+export function RunTable({ runs }: { runs: RunInfo[] }) {
   if (!runs.length) return <Empty title="No runs yet" />;
   return (
     <table>
@@ -174,7 +174,7 @@ export function RunTable({ runs }: { runs: { id: string; workflow: string; statu
             <td>
               <Status status={r.status} />
             </td>
-            <td>{r.trigger}</td>
+            <td>{r.trigger_kind}</td>
             <td>
               <When ts={r.created_at} />
             </td>

@@ -318,6 +318,11 @@ th {
   gap: 4px;
   margin: 8px 0;
 }
+.field label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .field .label {
   font-size: 13px;
   font-weight: 600;
@@ -377,4 +382,20 @@ th {
 .login h1 {
   margin-bottom: 20px;
   font-size: 28px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.badge.processed {
+  color: var(--ok);
+}
+.badge.rejected,
+.badge.duplicate,
+.badge.no_match {
+  color: var(--muted);
 }
