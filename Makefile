@@ -29,3 +29,12 @@ tidy:
 
 clean:
 	rm -rf bin dist coverage.out
+
+AGENT_IMAGE ?= ghcr.io/icaro-dev/agent-base:$(VERSION)
+AGENT_ARCH  ?= $(shell go env GOARCH)
+
+# The agent base image embeds a static Linux icaro for internal commands.
+.PHONY: image-agent
+image-agent:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(AGENT_ARCH) go build -ldflags '$(LDFLAGS)' -o bin/icaro-linux ./cmd/icaro
+	docker build -f images/agent-base/Dockerfile -t $(AGENT_IMAGE) .

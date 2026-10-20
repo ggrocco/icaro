@@ -74,7 +74,7 @@ func TestSessionSpineDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
+	t.Cleanup(func() { _ = st.Close() }) // runs after the session cleanup below
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,9 @@ func TestSessionSpineDocker(t *testing.T) {
 	var created []*Session
 	t.Cleanup(func() {
 		for _, s := range created {
-			_ = m.Remove(context.Background(), s.ID, false)
+			if err := m.Remove(context.Background(), s.ID, false); err != nil {
+				t.Errorf("cleanup %s: %v", s.ID, err)
+			}
 		}
 		ids, _ := eng.ListByLabel(context.Background(), map[string]string{container.LabelEgress: profile})
 		for _, id := range ids {
