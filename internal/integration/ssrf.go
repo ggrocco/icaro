@@ -83,7 +83,7 @@ func guardedDial(resolver Resolver, dial DialFunc, allowPrivate bool) DialFunc {
 				ips = append(ips, a.IP)
 			}
 		}
-		var lastErr error = fmt.Errorf("%w: %s", ErrBlockedAddress, host)
+		lastErr := fmt.Errorf("%w: %s", ErrBlockedAddress, host)
 		for _, ip := range ips {
 			if !allowPrivate && IsBlockedIP(ip) {
 				continue

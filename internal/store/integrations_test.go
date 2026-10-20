@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -57,7 +58,7 @@ func TestWebhookTokensAndCronState(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, s *Store) {
 		ctx := context.Background()
 		n := 0
-		gen := func() string { n++; return "tok" + string(rune('0'+n)) }
+		gen := func() string { n++; return fmt.Sprintf("tok%d", n) }
 		a, err := s.EnsureWebhookToken(ctx, "wf-a", gen)
 		if err != nil || a.Token != "tok1" {
 			t.Fatal(a, err)

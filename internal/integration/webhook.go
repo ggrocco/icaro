@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash"
 	"mime"
 	"net/http"
 	"net/url"
@@ -125,7 +124,7 @@ func (h *Hub) verify(ctx context.Context, m *Manifest, in *inbound, env expr.Env
 				return &verifyError{"render signed message: " + err.Error()}
 			}
 		}
-		var newHash func() hash.Hash = sha256.New
+		newHash := sha256.New
 		if v.Kind == VerifyHMACSHA1 {
 			newHash = sha1.New
 		}

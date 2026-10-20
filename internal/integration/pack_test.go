@@ -49,11 +49,11 @@ func git(t *testing.T, dir string, args ...string) string {
 func thirdPartyRepo(t *testing.T) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "acme-pack")
-	if err := os.MkdirAll(filepath.Join(repo, "manifests"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, "manifests"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	git(t, repo, "init", "--quiet")
-	if err := os.WriteFile(filepath.Join(repo, "manifests", "acme.yaml"), []byte(acmeManifest), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "manifests", "acme.yaml"), []byte(acmeManifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git(t, repo, "add", ".")
@@ -114,7 +114,7 @@ func TestAddThirdPartyPackWithoutRebuild(t *testing.T) {
 		t.Fatal("re-adding an installed pack must fail")
 	}
 	// Update pulls new commits.
-	if err := os.WriteFile(filepath.Join(repo, "manifests", "acme.yaml"), []byte(strings.Replace(acmeManifest, "Acme ticketing", "Acme v2", 1)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "manifests", "acme.yaml"), []byte(strings.Replace(acmeManifest, "Acme ticketing", "Acme v2", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git(t, repo, "commit", "--quiet", "-am", "v2")
