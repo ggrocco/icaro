@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
@@ -21,7 +22,7 @@ func init() { register(newServeCmd) }
 
 func newServeCmd(opts *rootOpts) *cobra.Command {
 	var logLevel, listen string
-	var background bool
+	var background, pprofOn bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the daemon (one per user; Unix socket, optional TCP with --listen)",
@@ -32,6 +33,9 @@ func newServeCmd(opts *rootOpts) *cobra.Command {
 			}
 			if listen != "" {
 				cfg.Daemon.Listen = listen
+			}
+			if pprofOn {
+				cfg.Daemon.Pprof = true
 			}
 			if background {
 				if err := daemon.StartBackground(cmd.Context(), cfg.Layout(), opts.daemonArgs(), 15*time.Second); err != nil {
@@ -51,6 +55,7 @@ func newServeCmd(opts *rootOpts) *cobra.Command {
 	cmd.Flags().StringVar(&listen, "listen", "", "also listen on TCP (e.g. 127.0.0.1:8787); every TCP request needs an API token")
 	cmd.Flags().BoolVar(&background, "background", false, "start the daemon detached and return once it answers")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "debug | info | warn | error")
+	cmd.Flags().BoolVar(&pprofOn, "pprof", false, "serve /debug/pprof on the Unix socket only (also daemon.pprof)")
 	return cmd
 }
 
@@ -77,7 +82,7 @@ func runDaemon(ctx context.Context, cfg *config.Config, log *slog.Logger) error 
 		return err
 	}
 	handler := a.Handler()
-	servers := []*http.Server{newHTTPServer(handler, runCtx)}
+	servers := []*http.Server{newHTTPServer(socketHandler(handler, cfg.Daemon.Pprof), runCtx)}
 	go serve(servers[0], unixLn, errCh)
 	log.Info("daemon listening", "socket", cfg.Layout().Socket(), "pid", os.Getpid())
 
@@ -130,4 +135,20 @@ func shutdown(servers []*http.Server) {
 	for _, s := range servers {
 		_ = s.Shutdown(sctx)
 	}
+}
+
+// socketHandler adds /debug/pprof to the Unix-socket server when enabled.
+// The TCP listeners never get it: profiles expose memory contents.
+func socketHandler(h http.Handler, withPprof bool) http.Handler {
+	if !withPprof {
+		return h
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	mux.Handle("/", h)
+	return mux
 }

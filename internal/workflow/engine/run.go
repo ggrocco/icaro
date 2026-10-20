@@ -61,14 +61,18 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 	}
 	fctx, fcancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer fcancel()
-	if err := e.d.Store.FinishRun(fctx, run.ID, status, errMsg); err != nil {
-		log.Error("finish run", "err", err)
-	}
+	// Finish the session (workspace cleanup) before the run turns terminal,
+	// so a terminal run never has a live session or workspace behind it. A
+	// crash in between leaves a running run with finished steps, which the
+	// next engine resumes and closes.
 	cur, err := e.d.Store.GetRun(fctx, run.ID)
 	if err == nil && cur.SessionID != "" {
 		if err := e.d.Sessions.FinishRun(fctx, cur.SessionID, keep); err != nil {
 			log.Warn("finish run session", "err", err)
 		}
+	}
+	if err := e.d.Store.FinishRun(fctx, run.ID, status, errMsg); err != nil {
+		log.Error("finish run", "err", err)
 	}
 	log.Info("run finished", "status", status, "error", errMsg)
 	e.publish(events.Event{Type: events.TypeRun, RunID: run.ID, Status: status})
