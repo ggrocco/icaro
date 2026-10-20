@@ -53,10 +53,10 @@ The Go code in the repository was built from the superseded `docs/` plan ([ADR 0
 | Secret storage | `master.key` file or `ICARO_MASTER_KEY` | OS keychain / secret store; encrypted-file fallback only after an explicit password | 1 |
 | Workspace & sessions | Per-run named volume at `/workspace`; runs re-attach by container label | Session worktree bind mount; `sessions` table + startup reconciliation | 1 |
 | Sandbox selection | Per-step `sandbox: standard\|strict`, `network: egress\|none` | Per-profile policy with a mandatory egress allowlist (O2) | 1–2 |
-| Step forms | `run` (script/command) and `http` | `image` + `command`; `uses:` integration actions | 2 (`image`), 3 (`uses`) |
-| Interpolation & gating | Go `text/template` `{{ }}`, `if:` | `${{ }}`, `when` (O3) | 2 |
-| Step graph & retry | Linear sequence, `continue_on_error`, `retry: {attempts, backoff}` | DAG with `needs`; integer `retry` per the schema | 2 |
-| Schema | Generated `schema/workflow.schema.json` | Generated output equal to the [blueprint contract](schemas/workflow.schema.json) (drift test) | 2 |
+| Step forms | **Done (Phase 2):** `image` + `command`; `uses` steps run through the integration action executor | `image` + `command`; `uses:` integration actions | 2 (`image`), 3 (`uses`) |
+| Interpolation & gating | **Done (Phase 2):** `${{ }}` and `when` ([ADR 0009](adr/0009-expression-language.md)) | `${{ }}`, `when` (O3) | 2 |
+| Step graph & retry | **Done (Phase 2):** DAG with `needs`, integer `retry` ([ADR 0013](adr/0013-workflow-execution-semantics.md)) | DAG with `needs`; integer `retry` per the schema | 2 |
+| Schema | **Done (Phase 2):** generated from the Go types, drift-tested against the contract | Generated output equal to the [blueprint contract](schemas/workflow.schema.json) (drift test) | 2 |
 | Triggers | `on.webhook` at `/hooks/{workflow}/{token}` with the raw body as input; `on.schedule` | `triggers:` (`manual`, `cron`, integration events) at `/hooks/<integration>` with normalized `trigger.*` | 3 |
 | Credentials | Named connections injected as `ICARO_CONN_*`; `http` auth from a connection | `${{ secrets.* }}`; host-bound integration credentials; agent creds in the profile home | 1 (home), 3 (integrations) |
 
