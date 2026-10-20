@@ -2,27 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 
 // Phase 4 acceptance: create, run and cancel a workflow from the UI.
 
-// The first sign-in uses the one-time link from `icaro ui`; it is single
-// use, so later ones paste an API token into the login form.
-let linkUsed = false;
+// Tests sign in by pasting an API token; the one-time `icaro ui` link is
+// covered by its own test (it is single use).
 async function login(page: Page) {
-  if (!linkUsed) {
-    linkUsed = true;
-    await page.goto(process.env.ICARO_E2E_LOGIN!);
-  } else {
-    await page.goto("/ui/");
-    await page.getByLabel("API token").fill(process.env.ICARO_E2E_TOKEN!);
-    await page.getByRole("button", { name: "Sign in" }).click();
-  }
+  await page.goto("/ui/");
+  await page.getByLabel("API token").fill(process.env.ICARO_E2E_TOKEN!);
+  await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 }
-
-test("a reused login link is refused", async ({ page }) => {
-  await login(page);
-  await page.context().clearCookies();
-  await page.goto(process.env.ICARO_E2E_LOGIN!);
-  await expect(page.getByRole("alert")).toContainText(/unauthorized/i);
-});
 
 // apiCall uses the browser's cookie session, as the UI does.
 async function apiCall(page: Page, method: string, path: string, body?: string) {
@@ -34,6 +21,14 @@ async function apiCall(page: Page, method: string, path: string, body?: string) 
     [method, path, body ?? null],
   );
 }
+
+test("the one-time sign-in link works once", async ({ page }) => {
+  await page.goto(process.env.ICARO_E2E_LOGIN!);
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  await page.context().clearCookies();
+  await page.goto(process.env.ICARO_E2E_LOGIN!);
+  await expect(page.getByRole("alert")).toContainText(/unauthorized/i);
+});
 
 test("create a workflow in the form editor, run it, and watch it succeed", async ({ page }) => {
   await login(page);
@@ -80,4 +75,21 @@ test("cancel a running workflow", async ({ page }) => {
   await expect(page.locator("h1 .badge")).toHaveText("running", { timeout: 60_000 });
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.locator("h1 .badge")).toHaveText("cancelled", { timeout: 60_000 });
+});
+
+test("a manifest edit commits to the local pack; an invalid edit is rejected", async ({ page }) => {
+  await login(page);
+  await page.goto("/ui/#/integrations/webhook");
+  await expect(page.getByRole("heading", { name: /webhook/ })).toBeVisible();
+  const editor = page.locator(".cm-content");
+  await expect(editor).toContainText("name: webhook");
+  // Saving the builtin copies it into the local pack as a commit.
+  await page.getByRole("button", { name: "Validate & commit" }).click();
+  await expect(page.getByRole("status").filter({ hasText: /Committed [0-9a-f]{8} to the local pack/ })).toBeVisible();
+  // Break the manifest: the daemon rejects it before writing anything.
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("version: 1\nname: webhook\nbogus_field: true\n");
+  await page.getByRole("button", { name: "Validate & commit" }).click();
+  await expect(page.getByLabel("Validation issues").first()).toContainText("bogus_field");
 });

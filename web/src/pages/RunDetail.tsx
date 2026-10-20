@@ -15,14 +15,23 @@ export function RunDetail({ id }: { id: string }) {
   const [logs, setLogs] = useState<Record<string, string>>({});
   const [live, setLive] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
+  // Once the stream reports the final state, late responses (e.g. to a
+  // Cancel click) must not overwrite it with an earlier status.
+  const finalRef = useRef(false);
+  const apply = (r: RunInfo, final = false) => {
+    if (finalRef.current && !final) return;
+    if (final || terminal(r.status)) finalRef.current = true;
+    setRun(r);
+  };
 
   useEffect(() => {
     let closed = false;
+    finalRef.current = false;
     api
       .getRun(id)
       .then((r) => {
         if (closed) return;
-        setRun(r);
+        apply(r);
         return api.version(r.workflow, r.version).then((v) => !closed && setYaml(v.yaml));
       })
       .catch(setError);
@@ -30,10 +39,11 @@ export function RunDetail({ id }: { id: string }) {
       id,
       (e) => {
         if (e.type === "status") {
-          setRun(e.run);
+          apply(e.run, e.final);
           setLive(!e.final);
           if (e.final) return;
         } else if (e.type === "step") {
+          if (finalRef.current) return;
           setRun((r) => r && { ...r, steps: r.steps?.map((s) => (s.id === e.step ? { ...s, status: e.status, attempt: e.attempt || s.attempt } : s)) });
         } else {
           setLogs((l) => ({ ...l, [e.step]: (l[e.step] ?? "") + e.line + "\n" }));
@@ -70,7 +80,7 @@ export function RunDetail({ id }: { id: string }) {
         </h1>
         <div className="actions">
           {!terminal(run.status) && (
-            <button className="danger" onClick={() => api.cancel(run.id).then(setRun).catch(setError)}>
+            <button className="danger" onClick={() => api.cancel(run.id).then((r) => apply(r)).catch(setError)}>
               Cancel
             </button>
           )}

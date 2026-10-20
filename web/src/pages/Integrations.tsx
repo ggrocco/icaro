@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api, ApiError, type Issue } from "../api";
 import { YamlEditor } from "../components/lazy";
 import { Empty, ErrorBox, Issues, Loading, Status, When, useLoad } from "../components/common";
@@ -122,10 +122,38 @@ export function ManifestEditor({ name }: { name: string }) {
   );
 }
 
+// DeliveryDetail shows the stored request (headers are masked by the
+// daemon where a manifest marks them secret) and the normalized payload.
+function DeliveryDetail({ id }: { id: string }) {
+  const d = useLoad(() => api.delivery(id), [id]);
+  if (d.loading && !d.data) return <Loading what="delivery" />;
+  if (d.error) return <ErrorBox error={d.error} />;
+  const del = d.data!;
+  return (
+    <div className="delivery-detail">
+      <h3 className="h4">Normalized payload</h3>
+      <pre className="code">{JSON.stringify(Object.fromEntries(del.events.map((e) => [e.event, e.payload ?? e.error])), null, 2)}</pre>
+      <h3 className="h4">Headers</h3>
+      <pre className="code">{JSON.stringify(del.headers ?? {}, null, 2)}</pre>
+      <h3 className="h4">Body</h3>
+      <pre className="code">{prettyBody(del.body ?? "")}</pre>
+    </div>
+  );
+}
+
+function prettyBody(b: string): string {
+  try {
+    return JSON.stringify(JSON.parse(b), null, 2);
+  } catch {
+    return b;
+  }
+}
+
 export function Deliveries() {
   const { data, error, loading, reload } = useLoad(api.deliveries, []);
   const [busy, setBusy] = useState<string | undefined>();
   const [err, setErr] = useState<Error | undefined>();
+  const [open, setOpen] = useState<string | undefined>();
   return (
     <section aria-labelledby="del-title">
       <header className="page-head">
@@ -153,9 +181,12 @@ export function Deliveries() {
           </thead>
           <tbody>
             {data.map((d) => (
-              <tr key={d.id}>
+              <Fragment key={d.id}>
+              <tr>
                 <td>
-                  <When ts={d.received_at} />
+                  <button className="ghost" aria-expanded={open === d.id} onClick={() => setOpen(open === d.id ? undefined : d.id)}>
+                    {open === d.id ? "▾" : "▸"} <When ts={d.received_at} />
+                  </button>
                   {d.redelivery_of && <div className="muted small">redelivery</div>}
                 </td>
                 <td>
@@ -202,6 +233,14 @@ export function Deliveries() {
                   </button>
                 </td>
               </tr>
+              {open === d.id && (
+                <tr>
+                  <td colSpan={5}>
+                    <DeliveryDetail id={d.id} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
