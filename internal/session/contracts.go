@@ -84,3 +84,12 @@ type PreviewHook interface {
 	WorktreeAdded(ctx context.Context, sessionID, projectID, worktreePath string) (previewInstanceID string, err error)
 	WorktreeRemoved(ctx context.Context, sessionID, worktreePath string) error
 }
+
+// MemoryAttacher serves the memory MCP server for one session on a Unix
+// socket that the session bind-mounts into its agent container at
+// /icaro/mcp.sock. Scope comes from id, never from the agent (ADR 0004).
+// Inside the container the agent's MCP config runs
+// `icaro mcp --socket /icaro/mcp.sock`, a stdio bridge (spike S3 fallback).
+type MemoryAttacher interface {
+	ServeSession(ctx context.Context, id Identity, socketPath string) (stop func(), err error)
+}

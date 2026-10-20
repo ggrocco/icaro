@@ -119,3 +119,41 @@ type SecretResolver interface {
 	Resolve(ctx context.Context, name string) (string, error)
 	Names(ctx context.Context) ([]string, error)
 }
+
+// Trigger kinds recorded on runs.
+const (
+	RunTriggerManual      = "manual"
+	RunTriggerCron        = "cron"
+	RunTriggerIntegration = "integration"
+	RunTriggerRedeliver   = "redeliver"
+)
+
+// EnqueueRequest asks the engine to start a run. The engine applies the
+// workflow's concurrency policy and deduplicates on IdempotencyKey.
+type EnqueueRequest struct {
+	Workflow    string
+	TriggerKind string
+	// Trigger is the normalized ${{ trigger.* }} payload.
+	Trigger        map[string]any
+	IdempotencyKey string // e.g. "<integration>:<delivery id>" or "cron:<workflow>:<fire time>"
+	Actor          string
+	DeliveryID     string
+}
+
+// EnqueueResult reports what happened to an EnqueueRequest.
+type EnqueueResult struct {
+	RunID        string `json:"run_id,omitempty"`
+	Deduplicated bool   `json:"deduplicated,omitempty"` // an earlier run had the same key
+	Skipped      string `json:"skipped,omitempty"`      // reason when no run was created (e.g. concurrency forbid)
+}
+
+// Enqueuer is implemented by the workflow service; integrations and the
+// scheduler depend only on this.
+type Enqueuer interface {
+	EnqueueRun(ctx context.Context, req EnqueueRequest) (EnqueueResult, error)
+}
+
+// SpecSource lists the active workflows, for trigger routing and cron.
+type SpecSource interface {
+	ActiveSpecs(ctx context.Context) ([]*Spec, error)
+}
