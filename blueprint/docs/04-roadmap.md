@@ -50,17 +50,17 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | Phase | State | Open |
 |---|---|---|
 | [0 — Foundation](phases/00-foundation.md) | Done | Domain coverage is below the 95% target in several packages; exceptions are not yet justified one by one |
-| [1 — Container and CLI](phases/01-container-cli.md) | Done on Linux | The macOS half of "`icaro sh` preserves the UID" and the Keychain backend have not run on a Mac; the agent base image is written but not published |
+| [1 — Container and CLI](phases/01-container-cli.md) | Done on Linux | The macOS half of "`icaro sh` preserves the UID" and the Keychain backend have not run on a Mac; the agent base image is built and pushed by the release workflow but no release has run yet |
 | [2 — Workflow core](phases/02-workflow-core.md) | Done | — |
 | [3 — Integrations](phases/03-workflow-integrations.md) | Done | Spike S8: the bundled manifests are checked against documented payload fixtures, not the live APIs |
 | [4 — Workflow UI and agent authoring](phases/04-workflow-ui.md) | Done | The run graph is read-only; drag/drop editing is deferred, as planned |
-| [5 — Previews](phases/05-previews.md) | Done on Linux | An agent-container edit reaching the preview is unverified, and so is macOS (spike S1); DNS-01/TLS is deferred |
+| [5 — Previews](phases/05-previews.md) | Done on Linux | An agent-container edit reaching the preview is verified on Linux (`hack/e2e`); macOS is not (spike S1); DNS-01/TLS is deferred |
 | [6 — Shared memory](phases/06-memory.md) | Done | The importers are prototypes over assumed export formats |
 | [7 — macOS app](phases/07-macos.md) | Partial | Only launch at login (`icaro service install`) is done. The Wails app, tray, notifications, tray-only mode, Apple signing/notarization and the clean-install smoke test need macOS hardware (spike S9) |
 | [8 — Distribution](phases/08-distribution.md) | Done on Linux | A fresh install on macOS, and an end-to-end "update re-attaches a running session" test |
 | [9 — Usage](phases/09-usage.md) (optional) | Done in the CLI | A usage panel in the web UI |
 | [10 — Docs and landing page](phases/10-docs-landing.md) | Done | — |
-| [11 — Hardening and GA](phases/11-hardening.md) | Not started | Load and chaos tests, license audit, profiling, compatibility matrix |
+| [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
 
 Open spikes:
 
