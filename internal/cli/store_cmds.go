@@ -11,6 +11,7 @@ import (
 	"icaro/internal/app"
 	"icaro/internal/config"
 	"icaro/internal/crypto"
+	"icaro/internal/secrets"
 	"icaro/internal/store"
 )
 
@@ -18,6 +19,19 @@ func init() {
 	register(newInitCmd)
 	register(newMigrateCmd)
 	register(newTokenCmd)
+}
+
+// loadMasterKey resolves (or creates) the master key, prompting for the
+// fallback-file password on a terminal.
+func loadMasterKey(cmd *cobra.Command, cfg *config.Config) (*crypto.Key, secrets.KeyInfo, error) {
+	key, info, err := secrets.LoadMasterKey(cmd.Context(), secrets.KeyOptions{
+		Dir: cfg.Layout().Secrets(), Keyring: secrets.DefaultKeyring(nil), Create: true,
+		Password: passwordPrompt(cmd.ErrOrStderr(), true),
+	})
+	if err == nil && info.Warning != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", info.Warning)
+	}
+	return key, info, err
 }
 
 // openStore opens the configured database, creating the state root.
@@ -37,9 +51,11 @@ func newInitCmd(opts *rootOpts) *cobra.Command {
 			if err := cfg.Layout().Ensure(); err != nil {
 				return err
 			}
-			if _, err := crypto.LoadMasterKey(cfg.Layout().Secrets(), true); err != nil {
+			_, info, err := loadMasterKey(cmd, cfg)
+			if err != nil {
 				return err
 			}
+			fmt.Fprintf(cmd.OutOrStdout(), "master key: %s\n", info.Backend)
 			s, err := openStore(cmd.Context(), cfg)
 			if err != nil {
 				return err

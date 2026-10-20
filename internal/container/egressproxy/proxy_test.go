@@ -33,7 +33,7 @@ func TestAllowed(t *testing.T) {
 func fixture(t *testing.T) (*httptest.Server, *http.Client) {
 	t.Helper()
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "hello from "+r.Host)
+		_, _ = io.WriteString(w, "hello from "+r.Host) //nolint:gosec // test server, plain text
 	}))
 	t.Cleanup(up.Close)
 	p := New([]string{"allowed.test"}, slog.New(slog.NewTextHandler(io.Discard, nil)))

@@ -16,13 +16,16 @@ import (
 
 	"icaro/internal/api"
 	"icaro/internal/config"
+	"icaro/internal/container"
 	"icaro/internal/container/docker"
+	"icaro/internal/creds"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
 	"icaro/internal/paths"
 	"icaro/internal/runner"
 	"icaro/internal/secrets"
 	"icaro/internal/service"
+	"icaro/internal/session"
 	"icaro/internal/store"
 )
 
@@ -40,10 +43,16 @@ type App struct {
 	Layout  paths.Layout
 	Store   *store.Store
 	Key     *crypto.Key
+	KeyInfo secrets.KeyInfo
 	Docker  *docker.Engine
 	Secrets *secrets.Store
-	Service *service.Service
-	API     *api.Server
+	// Sessions is the session spine (wired by internal/app/sessions.go).
+	Sessions *session.Manager
+	Egress   *container.DockerEgress
+	Images   *container.Images
+	Homes    *creds.Homes
+	Service  *service.Service
+	API      *api.Server
 
 	components []Component
 	checks     []doctor.Check
@@ -67,12 +76,16 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		_ = a.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	key, err := crypto.LoadMasterKey(a.Layout.Secrets(), true)
+	// The daemon cannot prompt: the fallback file needs ICARO_PASSWORD.
+	key, keyInfo, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: a.Layout.Secrets(), Keyring: secrets.DefaultKeyring(nil), Create: true})
 	if err != nil {
 		_ = a.Close()
 		return nil, err
 	}
-	a.Key = key
+	a.Key, a.KeyInfo = key, keyInfo
+	if keyInfo.Warning != "" {
+		log.Warn("master key", "warning", keyInfo.Warning)
+	}
 
 	eng, err := docker.New(cfg.Docker.Host)
 	if err != nil {

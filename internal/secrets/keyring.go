@@ -52,7 +52,7 @@ var ErrNoBackend = errors.New("no OS secret store is available: set " + Password
 type Runner func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 
 func execRunner(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name/args are the fixed security/secret-tool invocations above
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
