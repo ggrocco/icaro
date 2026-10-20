@@ -6,16 +6,16 @@
 
 ## Deliverables
 
-- [ ] Create install.sh that verifies architecture, checksum, and signature.
-- [ ] Create a Homebrew tap/formula.
-- [ ] Create a release pipeline with SBOM, checksums, and signature.
-- [ ] Implement updates with staging and rollback.
-- [ ] Document config upgrade/migration.
+- [x] Create install.sh that verifies architecture, checksum, and signature.
+- [x] Create a Homebrew tap/formula (GoReleaser cask for `ggrocco/homebrew-tap`).
+- [x] Create a release pipeline with SBOM, checksums, and signature ([`.goreleaser.yaml`](../../../.goreleaser.yaml), [`release.yml`](../../../.github/workflows/release.yml), [ADR 0021](../adr/0021-release-signing-and-updates.md)).
+- [x] Implement updates with staging and rollback (`icaro update`, `icaro update --rollback`).
+- [x] Document config upgrade/migration ([docs/upgrading.md](../../../docs/upgrading.md)).
 
 ## Acceptance criteria
 
-- [ ] A fresh install works on macOS and supported Linux.
-- [ ] An invalid checksum blocks the installation.
-- [ ] An update preserves config and DB.
-- [ ] An update while a session is running re-attaches to its container instead of orphaning it ([ADR 0006](../adr/0006-session-persistence-recovery.md)).
-- [ ] Rollback restores the previous binary.
+- [ ] A fresh install works on macOS and supported Linux. *Verified on Linux against a local signed mirror and a GoReleaser snapshot; macOS needs a real host.*
+- [x] An invalid checksum blocks the installation (`hack/installtest`, `internal/update` tests).
+- [x] An update preserves config and DB (it never writes under the state root).
+- [ ] An update while a session is running re-attaches to its container instead of orphaning it ([ADR 0006](../adr/0006-session-persistence-recovery.md)). *`icaro update` restarts the daemon gracefully; the re-attach itself is Phase 1's startup reconciliation and needs an end-to-end test once it lands.*
+- [x] Rollback restores the previous binary.

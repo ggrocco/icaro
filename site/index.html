@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ícaro — parallel isolated agents</title>
+  <meta name="description" content="Ícaro runs many coding agents in parallel, each in its own git worktree and container, with a live preview and shared project memory.">
+  <link rel="icon" href="icaro.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <a href="index.html">Ícaro</a>
+    <nav aria-label="Primary">
+      <a href="https://github.com/ggrocco/icaro">GitHub</a>
+      <a href="https://github.com/ggrocco/icaro/tree/main/docs">Docs</a>
+      <a href="https://github.com/ggrocco/icaro/blob/main/SECURITY.md">Security</a>
+    </nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div>
+        <h1>Many agents, flying in parallel. None of them too close to the sun.</h1>
+        <p class="lede">Ícaro runs coding agents side by side. Each gets its own git worktree, an isolated container with a locked-down network, a live preview URL, and shared memory with the others.</p>
+        <a class="cta" href="#install">Install</a>
+      </div>
+      <img src="icaro.svg" width="240" height="160" alt="Ícaro's mark: a winged figure flying toward a stylized sun; each feather is a separate parallel stroke.">
+    </section>
+
+    <h2>One primitive: the session</h2>
+    <ol class="spine">
+      <li>Create a <strong>worktree</strong> for the branch the agent will work on.</li>
+      <li>Start the agent in an <strong>isolated container</strong>. It runs non-root with no Docker socket, and egress is limited to its provider.</li>
+      <li>Open the app at a <strong>predictable preview URL</strong>. The preview updates as the agent edits.</li>
+      <li>Record decisions and handoffs in <strong>shared memory</strong> over MCP, scoped to the project.</li>
+      <li>Optionally orchestrate sessions with a <strong>workflow</strong>, triggered by webhooks or cron.</li>
+    </ol>
+
+    <h2>Why it is safe to leave running</h2>
+    <div class="grid">
+      <div class="card"><h3>Mandatory egress</h3><p>Every agent container is confined to an allowlist of provider endpoints. A prompt-injected agent cannot reach anything else.</p></div>
+      <div class="card"><h3>Managed homes</h3><p>You log in once per profile. Your real <code>~/.claude</code> is never mounted.</p></div>
+      <div class="card"><h3>Host-bound credentials</h3><p>Integration tokens never leave the daemon, and each one is sent only to the hosts you confirmed for it.</p></div>
+      <div class="card"><h3>Signed releases</h3><p>The installer and <code>icaro update</code> verify an ed25519 signature and the checksums before they replace anything.</p></div>
+    </div>
+
+    <h2 id="install">Install</h2>
+    <pre><code>curl -fsSL https://github.com/ggrocco/icaro/releases/latest/download/install.sh | sh
+icaro init &amp;&amp; icaro doctor</code></pre>
+    <p>Requires Docker on Linux or macOS. Homebrew: <code>brew install ggrocco/tap/icaro</code>. To start at login: <code>icaro service install</code>.</p>
+  </main>
+  <footer>
+    <p>Ícaro is MIT licensed. The Ícaro mark (<a href="icaro.svg">icaro.svg</a>) is licensed CC BY 4.0. Icarus flew on wings his father built and fell when he flew too close to the sun. Ícaro keeps the wings and adds the guardrails.</p>
+  </footer>
+</body>
+</html>

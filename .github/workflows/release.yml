@@ -1,0 +1,48 @@
+name: release
+
+# Builds, signs and publishes a release for every v* tag (ADR 0021).
+# Secrets: ICARO_SIGNING_KEY (base64 ed25519 seed), HOMEBREW_TAP_TOKEN.
+# Variables: ICARO_RELEASE_PUBKEY (base64 ed25519 public key).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write     # create the release
+  id-token: write     # cosign keyless signing + provenance
+  attestations: write # build provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 ./...
+      - uses: anchore/sbom-action/download-syft@v0
+      - uses: sigstore/cosign-installer@v3
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ICARO_SIGNING_KEY: ${{ secrets.ICARO_SIGNING_KEY }}
+          ICARO_RELEASE_PUBKEY: ${{ vars.ICARO_RELEASE_PUBKEY }}
+      - name: verify the published signature offline
+        run: |
+          printf '%s' "${{ vars.ICARO_RELEASE_PUBKEY }}" > pub.b64
+          go run ./hack/sign verify -pub pub.b64 -in dist/checksums.txt -sig dist/checksums.txt.sig
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+            dist/checksums.txt
