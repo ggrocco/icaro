@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -139,5 +140,54 @@ func TestErrors(t *testing.T) {
 	}
 	if systemdQuote("plain") != "plain" || systemdQuote("") != `""` {
 		t.Fatal("quote")
+	}
+}
+
+func TestInstallFilesystemErrors(t *testing.T) {
+	ctx := context.Background()
+
+	// The unit directory cannot be created under a file.
+	m, _ := newManager(t, "linux")
+	m.UserDir = filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(m.UserDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Install(ctx); err == nil {
+		t.Fatal("mkdir under a file must fail")
+	}
+
+	// The unit path is a directory, so it cannot be written, and a
+	// non-empty directory there cannot be uninstalled either.
+	m, _ = newManager(t, "linux")
+	p, _ := m.Path()
+	if err := os.MkdirAll(filepath.Join(p, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Install(ctx); err == nil {
+		t.Fatal("writing over a directory must fail")
+	}
+	if err := m.Uninstall(ctx); err == nil {
+		t.Fatal("removing a non-empty directory must fail")
+	}
+
+	m, f := newManager(t, "linux")
+	f.fail["systemctl --user daemon-reload"] = true
+	if _, err := m.Install(ctx); err == nil || !strings.Contains(err.Error(), "daemon-reload") {
+		t.Fatalf("daemon-reload failure must surface: %v", err)
+	}
+
+	w, _ := newManager(t, "windows")
+	if err := w.Uninstall(ctx); !errors.Is(err, ErrUnsupported) {
+		t.Fatal(err)
+	}
+}
+
+func TestExecRunner(t *testing.T) {
+	out, err := ExecRunner(context.Background(), "sh", "-c", "echo hi; echo err >&2")
+	if err != nil || !strings.Contains(string(out), "hi") || !strings.Contains(string(out), "err") {
+		t.Fatalf("%q %v", out, err)
+	}
+	if _, err := ExecRunner(context.Background(), "sh", "-c", "exit 3"); err == nil {
+		t.Fatal("non-zero exit must be an error")
 	}
 }
