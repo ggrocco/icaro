@@ -57,7 +57,12 @@ func TestSummaryFormat(t *testing.T) {
 // with fail.
 func failGit(fail ...string) GitRunner {
 	return func(ctx context.Context, dir string, args ...string) (string, error) {
-		if len(args) >= len(fail) && slices.Equal(args[:len(fail)], fail) {
+		// Without a git identity, commits run as `git -c user.name=... commit`.
+		sub := args
+		for len(sub) >= 2 && sub[0] == "-c" {
+			sub = sub[2:]
+		}
+		if len(sub) >= len(fail) && slices.Equal(sub[:len(fail)], fail) {
 			return "", errors.New("git " + strings.Join(fail, " ") + ": injected failure")
 		}
 		return ExecGit(ctx, dir, args...)
