@@ -10,7 +10,7 @@ icaro/internal/api 66 # baseline before the coverage work
 icaro/internal/app 0 # baseline before the coverage work
 icaro/internal/authoring 75 # baseline before the coverage work
 icaro/internal/autostart 87 # baseline before the coverage work
-icaro/internal/cli 25 # baseline before the coverage work
+icaro/internal/cli 30 # baseline before the coverage work
 icaro/internal/config 76 # baseline before the coverage work
 icaro/internal/container 73 # baseline before the coverage work
 icaro/internal/container/docker 0 # baseline before the coverage work
