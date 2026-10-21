@@ -22,6 +22,28 @@ test:
 test-integration:
 	go test -race -count=1 -tags integration $(PKG)
 
+# Coverage of the whole test suite, not only unit tests (needs Docker; set
+# ICARO_TEST_POSTGRES_DSN to include the Postgres matrix). Test binaries
+# write to coverage/unit and coverage/integration; every icaro binary the
+# suites build or launch writes to coverage/bin through GOCOVERDIR. The
+# edge packages that unit tests barely reach are printed per suite.
+COVERDIR   ?= $(CURDIR)/coverage
+COVERPKG   := icaro/...
+COVER_EDGE := icaro/internal/cli,icaro/internal/app,icaro/internal/container/docker
+
+.PHONY: cover-e2e
+cover-e2e:
+	rm -rf $(COVERDIR) && mkdir -p $(COVERDIR)/unit $(COVERDIR)/integration $(COVERDIR)/bin
+	CGO_ENABLED=0 go build -cover -coverpkg=$(COVERPKG) -ldflags '$(LDFLAGS)' -o $(COVERDIR)/icaro ./cmd/icaro
+	go test -count=1 -cover -coverpkg=$(COVERPKG) $(PKG) -args -test.gocoverdir=$(COVERDIR)/unit
+	GOCOVERDIR=$(COVERDIR)/bin go test -count=1 -tags integration -cover -coverpkg=$(COVERPKG) $(PKG) -args -test.gocoverdir=$(COVERDIR)/integration
+	GOCOVERDIR=$(COVERDIR)/bin ICARO_E2E_BIN=$(COVERDIR)/icaro go test -count=1 -tags e2e ./hack/e2e ./hack/quickstart
+	@echo "== unit";             go tool covdata percent -i=$(COVERDIR)/unit -pkg=$(COVER_EDGE)
+	@echo "== unit+integration"; go tool covdata percent -i=$(COVERDIR)/unit,$(COVERDIR)/integration -pkg=$(COVER_EDGE)
+	@echo "== all suites";       go tool covdata percent -i=$(COVERDIR)/unit,$(COVERDIR)/integration,$(COVERDIR)/bin -pkg=$(COVER_EDGE)
+	go tool covdata textfmt -i=$(COVERDIR)/unit,$(COVERDIR)/integration,$(COVERDIR)/bin -o $(COVERDIR)/all.out
+	@echo "merged profile: $(COVERDIR)/all.out (go tool cover -html=$(COVERDIR)/all.out)"
+
 lint:
 	golangci-lint run ./...
 
@@ -35,7 +57,7 @@ tidy:
 	go mod tidy
 
 clean:
-	rm -rf bin dist coverage.out
+	rm -rf bin dist coverage.out coverage
 	find web/dist -mindepth 1 ! -name README.txt -delete 2>/dev/null || true
 
 AGENT_IMAGE ?= ghcr.io/icaro-dev/agent-base:$(VERSION)
