@@ -215,7 +215,8 @@ func TestStringify(t *testing.T) {
 }
 
 func FuzzParse(f *testing.F) {
-	for _, s := range []string{"a.b == 'c'", "has(x.y) && !z", "f(", "${{ a }}", "a[b[c]]"} {
+	for _, s := range []string{"a.b == 'c'", "has(x.y) && !z", "f(", "${{ a }}", "a[b[c]]",
+		"x ${{ 'a\\'}}' }} y", "-1.5 <= a[-2]", "format('{0}', a.b-c)", "!(a || b) && c"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {

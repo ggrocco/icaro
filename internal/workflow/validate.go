@@ -587,13 +587,18 @@ func (v *validator) checkTriggerRef(path string, r expr.Ref) {
 	if r.Guarded || v.opts.Catalog == nil {
 		return
 	}
-	for _, t := range v.s.IntegrationTriggers() {
+	triggers := v.s.IntegrationTriggers()
+	events := make([]EventInfo, len(triggers))
+	for i, t := range triggers {
 		ev, ok := v.opts.Catalog.Event(t.Integration, t.Event)
 		if !ok {
 			return
 		}
-		if !contains(ev.Fields, r.Path[1]) {
-			v.add(path, fmt.Sprintf("%s/%s does not provide trigger.%s", t.Integration, t.Event, r.Path[1]), fieldHint(r.Path[1], ev.Fields)+"; guard optional fields with has(trigger."+r.Path[1]+")")
+		events[i] = ev
+	}
+	for i, t := range triggers {
+		if !contains(events[i].Fields, r.Path[1]) {
+			v.add(path, fmt.Sprintf("%s/%s does not provide trigger.%s", t.Integration, t.Event, r.Path[1]), fieldHint(r.Path[1], events[i].Fields)+"; guard optional fields with has(trigger."+r.Path[1]+")")
 			return
 		}
 	}
