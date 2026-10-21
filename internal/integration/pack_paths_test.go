@@ -198,7 +198,7 @@ func TestEditManifestFailures(t *testing.T) {
 		t.Fatalf("%v", msg)
 	}
 
-	for _, fail := range [][]string{{"add", "--"}, {"-c", "user.name=icaro"}} {
+	for _, fail := range [][]string{{"add", "--"}, {"commit"}} {
 		p := NewPacks(t.TempDir(), nil)
 		if _, err := p.EnsureLocal(ctx); err != nil {
 			t.Fatal(err)
