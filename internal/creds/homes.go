@@ -123,6 +123,8 @@ func (h *Homes) Prepare(ctx context.Context, profile, sessionID string) (contain
 		if err := copyTree(seed, home); err != nil {
 			return container.HomeMount{}, fmt.Errorf("copy profile home: %w", err)
 		}
+	} else if err != nil {
+		return container.HomeMount{}, err
 	}
 	return container.HomeMount{Dir: home}, nil
 }
