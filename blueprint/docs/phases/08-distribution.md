@@ -17,5 +17,5 @@
 - [ ] A fresh install works on macOS and supported Linux. *Verified on Linux against a local signed mirror and a GoReleaser snapshot; macOS needs a real host.*
 - [x] An invalid checksum blocks the installation (`hack/installtest`, `internal/update` tests).
 - [x] An update preserves config and DB (it never writes under the state root).
-- [ ] An update while a session is running re-attaches to its container instead of orphaning it ([ADR 0006](../adr/0006-session-persistence-recovery.md)). *`icaro update` restarts the daemon gracefully; the re-attach itself is Phase 1's startup reconciliation and needs an end-to-end test once it lands.*
+- [x] An update while a session is running re-attaches to its container instead of orphaning it ([ADR 0006](../adr/0006-session-persistence-recovery.md)). *`hack/e2e` runs `icaro update` from a signed local mirror while a session runs: the daemon restarts, and the session keeps its container, its worktree and its memory socket (Linux; macOS waits on a real host).*
 - [x] Rollback restores the previous binary.

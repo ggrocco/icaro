@@ -57,7 +57,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [5 — Previews](phases/05-previews.md) | Done on Linux | An agent-container edit reaching the preview is verified on Linux (`hack/e2e`); macOS is not (spike S1); DNS-01/TLS is deferred |
 | [6 — Shared memory](phases/06-memory.md) | Done | The importers are prototypes over assumed export formats |
 | [7 — macOS app](phases/07-macos.md) | Partial | Only launch at login (`icaro service install`) is done. The Wails app, tray, notifications, tray-only mode, Apple signing/notarization and the clean-install smoke test need macOS hardware (spike S9) |
-| [8 — Distribution](phases/08-distribution.md) | Done on Linux | A fresh install on macOS, and an end-to-end "update re-attaches a running session" test |
+| [8 — Distribution](phases/08-distribution.md) | Done on Linux | A fresh install on macOS |
 | [9 — Usage](phases/09-usage.md) (optional) | Done | Only Claude Code transcripts are parsed; other CLIs wait on spike S10 |
 | [10 — Docs and landing page](phases/10-docs-landing.md) | Done | — |
 | [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
