@@ -4,6 +4,7 @@ import { ErrorBox, Loading, useLoad } from "./components/common";
 import { Editor } from "./pages/Editor";
 import { Deliveries, Integrations, ManifestEditor } from "./pages/Integrations";
 import { RunDetail } from "./pages/RunDetail";
+import { Usage } from "./pages/Usage";
 import { RunTable, WorkflowDetail } from "./pages/WorkflowDetail";
 import { Workflows } from "./pages/Workflows";
 import { href, useRoute } from "./router";
@@ -29,6 +30,7 @@ function Shell({ me }: { me: { name: string } }) {
     ["runs", "Runs"],
     ["deliveries", "Deliveries"],
     ["integrations", "Integrations"],
+    ["usage", "Usage"],
   ];
   return (
     <>
@@ -67,7 +69,8 @@ function Shell({ me }: { me: { name: string } }) {
         {section === "deliveries" && <Deliveries />}
         {section === "integrations" && !a && <Integrations />}
         {section === "integrations" && a && <ManifestEditor name={a} />}
-        {!["workflows", "new", "runs", "deliveries", "integrations"].includes(section) && <p>Page not found.</p>}
+        {section === "usage" && <Usage since={a} />}
+        {!["workflows", "new", "runs", "deliveries", "integrations", "usage"].includes(section) && <p>Page not found.</p>}
       </main>
     </>
   );

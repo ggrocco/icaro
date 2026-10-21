@@ -171,6 +171,31 @@ export interface Delivery {
   body?: string;
 }
 
+// UsageRecord is one (provider, source, day, model) row of `icaro usage`;
+// rows with an error are sources that could not be read (ADR 0022).
+export interface UsageRecord {
+  provider: string;
+  source: string;
+  day: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  messages: number;
+  cost_usd_estimate?: number;
+  confidence: string;
+  error?: string;
+}
+
+export interface UsageReport {
+  timezone: string;
+  since: string;
+  daily_limit_usd?: number;
+  records: UsageRecord[];
+  alerts: { day: string; spent_usd_estimate: number; limit_usd: number; partial?: boolean }[];
+}
+
 export const api = {
   me: () => request<{ name: string; scope: string }>("GET", "/api/v1/ui/me"),
   login: (token: string) => request<{ name: string; scope: string }>("POST", "/api/v1/ui/login", { token }),
@@ -209,6 +234,8 @@ export const api = {
   deliveries: () => request<{ deliveries: Delivery[] }>("GET", "/api/v1/deliveries").then((r) => r.deliveries ?? []),
   delivery: (id: string) => request<Delivery>("GET", `/api/v1/deliveries/${id}`),
   redeliver: (id: string) => request<Delivery>("POST", `/api/v1/deliveries/${id}/redeliver`),
+
+  usage: (since: string) => request<UsageReport>("GET", `/api/v1/usage?since=${encodeURIComponent(since)}`),
 };
 
 export type RunEvent =

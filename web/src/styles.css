@@ -221,6 +221,37 @@ th {
   border-color: var(--bad);
   color: var(--bad);
 }
+.notice.warn {
+  border-color: var(--warn);
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.tile dd {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.scroll-x {
+  overflow-x: auto;
+  border-radius: 8px;
+}
+td.num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+tr.over td:first-child {
+  box-shadow: inset 3px 0 var(--bad);
+}
 .empty {
   text-align: center;
   padding: 40px;
