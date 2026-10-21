@@ -1,0 +1,40 @@
+# Per-package coverage exceptions checked by hack/covercheck (ADR 0025).
+# Format: <package> <min%> # <reason>. Every other package under
+# icaro/internal/ must reach 95% of statements in the unit run.
+#
+# TEMPORARY BASELINE: these floors are the coverage measured before the
+# Phase 0 coverage work, so the gate holds the line while tests are added.
+# They are replaced by the justified exceptions of ADR 0025.
+
+icaro/internal/api 66 # baseline before the coverage work
+icaro/internal/apiclient 0 # baseline before the coverage work
+icaro/internal/app 0 # baseline before the coverage work
+icaro/internal/authoring 75 # baseline before the coverage work
+icaro/internal/autostart 87 # baseline before the coverage work
+icaro/internal/cli 25 # baseline before the coverage work
+icaro/internal/config 76 # baseline before the coverage work
+icaro/internal/container 73 # baseline before the coverage work
+icaro/internal/container/docker 0 # baseline before the coverage work
+icaro/internal/container/egressproxy 81 # baseline before the coverage work
+icaro/internal/creds 77 # baseline before the coverage work
+icaro/internal/crypto 82 # baseline before the coverage work
+icaro/internal/daemon 49 # baseline before the coverage work
+icaro/internal/doctor 79 # baseline before the coverage work
+icaro/internal/expr 81 # baseline before the coverage work
+icaro/internal/integration 76 # baseline before the coverage work
+icaro/internal/logs 74 # baseline before the coverage work
+icaro/internal/mcp 90 # baseline before the coverage work
+icaro/internal/memory 89 # baseline before the coverage work
+icaro/internal/paths 0 # baseline before the coverage work
+icaro/internal/platform 85 # baseline before the coverage work
+icaro/internal/preview 74 # baseline before the coverage work
+icaro/internal/scheduler 85 # baseline before the coverage work
+icaro/internal/secrets 71 # baseline before the coverage work
+icaro/internal/service 71 # baseline before the coverage work
+icaro/internal/session 70 # baseline before the coverage work
+icaro/internal/store 78 # baseline before the coverage work
+icaro/internal/update 72 # baseline before the coverage work
+icaro/internal/usage 75 # baseline before the coverage work
+icaro/internal/workflow 88 # baseline before the coverage work
+icaro/internal/workflow/engine 81 # baseline before the coverage work
+icaro/internal/workflow/events 93 # baseline before the coverage work

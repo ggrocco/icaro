@@ -54,6 +54,11 @@ jobs:
         run: go test -count=1 -tags load -run Load ./internal/workflow/engine ./internal/api
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
+      # Per-package target and justified exceptions (ADR 0025). Linux only:
+      # platform files make the macOS numbers differ.
+      - name: coverage gate
+        if: matrix.os == 'ubuntu-latest'
+        run: go run ./hack/covercheck -profile coverage.out
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-latest'
         with:
