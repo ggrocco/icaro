@@ -6,13 +6,9 @@
 # Phase 0 coverage work, so the gate holds the line while tests are added.
 # They are replaced by the justified exceptions of ADR 0025.
 
-icaro/internal/api 66 # baseline before the coverage work
 icaro/internal/cli 30 # baseline before the coverage work
-icaro/internal/container 73 # baseline before the coverage work
 icaro/internal/container/docker 0 # baseline before the coverage work
-icaro/internal/container/egressproxy 81 # baseline before the coverage work
 icaro/internal/expr 81 # baseline before the coverage work
-icaro/internal/preview 74 # baseline before the coverage work
 icaro/internal/workflow 88 # baseline before the coverage work
 icaro/internal/workflow/engine 81 # baseline before the coverage work
 icaro/internal/workflow/events 93 # baseline before the coverage work
