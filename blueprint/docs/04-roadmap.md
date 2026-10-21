@@ -49,7 +49,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 
 | Phase | State | Open |
 |---|---|---|
-| [0 — Foundation](phases/00-foundation.md) | Done | Domain coverage is below the 95% target in several packages; exceptions are not yet justified one by one |
+| [0 — Foundation](phases/00-foundation.md) | Done | — |
 | [1 — Container and CLI](phases/01-container-cli.md) | Done on Linux | The macOS half of "`icaro sh` preserves the UID" and the Keychain backend have not run on a Mac; the agent base image is built and pushed by the release workflow but no release has run yet |
 | [2 — Workflow core](phases/02-workflow-core.md) | Done | — |
 | [3 — Integrations](phases/03-workflow-integrations.md) | Done | Spike S8: the bundled manifests are checked against documented payload fixtures, not the live APIs |

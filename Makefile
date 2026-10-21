@@ -19,8 +19,9 @@ test:
 	go test -race -count=1 $(PKG)
 
 # Needs a Docker daemon; set ICARO_TEST_POSTGRES_DSN to also run the Postgres matrix.
+# CI passes COVERFLAGS to gate the Docker adapter's coverage (ADR 0025).
 test-integration:
-	go test -race -count=1 -tags integration $(PKG)
+	go test -race -count=1 -tags integration $(COVERFLAGS) $(PKG)
 
 # Coverage of the whole test suite, not only unit tests (needs Docker; set
 # ICARO_TEST_POSTGRES_DSN to include the Postgres matrix). Test binaries

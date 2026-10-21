@@ -1,10 +1,8 @@
 # Per-package coverage exceptions checked by hack/covercheck (ADR 0025).
 # Format: <package> <min%> # <reason>. Every other package under
-# icaro/internal/ must reach 95% of statements in the unit run.
-#
-# TEMPORARY BASELINE: these floors are the coverage measured before the
-# Phase 0 coverage work, so the gate holds the line while tests are added.
-# They are replaced by the justified exceptions of ADR 0025.
+# icaro/internal/ must reach 95% of statements in the unit run (CI: Linux,
+# go test -race). A floor more than 5 points under real coverage fails, so
+# raise it when coverage improves; remove the line once 95% is reached.
 
-icaro/internal/cli 30 # baseline before the coverage work
-icaro/internal/container/docker 0 # baseline before the coverage work
+icaro/internal/cli 80 # ADR 0025: commands that exec into containers, pull images, read a TTY or install launchd/systemd units run in the integration and e2e suites
+icaro/internal/container/docker 0 # ADR 0025: Docker SDK adapter, no unit tests by design; the integration job gates it at 75%

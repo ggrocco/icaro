@@ -164,4 +164,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: docker version
-      - run: make test-integration
+      - run: make test-integration COVERFLAGS="-coverpkg=./internal/container/docker -coverprofile=integration.out"
+      # The Docker adapter has no unit tests by design (ADR 0025).
+      - name: coverage gate (Docker adapter)
+        run: go run ./hack/covercheck -profile integration.out -prefix icaro/internal/container/docker -default 75 -thresholds /dev/null
