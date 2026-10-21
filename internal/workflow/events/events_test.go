@@ -65,3 +65,23 @@ func TestBus(t *testing.T) {
 	}
 	s3.Cancel()
 }
+
+// Stopping the bus closes every live subscription, so followers of a run
+// (SSE streams) end instead of hanging.
+func TestShutdownClosesSubscriptions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	b := New(ctx)
+	s1 := b.Subscribe("r1")
+	s2 := b.Subscribe("r1")
+	s3 := b.Subscribe("r2")
+	cancel()
+	for _, s := range []*Subscription{s1, s2, s3} {
+		for {
+			if _, ok := recv(t, s.C); !ok {
+				break
+			}
+		}
+		s.Cancel() // after shutdown, a no-op that does not block
+	}
+	b.Publish(Event{RunID: "r1"}) // does not block after shutdown
+}

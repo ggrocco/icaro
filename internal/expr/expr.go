@@ -162,10 +162,14 @@ func ParseTemplate(src string) (*Template, error) {
 			return nil, &Error{Src: src, Pos: off + i, Msg: "unterminated ${{"}
 		}
 		inner := rest[i+3 : i+3+end]
-		e, err := Parse(strings.TrimSpace(inner))
+		trimmed := strings.TrimSpace(inner)
+		e, err := Parse(trimmed)
 		if err != nil {
 			if pe, ok := err.(*Error); ok {
-				pe.Src, pe.Pos = src, off+i+3+pe.Pos
+				// Offsets are relative to the trimmed text; add back the
+				// leading whitespace.
+				lead := strings.Index(inner, trimmed)
+				pe.Src, pe.Pos = src, off+i+3+lead+pe.Pos
 			}
 			return nil, err
 		}
