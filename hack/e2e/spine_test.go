@@ -39,12 +39,17 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	bin, err := filepath.Abs("../../bin/icaro")
+	// make cover-e2e points ICARO_E2E_BIN at a coverage-instrumented build.
+	bin := os.Getenv("ICARO_E2E_BIN")
+	if bin == "" {
+		bin = "../../bin/icaro"
+	}
+	bin, err := filepath.Abs(bin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(bin); err != nil {
-		t.Skip("bin/icaro not built; run make build")
+		t.Skip(bin + " not built; run make build")
 	}
 	if err := command("docker", "info").Run(); err != nil {
 		t.Skip("docker not available")
@@ -75,9 +80,8 @@ previews:
 	t.Cleanup(func() {
 		h.icaro(context.Background(), "session", "list") // keep output on failure
 		if pid, err := os.ReadFile(filepath.Join(home, "run", "icaro.pid")); err == nil {
-			_ = command("kill", strings.TrimSpace(string(pid))).Run()
+			stopDaemon(strings.TrimSpace(string(pid)))
 		}
-		time.Sleep(time.Second)
 		// The proxies are named per state root, so this removes only ours.
 		_ = command("docker", "rm", "-f", preview.ProxyName(home)).Run()
 		ns := container.Namespace(home)
@@ -266,4 +270,13 @@ func freePort(t *testing.T) int {
 // command runs a tool with test-controlled arguments.
 func command(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...) //nolint:gosec // arguments come from the test itself
+}
+
+// stopDaemon sends SIGTERM and waits for a clean exit, which is also when
+// a coverage-instrumented daemon writes its counters.
+func stopDaemon(pid string) {
+	_ = command("kill", pid).Run()
+	for i := 0; i < 150 && command("kill", "-0", pid).Run() == nil; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
 }

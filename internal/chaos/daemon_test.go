@@ -56,7 +56,11 @@ func newDaemon(t *testing.T) *daemon {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(home, "icaro")
-	build := command("go", "build", "-o", bin, "icaro/cmd/icaro")
+	args := []string{"build", "-o", bin}
+	if os.Getenv("GOCOVERDIR") != "" { // make cover-e2e
+		args = append(args, "-cover", "-coverpkg=icaro/...")
+	}
+	build := command("go", append(args, "icaro/cmd/icaro")...)
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		t.Fatalf("build: %v", err)
