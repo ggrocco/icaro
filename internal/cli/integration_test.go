@@ -96,7 +96,8 @@ func TestCLISessionTTY(t *testing.T) {
 	var b bytes.Buffer
 	c.Stdout, c.Stderr = &b, &b
 	err = c.Run()
-	out := strings.ReplaceAll(b.String(), "\r", "")
+	// The pseudo-terminal may also emit NUL padding between lines.
+	out := strings.NewReplacer("\r", "", "\x00", "").Replace(b.String())
 	ee, ok := err.(*exec.ExitError)
 	if !ok || ee.ExitCode() != 3 {
 		t.Fatalf("exit code must propagate (want 3): %v\n%s", err, out)
