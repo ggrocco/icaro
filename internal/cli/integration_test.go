@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"icaro/internal/container"
 )
 
 // TestCLISessionTTY drives the real binary: the daemon starts on demand,
@@ -87,7 +89,14 @@ func TestCLISessionTTY(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		_, _ = exec.Command("docker", "network", "rm", "icaro-egress-"+profile).CombinedOutput()
+		// Egress proxies and networks are named per state root.
+		ns := container.Namespace(home)
+		if out, err := exec.Command("docker", "ps", "-aq", "--filter", "label="+container.LabelEgress+"="+ns+"/"+profile).Output(); err == nil {
+			for _, id := range strings.Fields(string(out)) {
+				_ = exec.Command("docker", "rm", "-f", id).Run()
+			}
+		}
+		_, _ = exec.Command("docker", "network", "rm", "icaro-egress-"+ns+"-"+profile).CombinedOutput()
 	})
 
 	// script(1) gives icaro a real pseudo-terminal; -e returns the child's exit code.
