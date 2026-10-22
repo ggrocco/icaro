@@ -60,7 +60,9 @@ func TestPreviewCommandsWithoutDocker(t *testing.T) {
 	// a non-zero exit in text mode, the status field in JSON mode.
 	failCLI(t, "preview is error", "preview", "up", safe)
 	wantCLI(t, []string{"preview", "up", "--json", "--force", safe}, `"status": "error"`)
-	wantCLI(t, []string{"preview", "list"}, "error", safe)
+	// The daemon records the path with symlinks resolved (macOS temp dirs).
+	resolved, _ := filepath.EvalSymlinks(safe)
+	wantCLI(t, []string{"preview", "list"}, "error", resolved)
 	// Logs by path find the preview; compose reports that Docker is gone.
 	wantCLI(t, []string{"preview", "logs", safe}, "logs unavailable")
 	_, _ = runCLI(t, "", "preview", "down", safe)

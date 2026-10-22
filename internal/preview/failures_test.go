@@ -230,7 +230,8 @@ func (e *failEnv) add(dir string) *store.PreviewInstance {
 
 func (e *failEnv) get(path string) *store.PreviewInstance {
 	e.t.Helper()
-	p, err := e.st.Store.GetPreviewByPath(e.ctx, path)
+	// Rows are keyed by the normalized path (symlinks resolved).
+	p, err := e.st.Store.GetPreviewByPath(e.ctx, norm(path))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -362,7 +363,8 @@ func TestResumeSkipsStoppedAndSurvivesErrors(t *testing.T) {
 	}
 
 	e = newFailEnv(t)
-	parent := t.TempDir()
+	// The daemon stores normalized paths (symlinks resolved).
+	parent := norm(t.TempDir())
 	stopped := worktree(t, parent, "a-stopped", webCompose)
 	vanished := filepath.Join(parent, "b-vanished")
 	for _, p := range []*store.PreviewInstance{
