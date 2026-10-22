@@ -26,9 +26,10 @@ The [engineering standards](../05-engineering.md#coverage) set a 95%+ statement 
 - A change that drops a package below its target fails CI with the package and the number. Lowering an exception's floor, or adding one, needs this ADR updated, so it gets reviewed as a decision.
 - The integration job now also measures coverage. `-coverpkg` adds a few seconds to that job.
 - Coverage numbers are statements, not decisions. The [standards](../05-engineering.md#coverage) still ask for every business decision and critical path to be tested; the gate is the floor, not the goal.
-- Writing the tests found four product bugs, each fixed with a regression test:
+- Writing the tests found five product bugs, each fixed with a regression test:
   - `creds`: preparing a session home returned a home that did not exist, with no error, when the seed could not be read for a reason other than "not exist".
   - `expr`: parse errors inside `${{ }}` pointed too early by the amount of leading whitespace.
   - `workflow`: trigger field checks depended on trigger order when one event was not in the catalog.
   - `cli`: `preview logs` missed previews whose path went through a symlink.
+  - `cli`: `icaro mcp` treated any directory under a symlink as a repository, because `isRepo` compared a resolved path with an unresolved one. Only the macOS job, whose temp dirs sit under a symlink, caught it.
 - One behaviour is recorded by a test but not changed here: the preview and integration handlers return internal errors (such as `sql: database is closed`) as 400 with the raw message, where other handlers return an opaque 500.
