@@ -59,7 +59,7 @@ jobs:
       - name: coverage gate
         if: matrix.os == 'ubuntu-latest'
         run: go run ./hack/covercheck -profile coverage.out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.os == 'ubuntu-latest'
         with:
           name: coverage
@@ -122,7 +122,7 @@ jobs:
       - run: cd web && npx playwright test
       - name: session spine (worktree -> container -> preview -> memory)
         run: go test -count=1 -tags e2e ./hack/e2e/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-traces
