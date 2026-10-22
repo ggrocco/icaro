@@ -11,6 +11,8 @@ icaro preview rm [PATH] --yes    # tear down containers, volumes and the record
 icaro preview lint [PATH]        # check a compose file against the policy (no daemon needed)
 ```
 
+`icaro preview up` exits non-zero unless the preview ends up running, with `--json` too (it still prints the preview, whose `status` and `error` say why).
+
 ## Routing
 
 Mark the service to route with a label, or let Ícaro use port 80 when exactly one service exposes it:

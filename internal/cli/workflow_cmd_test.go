@@ -34,6 +34,11 @@ func TestWorkflowLifecycle(t *testing.T) {
 	}
 	bad := writeFile(t, dir, "bad.yaml", "version: 1\nname: bad\nsteps:\n  - id: a\n    needs: [missing]\n")
 	failCLI(t, "issue(s)", "workflow", "validate", bad)
+	// --json prints the issues and still fails.
+	out, err := runCLI(t, "", "workflow", "validate", "--json", bad)
+	if err == nil || !strings.Contains(out, `"valid": false`) || !strings.Contains(out, `"issues"`) {
+		t.Fatalf("validate --json on an invalid file: %v\n%s", err, out)
+	}
 	failCLI(t, "no such file", "workflow", "validate", dir+"/absent.yaml")
 	failCLI(t, "no such file", "workflow", "apply", dir+"/absent.yaml")
 

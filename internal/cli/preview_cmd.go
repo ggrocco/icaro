@@ -100,9 +100,14 @@ func newPreviewCmd(opts *rootOpts) *cobra.Command {
 				return err
 			}
 			if asJSON {
-				return printPreviewJSON(cmd.OutOrStdout(), p)
+				if err := printPreviewJSON(cmd.OutOrStdout(), p); err != nil {
+					return err
+				}
+			} else {
+				printPreview(cmd.OutOrStdout(), p)
 			}
-			printPreview(cmd.OutOrStdout(), p)
+			// The exit status says whether the preview runs, in both
+			// output modes, so scripts can rely on it.
 			if p.Status != "running" {
 				return fmt.Errorf("preview is %s", p.Status)
 			}
