@@ -9,7 +9,7 @@ triggers:
   - type: manual
 steps:
   - id: greet
-    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
     input:
       who: ${{ trigger.who }}
     command: |
@@ -19,7 +19,7 @@ steps:
     outputs:
       greeting: json:greeting
   - id: shout
-    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
     needs: [greet]
     # Values that come from a trigger reach the shell through env, never
     # spliced into the command text.

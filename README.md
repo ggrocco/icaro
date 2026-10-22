@@ -59,7 +59,7 @@ Read [Security](docs/security.md) for what the isolation does and does not cover
 
 ## Development
 
-Requirements: Go 1.26+, Docker, and Node 22 for the web UI.
+Requirements: Go 1.26+, Docker, and Node 24 for the web UI.
 
 ```sh
 make web build                 # embed the UI, build bin/icaro

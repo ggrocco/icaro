@@ -68,13 +68,13 @@ triggers:
     filter: trigger.branch != 'main'
 steps:
   - id: checkout
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     repository: { ref: github.com/acme/app, revision: main }
     command: echo ${{ trigger.repo }}
     outputs:
       sha: json:git.sha
   - id: lint
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     needs: [checkout]
     command: echo lint ${{ steps.checkout.outputs.sha }}
     timeout: 10m
@@ -82,7 +82,7 @@ steps:
     outputs:
       report: stdout
   - id: test
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     needs: [checkout]
     env: { MODE: "${{ env.STAGE }}" }
     command: echo test
@@ -97,7 +97,7 @@ steps:
       channel: "#ci"
       text: "PR ${{ trigger.pr_number }}: ${{ steps.test.outputs.summary }}"
   - id: after
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     needs: [notify]
     command: echo ${{ steps.notify.outputs.ts }} ${{ steps.checkout.outputs.sha }}
 `

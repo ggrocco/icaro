@@ -64,7 +64,7 @@ test("cancel a running workflow", async ({ page }) => {
     "name: e2e-slow",
     "steps:",
     "  - id: wait",
-    "    image: mirror.gcr.io/library/alpine:3.20",
+    "    image: mirror.gcr.io/library/alpine:3.24",
     "    command: sleep 300",
     "",
   ].join("\n");

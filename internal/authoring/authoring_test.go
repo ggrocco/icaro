@@ -117,7 +117,7 @@ func TestAgentAuthoringLoop(t *testing.T) {
 	}
 
 	// A deliberate typo: `comand`.
-	draft := "version: 1\nname: agent-hello\nsteps:\n  - id: greet\n    image: alpine:3.20\n    comand: echo hi\n    outputs:\n      greeting: json:greeting\n"
+	draft := "version: 1\nname: agent-hello\nsteps:\n  - id: greet\n    image: alpine:3.24\n    comand: echo hi\n    outputs:\n      greeting: json:greeting\n"
 	var v struct {
 		Valid  bool `json:"valid"`
 		Issues []struct {
@@ -209,7 +209,7 @@ func TestSecretsNeverReturnedAndReadOnlyScope(t *testing.T) {
 	if isErr || strings.Contains(text, "ghp_supersecretvalue") || !strings.Contains(text, "github.token") || !strings.Contains(text, "api.github.com") {
 		t.Fatalf("list_secrets: %s", text)
 	}
-	yaml := "version: 1\nname: ro-test\nsteps:\n  - id: a\n    image: alpine:3.20\n    command: echo hi\n"
+	yaml := "version: 1\nname: ro-test\nsteps:\n  - id: a\n    image: alpine:3.24\n    command: echo hi\n"
 	if text, isErr := e.call(ToolCreate, map[string]any{"yaml": yaml}); !isErr || !strings.Contains(text, "read-only") {
 		t.Fatalf("read scope created a workflow: %s", text)
 	}

@@ -64,7 +64,7 @@ version: 1
 name: hello
 steps:
   - id: say
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     command: echo ${{ trigger.who }}
 `
 

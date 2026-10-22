@@ -17,22 +17,22 @@ version: 1
 name: load-dag
 steps:
   - id: s-a
-    image: alpine:3.20
+    image: alpine:3.24
     command: echo a
   - id: s-b
-    image: alpine:3.20
+    image: alpine:3.24
     needs: [s-a]
     command: echo b
   - id: s-c
-    image: alpine:3.20
+    image: alpine:3.24
     needs: [s-a]
     command: echo c
   - id: s-d
-    image: alpine:3.20
+    image: alpine:3.24
     needs: [s-b, s-c]
     command: echo d
   - id: s-e
-    image: alpine:3.20
+    image: alpine:3.24
     needs: [s-d]
     command: echo e
 `

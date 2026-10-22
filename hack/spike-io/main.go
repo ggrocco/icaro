@@ -41,7 +41,7 @@ func run() error {
 	if err := eng.Ping(ctx); err != nil {
 		return fmt.Errorf("docker not reachable: %w", err)
 	}
-	const image = "alpine:3.20"
+	const image = "alpine:3.24"
 	if err := eng.EnsureImage(ctx, image); err != nil {
 		return err
 	}
