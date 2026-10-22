@@ -3,7 +3,7 @@ PKG      := ./...
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X icaro/internal/cli.version=$(VERSION)
 
-.PHONY: build web web-test test test-integration lint generate fmt tidy clean
+.PHONY: build web web-test test test-integration lint generate fmt tidy upgrade clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/icaro
@@ -33,6 +33,15 @@ fmt:
 
 tidy:
 	go mod tidy
+
+# Upgrades Go modules and npm packages to their latest minor/patch releases
+# and regenerates the third-party license lists. Major versions stay manual.
+upgrade:
+	go get -u -t $(PKG)
+	go mod tidy
+	cd web && npm update --save
+	go run ./hack/licenses
+	go run ./hack/licenses -npm web -out web/THIRD_PARTY_LICENSES.md
 
 clean:
 	rm -rf bin dist coverage.out
