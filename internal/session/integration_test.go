@@ -126,7 +126,7 @@ func TestSessionSpineDocker(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		script := "id -u; pwd; echo hi > /workspace/from-" + s.ID + " && echo written; ls /icaro >/dev/null && echo icaro-dir; cat /home/icaro/.claude.json | grep -c mcp.sock || true"
+		script := "id -u; pwd; echo hi > /workspace/from-" + s.ID + " && echo written; ls /icaro >/dev/null && echo icaro-dir; cat /home/icaro/.claude.json 2>/dev/null | grep -c mcp.sock || true"
 		out, err := dockerOut(container.ExecArgs(container.ExecOptions{Container: info.ContainerID, User: info.User, Cmd: []string{"sh", "-c", script}})...)
 		if err != nil {
 			t.Fatalf("session %d exec: %v %s", i, err, out)
