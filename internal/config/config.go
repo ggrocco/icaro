@@ -16,7 +16,7 @@ import (
 
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 
@@ -238,7 +238,10 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("config %s: %w", resolved, err)
 		}
 	}
-	if err := k.Load(env.Provider(envPrefix, ".", envKey), nil); err != nil {
+	if err := k.Load(env.Provider(".", env.Opt{
+		Prefix:        envPrefix,
+		TransformFunc: func(name, value string) (string, any) { return envKey(name), value },
+	}), nil); err != nil {
 		return nil, err
 	}
 	var cfg Config
