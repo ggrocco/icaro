@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"icaro/internal/container"
 )
 
 // TestCLISessionTTY drives the real binary: the daemon starts on demand,
@@ -29,7 +31,11 @@ func TestCLISessionTTY(t *testing.T) {
 	}
 	_, file, _, _ := runtime.Caller(0)
 	bin := filepath.Join(t.TempDir(), "icaro")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/icaro")
+	args := []string{"build", "-o", bin}
+	if os.Getenv("GOCOVERDIR") != "" { // make cover-e2e
+		args = append(args, "-cover", "-coverpkg=icaro/...")
+	}
+	build := exec.Command("go", append(args, "./cmd/icaro")...) //nolint:gosec // builds this repository
 	build.Dir = filepath.Join(filepath.Dir(file), "..", "..")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if b, err := build.CombinedOutput(); err != nil {
@@ -76,9 +82,21 @@ func TestCLISessionTTY(t *testing.T) {
 			}
 		}
 		if pid, err := os.ReadFile(filepath.Join(home, "run", "icaro.pid")); err == nil {
-			_ = exec.Command("kill", strings.TrimSpace(string(pid))).Run()
+			p := strings.TrimSpace(string(pid))
+			_ = exec.Command("kill", p).Run()
+			// A clean exit is when an instrumented daemon writes coverage.
+			for i := 0; i < 150 && exec.Command("kill", "-0", p).Run() == nil; i++ {
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
-		_, _ = exec.Command("docker", "network", "rm", "icaro-egress-"+profile).CombinedOutput()
+		// Egress proxies and networks are named per state root.
+		ns := container.Namespace(home)
+		if out, err := exec.Command("docker", "ps", "-aq", "--filter", "label="+container.LabelEgress+"="+ns+"/"+profile).Output(); err == nil {
+			for _, id := range strings.Fields(string(out)) {
+				_ = exec.Command("docker", "rm", "-f", id).Run()
+			}
+		}
+		_, _ = exec.Command("docker", "network", "rm", "icaro-egress-"+ns+"-"+profile).CombinedOutput()
 	})
 
 	// script(1) gives icaro a real pseudo-terminal; -e returns the child's exit code.
@@ -87,7 +105,8 @@ func TestCLISessionTTY(t *testing.T) {
 	var b bytes.Buffer
 	c.Stdout, c.Stderr = &b, &b
 	err = c.Run()
-	out := strings.ReplaceAll(b.String(), "\r", "")
+	// The pseudo-terminal may also emit NUL padding, raw or echoed as ^@.
+	out := strings.NewReplacer("\r", "", "\x00", "", "^@", "").Replace(b.String())
 	ee, ok := err.(*exec.ExitError)
 	if !ok || ee.ExitCode() != 3 {
 		t.Fatalf("exit code must propagate (want 3): %v\n%s", err, out)

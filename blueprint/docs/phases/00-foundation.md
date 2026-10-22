@@ -18,4 +18,4 @@
 - [x] `icaro version` works on macOS/Linux.
 - [x] A duplicate `icaro serve` fails deterministically.
 - [x] Killing the process and running `icaro doctor` detects and cleans up orphaned state.
-- [ ] Domain coverage meets the [target](../05-engineering.md#coverage); exceptions justified. *(CI reports coverage per package; most domain packages are at 70–90%, below the 95% target, and the exceptions are not yet justified one by one.)*
+- [x] Domain coverage meets the [target](../05-engineering.md#coverage); exceptions justified. *(CI gates every `internal/*` package at 95%; the two exceptions, `cli` and the Docker adapter, are justified in [ADR 0025](../adr/0025-coverage-target-and-exceptions.md).)*

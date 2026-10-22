@@ -308,18 +308,14 @@ func deriveKey(password string, salt []byte, n, r, p int) (*[32]byte, error) {
 
 func writeEncrypted(path string, key *crypto.Key, password string) error {
 	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return err
-	}
+	_, _ = rand.Read(salt) // never fails: crypto/rand.Read crashes the process instead
 	ek := encryptedKey{KDF: "scrypt", N: scryptN, R: 8, P: 1, Salt: base64.StdEncoding.EncodeToString(salt)}
 	dk, err := deriveKey(password, salt, ek.N, ek.R, ek.P)
 	if err != nil {
 		return err
 	}
 	var nonce [24]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
-	}
+	_, _ = rand.Read(nonce[:])
 	ek.Box = base64.StdEncoding.EncodeToString(secretbox.Seal(nonce[:], key[:], &nonce, dk))
 	b, err := json.MarshalIndent(ek, "", "  ")
 	if err != nil {

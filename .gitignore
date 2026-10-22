@@ -6,6 +6,7 @@
 icaro.yaml
 .env
 coverage.out
+/coverage/
 /internal/ui/dist/
 /ui/node_modules/
 .DS_Store

@@ -41,6 +41,16 @@ func TestAgentSpecBuild(t *testing.T) {
 	if !strings.Contains(strings.Join(spec.Env, " "), "HTTPS_PROXY=p") || spec.Entrypoint[0] != "sh" {
 		t.Fatal(spec.Env)
 	}
+
+	// A home directory is bind-mounted; without any home, /home is tmpfs.
+	spec, _ = AgentSpec{Name: "s", Image: "i", Home: HomeMount{Dir: "/h"}}.Build()
+	if len(spec.HostConfig.Mounts) != 1 || spec.HostConfig.Mounts[0].Target != HomePath || spec.HostConfig.Mounts[0].Source != "/h" {
+		t.Fatalf("%+v", spec.HostConfig.Mounts)
+	}
+	spec, _ = AgentSpec{Name: "s", Image: "i"}.Build()
+	if _, ok := spec.HostConfig.Tmpfs["/home"]; !ok || len(spec.HostConfig.Mounts) != 0 {
+		t.Fatalf("no home: %+v", spec.HostConfig)
+	}
 }
 
 func TestExecArgsAndExitCode(t *testing.T) {
@@ -54,6 +64,10 @@ func TestExecArgsAndExitCode(t *testing.T) {
 	err := exec.Command("sh", "-c", "exit 42").Run()
 	if ExitCode(err) != 42 || ExitCode(&wrapped{err}) != 42 {
 		t.Fatalf("%v", err)
+	}
+	// A wrapper chain that ends without an exit error means "failed to run".
+	if ExitCode(&wrapped{errors.New("x")}) != 1 || ExitCode(&wrapped{nil}) != 1 {
+		t.Fatal("non-exit chains map to 1")
 	}
 	if QuoteArgs([]string{"a", "b c", ""}) != "a 'b c' ''" {
 		t.Fatal(QuoteArgs([]string{"a", "b c", ""}))

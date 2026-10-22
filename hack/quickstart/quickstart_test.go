@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // blocks returns the bodies of ```sh quickstart fences in order.
@@ -56,7 +57,11 @@ func TestQuickstart(t *testing.T) {
 		t.Skipf("docker is not available: %v", err)
 	}
 	bin := t.TempDir()
-	build := exec.Command("go", "build", "-o", filepath.Join(bin, "icaro"), "./cmd/icaro") //nolint:gosec // builds this repository
+	args := []string{"build", "-o", filepath.Join(bin, "icaro")}
+	if os.Getenv("GOCOVERDIR") != "" { // make cover-e2e
+		args = append(args, "-cover", "-coverpkg=icaro/...")
+	}
+	build := exec.Command("go", append(args, "./cmd/icaro")...) //nolint:gosec // builds this repository
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
@@ -70,6 +75,10 @@ func TestQuickstart(t *testing.T) {
 		if b, err := os.ReadFile(filepath.Join(home, "run", "icaro.pid")); err == nil {
 			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
 				_ = syscall.Kill(pid, syscall.SIGTERM)
+				// A clean exit is when an instrumented daemon writes coverage.
+				for i := 0; i < 150 && syscall.Kill(pid, 0) == nil; i++ {
+					time.Sleep(100 * time.Millisecond)
+				}
 			}
 		}
 		_ = os.RemoveAll(home)

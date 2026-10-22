@@ -35,6 +35,7 @@ Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` sess
   `uses:` steps get a typed form built from the action's inputs, and integration triggers pick from the installed events.
 - **Runs:** a run is drawn from the workflow version it ran with, so pending steps are visible. Status, attempts, outputs and live logs stream over SSE, with no polling. **Cancel** kills the step containers; **Re-run** starts the workflow again with the same trigger payload.
 - **Deliveries:** every inbound webhook with its verification result, the normalized payload, headers (secrets masked), the body, what each subscribed workflow did with it, and **Redeliver**.
+- **Usage:** the `icaro usage` report for the profile homes over the last 1–90 days: totals, a per-day table, and every source and model with its confidence. Costs are labelled as estimates, unpriced usage shows `n/a` (and turns a total into "at least"), days over `usage.daily_limit_usd` raise an alert, and an unreadable source is shown instead of hidden. Your own `~/.claude` is read only by `icaro usage --host-claude`.
 - **Integrations:** the installed integrations, and a manifest editor that validates an edit and commits it to your `local` pack. An invalid edit is rejected before anything is written, and **Push** stays a manual button.
 
 ## Building it

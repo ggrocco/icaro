@@ -125,3 +125,19 @@ func TestAlerts(t *testing.T) {
 		t.Fatal("longest prefix wins")
 	}
 }
+
+func TestParseSince(t *testing.T) {
+	now := time.Date(2025, 3, 10, 15, 4, 0, 0, time.UTC)
+	got, err := ParseSince("7d", now)
+	if err != nil || !got.Equal(time.Date(2025, 3, 3, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("%v %v", got, err)
+	}
+	got, err = ParseSince("2025-01-02", now)
+	if err != nil || got.Day() != 2 {
+		t.Fatalf("%v %v", got, err)
+	}
+	var bad *BadOption
+	if _, err := ParseSince("yesterday", now); !errors.As(err, &bad) {
+		t.Fatalf("bad input: %v", err)
+	}
+}

@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 // Phase 4 acceptance: create, run and cancel a workflow from the UI.
@@ -92,4 +94,31 @@ test("a manifest edit commits to the local pack; an invalid edit is rejected", a
   await page.keyboard.type("version: 1\nname: webhook\nbogus_field: true\n");
   await page.getByRole("button", { name: "Validate & commit" }).click();
   await expect(page.getByLabel("Validation issues").first()).toContainText("bogus_field");
+});
+
+test("the usage page shows transcript usage with its source and an estimated cost", async ({ page }) => {
+  // A Claude Code transcript in a profile home, as an agent session writes it.
+  const dir = join(process.env.ICARO_E2E_HOME!, "home", "e2e", ".claude", "projects", "-workspace");
+  mkdirSync(dir, { recursive: true });
+  const line = (id: string, model: string) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date().toISOString(),
+      requestId: `req_${id}`,
+      message: { id: `msg_${id}`, model, usage: { input_tokens: 1200, output_tokens: 300 } },
+    });
+  writeFileSync(join(dir, "session.jsonl"), [line("1", "claude-sonnet-4-20250514"), line("2", "claude-future-9")].join("\n") + "\n");
+
+  await login(page);
+  await page.getByRole("link", { name: "Usage" }).click();
+  await expect(page.getByRole("heading", { name: "Usage", level: 1 })).toBeVisible();
+  const detail = page.getByRole("table", { name: "Usage by source and model" });
+  const priced = detail.getByRole("row").filter({ hasText: "claude-sonnet-4-20250514" });
+  await expect(priced).toContainText("profile:e2e");
+  await expect(priced).toContainText("1,200");
+  await expect(priced).toContainText("~$");
+  await expect(priced).toContainText("high");
+  // An unpriced model never gets a guessed cost.
+  await expect(detail.getByRole("row").filter({ hasText: "claude-future-9" })).toContainText("n/a");
+  await expect(page.getByRole("table", { name: "Usage by day" }).getByRole("row").nth(1)).toContainText("≥ ~$");
 });

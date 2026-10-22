@@ -27,7 +27,7 @@ These pages describe how to use what is built. The design (architecture, decisio
 
 ## Usage tracking
 
-`icaro usage` reads the Claude Code transcripts written in each profile home and prints tokens per day and model. With `--host-claude` it also reads your own `~/.claude`, read-only. Every row names its source and confidence. Costs are list-price estimates; models without a price entry show no cost, and no cost comes from the provider. Set `usage.daily_limit_usd` to get an alert when a day's estimated spend reaches it; days follow `usage.timezone`. An unreadable source shows as an `unavailable` row and never fails the command.
+`icaro usage` reads the Claude Code transcripts written in each profile home and prints tokens per day and model. With `--host-claude` it also reads your own `~/.claude`, read-only. Every row names its source and confidence. Costs are list-price estimates; models without a price entry show no cost, and no cost comes from the provider. Set `usage.daily_limit_usd` to get an alert when a day's estimated spend reaches it; days follow `usage.timezone`. An unreadable source shows as an `unavailable` row and never fails the command. The web UI's **Usage** page shows the same report for the profile homes (`GET /api/v1/usage?since=7d`); your own `~/.claude` stays a CLI opt-in.
 
 ## Start at login
 

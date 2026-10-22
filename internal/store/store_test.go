@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -14,17 +13,7 @@ func forEachDriver(t *testing.T, fn func(t *testing.T, s *Store)) {
 	t.Helper()
 	ctx := context.Background()
 
-	t.Run("sqlite", func(t *testing.T) {
-		s, err := Open(ctx, SQLite, filepath.Join(t.TempDir(), "t.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = s.Close() })
-		if err := s.Migrate(ctx); err != nil {
-			t.Fatal(err)
-		}
-		fn(t, s)
-	})
+	t.Run("sqlite", func(t *testing.T) { fn(t, sqliteStore(t)) })
 
 	dsn := os.Getenv("ICARO_TEST_POSTGRES_DSN")
 	if dsn == "" {

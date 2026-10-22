@@ -12,7 +12,7 @@
 
 ### Coverage
 
-"Full coverage" means 100% of business decisions and critical paths covered, not a blind line-count metric. Technical target: 95%+ in the domain `internal/*` packages; any exclusion must have a comment and an ADR/issue.
+"Full coverage" means 100% of business decisions and critical paths covered, not a blind line-count metric. Technical target: 95%+ in the domain `internal/*` packages; any exclusion must have a comment and an ADR/issue. CI enforces the target per package with `hack/covercheck`; the exceptions and their reasons are in `hack/covercheck/thresholds.txt` and [ADR 0025](adr/0025-coverage-target-and-exceptions.md).
 
 ### Surgical mocks
 

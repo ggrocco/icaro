@@ -177,6 +177,10 @@ func newPreviewCmd(opts *rootOpts) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// The daemon records worktree paths with symlinks resolved.
+				if path, err = preview.NormalizePath(path); err != nil {
+					return err
+				}
 				ps, err := c.ListPreviews(cmd.Context())
 				if err != nil {
 					return err
