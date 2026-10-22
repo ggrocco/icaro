@@ -76,13 +76,22 @@ type execFixture struct {
 
 func newExecFixture(t *testing.T) *execFixture {
 	t.Helper()
+	return newExecFixtureWith(t, map[string]string{"acme": actManifest})
+}
+
+// newExecFixtureWith loads the given manifests (name -> YAML) into a user
+// pack and points every request at one TLS test server.
+func newExecFixtureWith(t *testing.T, manifests map[string]string) *execFixture {
+	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "p"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "p", "acme.yaml"), []byte(actManifest), 0o600); err != nil {
-		t.Fatal(err)
+	for name, src := range manifests {
+		if err := os.WriteFile(filepath.Join(dir, "p", name+".yaml"), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	reg := NewRegistry(dir, nil)
 	if errs := reg.Snapshot().Errors(); len(errs) > 0 {
@@ -114,7 +123,7 @@ func newExecFixture(t *testing.T) *execFixture {
 		Registry: reg,
 		Secrets:  sec,
 		Settings: func(n string) config.IntegrationConfig { return settings[n] },
-		Resolver: fakeResolver{"api.acme.dev": "93.184.216.34", "evil.acme.dev": "10.0.0.5", "ghe.corp.example": "10.1.1.1"},
+		Resolver: fakeResolver{"api.acme.dev": "93.184.216.34", "api.beta.dev": "93.184.216.35", "evil.acme.dev": "10.0.0.5", "ghe.corp.example": "10.1.1.1"},
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, network, srv.Listener.Addr().String())

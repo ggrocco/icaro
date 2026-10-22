@@ -9,7 +9,7 @@
 - [x] Define a usage provider interface.
 - [x] Start with explicit parsing of supported sources (local agent logs such as `~/.claude/`).
 - [x] Save snapshots and expose limits/alerts (`usage_snapshots`, `usage.daily_limit_usd`).
-- [ ] Add a usage UI. *The CLI view (`icaro usage`, `--json`) is done; a web UI panel belongs with the Phase 4 UI.*
+- [x] Add a usage UI. *The CLI view (`icaro usage`, `--json`) and the web UI's **Usage** page over `GET /api/v1/usage` (covered by `web/e2e`).*
 - [x] Never infer cost as fact without provider metadata.
 
 ## Acceptance criteria

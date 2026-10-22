@@ -101,7 +101,12 @@ func isRepo(dir string) bool {
 	if err != nil {
 		return false
 	}
+	// ProjectRoot resolves symlinks (macOS temp dirs live under one), so
+	// compare against the resolved path.
 	abs, _ := filepath.Abs(dir)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
 	return root != abs || fileExists(filepath.Join(abs, ".git"))
 }
 

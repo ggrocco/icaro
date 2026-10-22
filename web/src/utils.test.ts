@@ -4,6 +4,7 @@ import { layout, stepsFromSpec } from "./graph";
 import { canonicalJSON, parse, pointerToPath, rangeFor, setIn } from "./yamldoc";
 import { pathAtLine, propertiesAt } from "./schema";
 import { triggerFields } from "./pages/WorkflowDetail";
+import { fmtCost, summarizeUsage } from "./usage";
 
 const wf = `version: 1
 name: demo
@@ -78,5 +79,39 @@ describe("schema", () => {
 describe("trigger fields", () => {
   it("collects trigger.* references for manual runs", () => {
     expect(triggerFields(parse(wf).toJS())).toEqual(["pr_number"]);
+  });
+});
+
+describe("usage", () => {
+  const row = (day: string, model: string, cost?: number) => ({
+    provider: "claude-code",
+    source: "profile:claude",
+    day,
+    model,
+    input_tokens: 10,
+    output_tokens: 5,
+    cache_read_tokens: 2,
+    cache_write_tokens: 1,
+    messages: 1,
+    cost_usd_estimate: cost,
+    confidence: "high",
+  });
+  it("totals per day, newest first, and never sums unavailable rows", () => {
+    const s = summarizeUsage([
+      row("2025-03-01", "a", 0.5),
+      row("2025-03-02", "a", 1.25),
+      row("2025-03-02", "unpriced"),
+      { ...row("", ""), source: "*", confidence: "unavailable", error: "boom" },
+    ]);
+    expect(s.days.map((d) => d.day)).toEqual(["2025-03-02", "2025-03-01"]);
+    expect(s.days[0]).toMatchObject({ messages: 2, input: 20, cost: 1.25, unpriced: true });
+    expect(s.days[1].unpriced).toBe(false);
+    expect(s.total).toMatchObject({ messages: 3, cost: 1.75, unpriced: true });
+    expect(s.unavailable).toHaveLength(1);
+  });
+  it("labels costs as estimates", () => {
+    expect(fmtCost(undefined)).toBe("n/a");
+    expect(fmtCost(0.01234)).toBe("~$0.0123");
+    expect(fmtCost(12.5, true)).toBe("≥ ~$12.50");
   });
 });

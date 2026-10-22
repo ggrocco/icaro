@@ -27,10 +27,11 @@ type fakeEngine struct {
 	running map[string]bool
 	n       int
 	failOn  string
+	errs    map[string]error // per-operation failures, see fail
 }
 
 func newFakeEngine() *fakeEngine {
-	f := &fakeEngine{ops: make(chan func()), specs: map[string]docker.Spec{}, running: map[string]bool{}}
+	f := &fakeEngine{ops: make(chan func()), specs: map[string]docker.Spec{}, running: map[string]bool{}, errs: map[string]error{}}
 	go func() {
 		for op := range f.ops {
 			op()
@@ -45,10 +46,22 @@ func (f *fakeEngine) do(fn func()) {
 	<-done
 }
 
+// fail makes every later call of op ("create", "start", "stop", "remove",
+// "inspect") return err; a nil err clears it. "create-once" fails only the
+// next create.
+func (f *fakeEngine) fail(op string, err error) { f.do(func() { f.errs[op] = err }) }
+
 func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, _ docker.NetSpec) (id string, err error) {
 	f.do(func() {
 		if f.failOn != "" && strings.Contains(spec.Name, f.failOn) {
 			err = fmt.Errorf("boom")
+			return
+		}
+		if err = f.errs["create"]; err != nil {
+			return
+		}
+		if err = f.errs["create-once"]; err != nil {
+			delete(f.errs, "create-once")
 			return
 		}
 		f.n++
@@ -58,27 +71,43 @@ func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, _ do
 	return id, err
 }
 
-func (f *fakeEngine) StartContainer(_ context.Context, id string) error {
-	f.do(func() { f.running[id] = true })
-	return nil
+func (f *fakeEngine) StartContainer(_ context.Context, id string) (err error) {
+	f.do(func() {
+		if err = f.errs["start"]; err == nil {
+			f.running[id] = true
+		}
+	})
+	return err
 }
 
-func (f *fakeEngine) StopContainer(_ context.Context, id string, _ int) error {
-	f.do(func() { f.running[id] = false })
-	return nil
+func (f *fakeEngine) StopContainer(_ context.Context, id string, _ int) (err error) {
+	f.do(func() {
+		if err = f.errs["stop"]; err == nil {
+			f.running[id] = false
+		}
+	})
+	return err
 }
 
-func (f *fakeEngine) RemoveContainer(_ context.Context, id string) error {
-	f.do(func() { delete(f.specs, id); delete(f.running, id) })
-	return nil
+func (f *fakeEngine) RemoveContainer(_ context.Context, id string) (err error) {
+	f.do(func() {
+		if err = f.errs["remove"]; err == nil {
+			delete(f.specs, id)
+			delete(f.running, id)
+		}
+	})
+	return err
 }
 
 func (f *fakeEngine) Inspect(_ context.Context, id string) (st docker.State, err error) {
 	f.do(func() {
+		if err = f.errs["inspect"]; err != nil {
+			return
+		}
 		_, ok := f.specs[id]
 		st = docker.State{Exists: ok, Running: f.running[id]}
 	})
-	return st, nil
+	return st, err
 }
 
 func (f *fakeEngine) kill(id string) { f.do(func() { delete(f.specs, id); delete(f.running, id) }) }
@@ -144,14 +173,21 @@ func gitInit(t *testing.T, dir string) {
 	}
 }
 
-func newEnv(t *testing.T, maxActive int) *env {
+// newEnv starts a manager on a fresh store and repository; mods adjust
+// its options before it is built.
+func newEnv(t *testing.T, maxActive int, mods ...func(*Options)) *env {
 	t.Helper()
-	t.Setenv("ICARO_HOME", t.TempDir())
-	t.Setenv("ICARO_CONFIG", "")
-	cfg, err := config.Load("")
+	// An explicit empty config file and Home keep the test off the user's
+	// ~/.icaro without t.Setenv, so tests can run in parallel.
+	cfgFile := filepath.Join(t.TempDir(), "icaro.yaml")
+	if err := os.WriteFile(cfgFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.Home = t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	st, err := store.Open(ctx, store.SQLite, filepath.Join(t.TempDir(), "s.db"))
@@ -167,16 +203,21 @@ func newEnv(t *testing.T, maxActive int) *env {
 	gitInit(t, repo)
 	e := &env{st: st, eng: newFakeEngine(), repo: repo, cfg: cfg, cancel: cancel,
 		mem: fakeMemory{calls: make(chan Identity, 10)}, pv: fakePreview{added: make(chan string, 10), removed: make(chan string, 10)}}
-	e.m = New(Options{
+	o := Options{
 		Store: st, Config: cfg, Engine: e.eng, Egress: fakeEgress{}, Images: fakeImages{},
 		Homes: &creds.Homes{Layout: cfg.Layout(), Mode: creds.ModeCopy}, Memory: e.mem, Preview: e.pv,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), MaxActive: maxActive, UID: 1234, GID: 1234, Tick: time.Hour,
-	})
+	}
+	for _, mod := range mods {
+		mod(&o)
+	}
+	e.m = New(o)
 	go func() { _ = e.m.Run(ctx) }()
 	return e
 }
 
 func TestTwoSessionsOnTwoWorktrees(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t, 4)
 	ctx := context.Background()
 	a, err := e.m.Create(ctx, CreateRequest{RepoPath: e.repo, Name: "Fix Login"})
@@ -276,6 +317,7 @@ func TestTwoSessionsOnTwoWorktrees(t *testing.T) {
 }
 
 func TestConcurrencyCapQueues(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t, 1)
 	ctx := context.Background()
 	a, err := e.m.Create(ctx, CreateRequest{RepoPath: e.repo, Name: "a"})
@@ -308,6 +350,7 @@ func TestConcurrencyCapQueues(t *testing.T) {
 }
 
 func TestReconcileAfterRestart(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t, 4)
 	ctx := context.Background()
 	alive, _ := e.m.Create(ctx, CreateRequest{RepoPath: e.repo, Name: "alive"})
@@ -347,6 +390,7 @@ func TestReconcileAfterRestart(t *testing.T) {
 }
 
 func TestDisallowedMountFailsStart(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t, 4)
 	p := e.cfg.Profiles["claude"]
 	p.Mounts = []string{t.TempDir() + ":/data"}
@@ -361,6 +405,7 @@ func TestDisallowedMountFailsStart(t *testing.T) {
 }
 
 func TestRunSessions(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t, 4)
 	ctx := context.Background()
 	ws, err := e.m.StartRun(ctx, "RUN1", "")
@@ -418,6 +463,7 @@ func TestRunSessions(t *testing.T) {
 }
 
 func TestCapacity(t *testing.T) {
+	t.Parallel()
 	if capFor(0) != 2 || capFor(2<<30) != 1 || capFor(16<<30) != 4 {
 		t.Fatal("capFor")
 	}

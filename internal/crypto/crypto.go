@@ -56,12 +56,11 @@ func LoadMasterKey(dataDir string, create bool) (*Key, error) {
 	}
 }
 
-// NewKey generates a random key.
+// NewKey generates a random key. The error is always nil: crypto/rand.Read
+// never fails (it crashes the process instead).
 func NewKey() (*Key, error) {
 	var k Key
-	if _, err := rand.Read(k[:]); err != nil {
-		return nil, err
-	}
+	_, _ = rand.Read(k[:])
 	return &k, nil
 }
 
@@ -78,9 +77,7 @@ func decodeKey(b64 string) (*Key, error) {
 // Seal encrypts plaintext; the random nonce is prefixed to the box.
 func (k *Key) Seal(plaintext []byte) ([]byte, error) {
 	var nonce [24]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return nil, err
-	}
+	_, _ = rand.Read(nonce[:]) // never fails, see NewKey
 	return secretbox.Seal(nonce[:], plaintext, &nonce, (*[32]byte)(k)), nil
 }
 
@@ -104,9 +101,7 @@ const TokenPrefix = "icaro_"
 // NewToken returns a random bearer token and its hash.
 func NewToken() (plain, hash string, err error) {
 	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", "", err
-	}
+	_, _ = rand.Read(raw) // never fails, see NewKey
 	plain = TokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
 	return plain, HashToken(plain), nil
 }

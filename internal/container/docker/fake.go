@@ -194,7 +194,7 @@ func (f *Fake) CopyOut(_ context.Context, id, path string) (io.ReadCloser, error
 	return io.NopCloser(&buf), nil
 }
 
-func (f *Fake) Logs(_ context.Context, id string, follow bool) (io.ReadCloser, error) {
+func (f *Fake) Logs(ctx context.Context, id string, follow bool) (io.ReadCloser, error) {
 	f.mu.Lock()
 	c, ok := f.Containers[id]
 	f.mu.Unlock()
@@ -204,7 +204,13 @@ func (f *Fake) Logs(_ context.Context, id string, follow bool) (io.ReadCloser, e
 	pr, pw := io.Pipe()
 	go func() {
 		if follow {
-			<-c.done
+			// Like the real client, a cancelled context ends a follow.
+			select {
+			case <-c.done:
+			case <-ctx.Done():
+				_ = pw.CloseWithError(ctx.Err())
+				return
+			}
 		}
 		f.mu.Lock()
 		out, errOut := c.Behavior.Stdout, c.Behavior.Stderr

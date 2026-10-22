@@ -11,7 +11,7 @@ Phase 9 wants unified usage without fragility: an unavailable provider must not 
 - `internal/usage` defines a `Provider` interface (`Collect(since, timezone) → records`). The first provider parses **Claude Code JSONL transcripts** under each profile home (`~/.icaro/home/<profile>/**/.claude/projects/**`). The user's own `~/.claude` is read only with `--host-claude`, and read-only.
 - A record is `(provider, source, day, model)` with input, output, cache-read and cache-write tokens and a message count. Responses that span several transcript lines are counted once (`message.id` + `requestId`). Token counts come from the provider's own usage fields: confidence `high`.
 - **Cost is an estimate.** It is computed from a list-price table keyed by model prefix and labelled as an estimate everywhere. Models without an entry get no cost — never a guess. Alerts that include unpriced usage are marked partial ("at least").
-- A provider error or panic becomes an `unavailable` row. Collection runs from the CLI (`icaro usage`) and never sits on an agent's code path.
+- A provider error or panic becomes an `unavailable` row. Collection runs on demand from the CLI (`icaro usage`) or the web UI's usage page (`GET /api/v1/usage`, read scope), both through `usage.BuildReport`, and never sits on an agent's code path. The API reads the profile homes only; the host's `~/.claude` stays a CLI opt-in.
 - Days are bucketed in `usage.timezone`. Alerts fire when a day's estimated spend reaches `usage.daily_limit_usd`. Snapshots are upserted into `usage_snapshots`, so recollecting a window replaces its rows instead of double-counting them.
 
 ## Consequences
