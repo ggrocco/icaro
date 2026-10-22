@@ -28,7 +28,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go run ./hack/linkcheck site
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

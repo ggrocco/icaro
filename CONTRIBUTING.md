@@ -15,6 +15,7 @@ Thanks for helping. Ícaro is built against one design: [`blueprint/`](blueprint
   ```
 
 - `make lint` runs golangci-lint (gosec, staticcheck, errcheck, unused).
+- `make upgrade` moves Go modules and npm packages to their latest minor/patch releases and regenerates both `THIRD_PARTY_LICENSES.md` files; major upgrades are done by hand.
 - `go run ./hack/linkcheck .` checks the relative links in every Markdown and HTML file.
 
 ## Rules
