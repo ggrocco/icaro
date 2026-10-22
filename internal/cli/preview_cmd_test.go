@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,7 +72,12 @@ func TestPreviewCommandsWithoutDocker(t *testing.T) {
 	failCLI(t, "", "preview", "down", t.TempDir())
 	failCLI(t, "", "preview", "down", "--json", t.TempDir())
 	failCLI(t, "pass --yes", "preview", "rm", safe)
-	failCLI(t, "", "preview", "rm", "--yes", t.TempDir())
+	// Removing an unknown path runs compose down. With a docker CLI that
+	// cannot reach the engine it fails; without a docker CLI (the macOS CI
+	// runner) there is nothing to tear down, so it succeeds.
+	if _, err := exec.LookPath("docker"); err == nil {
+		failCLI(t, "", "preview", "rm", "--yes", t.TempDir())
+	}
 	failCLI(t, "no preview for", "preview", "logs", t.TempDir())
 	failCLI(t, "", "preview", "logs", "prv_nope")
 }
