@@ -131,6 +131,5 @@ func PlanCredential(m *Manifest, cred string, settings config.IntegrationConfig)
 		used = append(used, strings.TrimPrefix(WebhookCredential(m), m.Name+"."))
 	}
 	sort.Strings(used)
-	msg := fmt.Sprintf("integration %s uses no credential %q (it uses: %s)", m.Name, cred, orNone(used))
-	return CredentialPlan{}, errors.New(msg)
+	return CredentialPlan{}, invalid("integration %s uses no credential %q (it uses: %s)", m.Name, cred, orNone(used))
 }

@@ -21,6 +21,10 @@ import (
 // ErrNotFound reports an unknown secret.
 var ErrNotFound = errors.New("secret not found")
 
+// ErrInvalid marks a rejected name, value or host binding: the caller's
+// mistake, reported with its message.
+var ErrInvalid = errors.New("invalid secret")
+
 // ErrHostNotAllowed is returned when a value would be sent to a host
 // outside its binding.
 var ErrHostNotAllowed = errors.New("host is outside the secret's binding")
@@ -52,10 +56,10 @@ func ValidName(name string) bool { return nameRe.MatchString(name) }
 // container env, never in integration requests).
 func (s *Store) Set(ctx context.Context, name, value string, hosts []string) error {
 	if !ValidName(name) {
-		return fmt.Errorf("invalid secret name %q", name)
+		return fmt.Errorf("%w name %q", ErrInvalid, name)
 	}
 	if value == "" {
-		return errors.New("secret value is empty")
+		return fmt.Errorf("%w: the value is empty", ErrInvalid)
 	}
 	norm := make([]string, 0, len(hosts))
 	for _, h := range hosts {
@@ -64,7 +68,7 @@ func (s *Store) Set(ctx context.Context, name, value string, hosts []string) err
 			continue
 		}
 		if strings.ContainsAny(h, "/: ") {
-			return fmt.Errorf("host %q must be a hostname or *.domain", h)
+			return fmt.Errorf("%w: host %q must be a hostname or *.domain", ErrInvalid, h)
 		}
 		norm = append(norm, h)
 	}

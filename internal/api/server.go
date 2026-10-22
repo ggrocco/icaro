@@ -219,6 +219,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	var br *service.BadRequest
 	var mt *service.MissingTriggerFieldsError
 	var conflict *service.Conflict
+	var unavailable *service.Unavailable
+	var upstream *service.Upstream
 	switch {
 	case errors.As(err, &mt):
 		status = http.StatusBadRequest
@@ -231,6 +233,10 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		body.Issues = ve.Issues
 	case errors.As(err, &br):
 		status = http.StatusBadRequest
+	case errors.As(err, &unavailable):
+		status = http.StatusServiceUnavailable
+	case errors.As(err, &upstream):
+		status = http.StatusBadGateway
 	case errors.Is(err, service.ErrNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, service.ErrUnauthorized):

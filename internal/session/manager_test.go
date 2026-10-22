@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,10 +47,15 @@ func (f *fakeEngine) do(fn func()) {
 	<-done
 }
 
-// fail makes every later call of op ("create", "start", "stop", "remove",
-// "inspect") return err; a nil err clears it. "create-once" fails only the
+// fail makes every later call of op ("ping", "create", "start", "stop",
+// "remove", "inspect") return err; a nil err clears it. "create-once" fails only the
 // next create.
 func (f *fakeEngine) fail(op string, err error) { f.do(func() { f.errs[op] = err }) }
+
+func (f *fakeEngine) Ping(context.Context) (err error) {
+	f.do(func() { err = f.errs["ping"] })
+	return err
+}
 
 func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, _ docker.NetSpec) (id string, err error) {
 	f.do(func() {
@@ -482,4 +488,43 @@ func contains(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// Sessions start only while Docker answers, so creating one while it is
+// down fails at once instead of waiting, and leaves nothing behind.
+func TestCreateFailsFastWhileDockerIsDown(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, 4)
+	ctx := context.Background()
+	e.eng.fail("ping", errors.New("dial unix /var/run/docker.sock: connect: no such file or directory"))
+
+	start := time.Now()
+	for _, create := range []func(context.Context, CreateRequest) (*Session, error){e.m.Create, e.m.Ensure} {
+		_, err := create(ctx, CreateRequest{RepoPath: e.repo, Name: "down"})
+		var un *ErrUnavailable
+		if !errors.As(err, &un) || !strings.Contains(un.Msg, "docker is not reachable") || !strings.Contains(un.Msg, "docker.sock") {
+			t.Fatalf("want ErrUnavailable naming the Docker error, got %v", err)
+		}
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %v; must not wait for Docker", d)
+	}
+	if rows, err := e.st.ListSessions(ctx, store.SessionFilter{}); err != nil || len(rows) != 0 {
+		t.Fatalf("no session row may be left: %v %v", rows, err)
+	}
+	if _, err := os.Stat(filepath.Join(e.cfg.Layout().Worktrees(), "my-app", "down")); !os.IsNotExist(err) {
+		t.Fatalf("no worktree may be left: %v", err)
+	}
+	// A bad request is still reported as such while Docker is down.
+	var inv *ErrInvalid
+	if _, err := e.m.Create(ctx, CreateRequest{RepoPath: e.repo, Profile: "nope"}); !errors.As(err, &inv) {
+		t.Fatalf("unknown profile: %v", err)
+	}
+
+	// Once Docker answers, the same request succeeds.
+	e.eng.fail("ping", nil)
+	s, err := e.m.Create(ctx, CreateRequest{RepoPath: e.repo, Name: "down"})
+	if err != nil || s.Status != StatusRunning {
+		t.Fatalf("after Docker is back: %+v %v", s, err)
+	}
 }

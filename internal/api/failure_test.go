@@ -8,7 +8,8 @@ import (
 
 // TestStoreFailureMapping closes the database under a running daemon:
 // every route must answer with an error status, and a 500 must never
-// leak the underlying error.
+// leak the underlying error. The remaining 400s are requests that are
+// wrong whatever the store does (no compose file, a weak secret value).
 func TestStoreFailureMapping(t *testing.T) {
 	t.Parallel()
 	f := newFull(t)
@@ -48,11 +49,11 @@ func TestStoreFailureMapping(t *testing.T) {
 		{"DELETE", "/api/v1/secrets/gh", nil, internal},
 
 		{"GET", "/api/v1/previews", nil, internal},
-		{"GET", "/api/v1/previews/p1", nil, http.StatusBadRequest},
-		{"GET", "/api/v1/previews/p1/logs", nil, http.StatusBadRequest},
+		{"GET", "/api/v1/previews/p1", nil, internal},
+		{"GET", "/api/v1/previews/p1/logs", nil, internal},
 		{"POST", "/api/v1/previews/up", map[string]any{"path": dir}, http.StatusBadRequest},
-		{"POST", "/api/v1/previews/down", map[string]any{"path": dir}, http.StatusBadRequest},
-		{"POST", "/api/v1/previews/remove", map[string]any{"path": dir}, http.StatusBadRequest},
+		{"POST", "/api/v1/previews/down", map[string]any{"path": dir}, internal},
+		{"POST", "/api/v1/previews/remove", map[string]any{"path": dir}, internal},
 		{"POST", "/api/v1/previews/lint", map[string]any{"path": dir}, http.StatusBadRequest},
 		{"POST", "/api/v1/previews/allow", map[string]any{"path": dir, "findings": []string{"web/privileged"}, "confirm": true}, http.StatusBadRequest},
 
@@ -65,13 +66,13 @@ func TestStoreFailureMapping(t *testing.T) {
 		{"POST", "/api/v1/memory/import", map[string]any{"project": "pa", "format": "ai-memory", "data": `[{"id":"z","title":"t"}]`}, internal},
 
 		{"GET", "/api/v1/credentials", nil, internal},
-		{"POST", "/api/v1/credentials", map[string]any{"integration": "github", "name": "token", "value": "ghp_abcdefghijklmnopqrstuvwxyz012345"}, http.StatusBadRequest},
-		{"DELETE", "/api/v1/credentials/github.token", nil, http.StatusBadRequest},
+		{"POST", "/api/v1/credentials", map[string]any{"integration": "github", "name": "token", "value": "ghp_abcdefghijklmnopqrstuvwxyz012345"}, internal},
+		{"DELETE", "/api/v1/credentials/github.token", nil, internal},
 		{"GET", "/api/v1/deliveries", nil, internal},
-		{"GET", "/api/v1/deliveries/d1", nil, http.StatusBadRequest},
-		{"POST", "/api/v1/deliveries/d1/redeliver", nil, http.StatusBadRequest},
+		{"GET", "/api/v1/deliveries/d1", nil, internal},
+		{"POST", "/api/v1/deliveries/d1/redeliver", nil, internal},
 		{"GET", "/api/v1/webhook-tokens", nil, internal},
-		{"POST", "/api/v1/webhook-tokens/triage/rotate", nil, http.StatusBadRequest},
+		{"POST", "/api/v1/webhook-tokens/triage/rotate", nil, internal},
 
 		{"POST", "/api/v1/ui/link", nil, internal},
 	} {

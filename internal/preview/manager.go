@@ -62,6 +62,20 @@ type Manager struct {
 // ErrStopped is returned by calls made after the manager stopped.
 var ErrStopped = errors.New("preview manager is not running")
 
+// ErrInvalid marks errors caused by the request (no compose file, a
+// compose file that does not parse, an unknown finding). The API returns
+// them as 400 with their message; other errors are internal.
+var ErrInvalid = errors.New("invalid request")
+
+type invalidError struct{ msg string }
+
+func (e *invalidError) Error() string        { return e.msg }
+func (e *invalidError) Is(target error) bool { return target == ErrInvalid }
+
+func invalid(format string, args ...any) error {
+	return &invalidError{msg: fmt.Sprintf(format, args...)}
+}
+
 type actorState struct {
 	workers  map[string]*worker
 	retiring map[string]*worker // workers finishing a Remove
@@ -281,7 +295,7 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (*store.PreviewInstan
 		return nil, err
 	}
 	if FindComposeFile(path) == "" {
-		return nil, fmt.Errorf("%s has no compose file (%s)", path, strings.Join(ComposeFileNames, ", "))
+		return nil, invalid("%s has no compose file (%s)", path, strings.Join(ComposeFileNames, ", "))
 	}
 	inst, err := m.ensureInstance(ctx, path, req.SessionID, req.ProjectID)
 	if err != nil {
@@ -373,7 +387,11 @@ func (m *Manager) loadProject(ctx context.Context, dir, file string) (*Project, 
 			return nil, err
 		}
 	}
-	return ParseCompose(data, dir)
+	p, err := ParseCompose(data, dir)
+	if err != nil {
+		return nil, invalid("%s: %v", file, err)
+	}
+	return p, nil
 }
 
 // LintResult is the outcome of linting one worktree.
@@ -393,7 +411,7 @@ func (m *Manager) Lint(ctx context.Context, path string) (*LintResult, error) {
 	}
 	file := FindComposeFile(path)
 	if file == "" {
-		return nil, fmt.Errorf("%s has no compose file", path)
+		return nil, invalid("%s has no compose file", path)
 	}
 	p, err := m.loadProject(ctx, path, file)
 	if err != nil {
@@ -431,7 +449,7 @@ func (m *Manager) Allow(ctx context.Context, path string, findingIDs []string, a
 	}
 	for _, id := range findingIDs {
 		if !known[id] {
-			return fmt.Errorf("finding %q is not reported for %s", id, path)
+			return invalid("finding %q is not reported for %s", id, path)
 		}
 	}
 	for _, id := range findingIDs {

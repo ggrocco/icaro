@@ -210,12 +210,11 @@ func mapIntegrationErr(err error) error {
 	switch {
 	case errors.Is(err, integration.ErrNotFound), errors.Is(err, store.ErrNotFound), errors.Is(err, secrets.ErrNotFound):
 		return service.ErrNotFound
-	case errors.Is(err, context.Canceled):
-		return err
+	case errors.Is(err, integration.ErrInvalid), errors.Is(err, secrets.ErrInvalid):
+		return &service.BadRequest{Msg: err.Error()}
 	}
-	// Remaining integration errors are caller mistakes (unknown credential,
-	// invalid host, unverified delivery).
-	return &service.BadRequest{Msg: err.Error()}
+	// Anything else (a store failure, ...) is internal: a logged, opaque 500.
+	return err
 }
 
 func orEmptySlice[T any](s []T) []T {

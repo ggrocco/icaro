@@ -51,12 +51,20 @@ func (h *previewHandlers) info(p *store.PreviewInstance) PreviewInfo {
 	return PreviewInfo{PreviewInstance: p, Curl: h.m.CurlHint(p)}
 }
 
+// fail maps preview errors: the caller's mistakes are 400s with their
+// message, a failed compose command is a 502 with compose's message, and
+// anything else (a store failure, ...) is a logged, opaque 500.
 func (h *previewHandlers) fail(w http.ResponseWriter, err error) {
+	var ce *preview.ComposeError
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		h.s.WriteError(w, service.ErrNotFound)
-	default:
+	case errors.Is(err, preview.ErrInvalid):
 		h.s.WriteError(w, &service.BadRequest{Msg: err.Error()})
+	case errors.As(err, &ce):
+		h.s.WriteError(w, &service.Upstream{Msg: ce.Error()})
+	default:
+		h.s.WriteError(w, err)
 	}
 }
 

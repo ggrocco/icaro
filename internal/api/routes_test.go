@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"icaro/internal/preview"
 	"icaro/internal/secrets"
 	"icaro/internal/service"
+	"icaro/internal/session"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 )
@@ -56,6 +58,46 @@ func TestPreviewInputErrors(t *testing.T) {
 		code, body := f.call(tc.method, tc.path, tc.body)
 		if code != tc.status || !strings.Contains(body, tc.want) {
 			t.Errorf("%s %s %v = %d %s", tc.method, tc.path, tc.body, code, body)
+		}
+	}
+}
+
+// The caller's mistakes on integration routes are 400s with a message
+// that says what to fix.
+func TestIntegrationInputErrors(t *testing.T) {
+	t.Parallel()
+	f := newFull(t)
+	for _, tc := range []struct {
+		method, path string
+		body         any
+		want         string
+	}{
+		{"GET", "/api/v1/credentials/plan?integration=github&name=tokn", nil, "uses no credential"},
+		{"POST", "/api/v1/credentials", map[string]any{"integration": "github", "name": "tokn", "value": "x"}, "uses no credential"},
+		{"POST", "/api/v1/credentials", map[string]any{"integration": "github", "name": "token", "value": "ghp_abcdefghijklmnopqrstuvwxyz012345", "hosts": []string{"api.github.com/x"}}, "must be a hostname"},
+	} {
+		code, body := f.call(tc.method, tc.path, tc.body)
+		if code != http.StatusBadRequest || !strings.Contains(body, tc.want) {
+			t.Errorf("%s %s = %d %s", tc.method, tc.path, code, body)
+		}
+	}
+}
+
+// Docker being down and a failed compose command keep their message:
+// they are about the user's setup, not the daemon's internals.
+func TestDependencyErrorStatuses(t *testing.T) {
+	s := New(nil, quietLog())
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{
+		{sessionErr(&session.ErrUnavailable{Msg: "docker is not reachable, so the session cannot start: dial unix"}), http.StatusServiceUnavailable},
+		{&service.Upstream{Msg: "docker compose -p x: exit status 1: Cannot connect to the Docker daemon"}, http.StatusBadGateway},
+	} {
+		rec := httptest.NewRecorder()
+		s.writeError(rec, tc.err)
+		if rec.Code != tc.status || errBody(t, rec.Body.String()).Error != tc.err.Error() {
+			t.Errorf("%v = %d %s", tc.err, rec.Code, rec.Body.String())
 		}
 	}
 }
@@ -224,12 +266,21 @@ func TestMapIntegrationErr(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}
-	if err := mapIntegrationErr(context.Canceled); err != context.Canceled {
-		t.Fatalf("cancel: %v", err)
+	// Only the caller's mistakes become 400s, with their message.
+	for _, err := range []error{
+		fmt.Errorf("plan: %w", integration.ErrInvalid),
+		fmt.Errorf("%w: host %q must be a hostname or *.domain", secrets.ErrInvalid, "a/b"),
+	} {
+		var br *service.BadRequest
+		if !errors.As(mapIntegrationErr(err), &br) || br.Msg != err.Error() {
+			t.Fatalf("%v is a bad request", err)
+		}
 	}
-	var br *service.BadRequest
-	if !errors.As(mapIntegrationErr(errBoom), &br) || br.Msg != "boom" {
-		t.Fatal("bad request")
+	// Everything else stays as is, so writeError makes it an opaque 500.
+	for _, err := range []error{errBoom, context.Canceled} {
+		if got := mapIntegrationErr(err); got != err {
+			t.Fatalf("%v mapped to %v", err, got)
+		}
 	}
 	if got := orEmptySlice[int](nil); got == nil || len(got) != 0 {
 		t.Fatal("orEmptySlice(nil)")

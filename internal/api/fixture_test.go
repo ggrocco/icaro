@@ -64,6 +64,8 @@ func (f *fakeContainers) do(fn func()) {
 	<-done
 }
 
+func (f *fakeContainers) Ping(context.Context) error { return nil }
+
 func (f *fakeContainers) CreateContainerOn(context.Context, docker.Spec, docker.NetSpec) (id string, err error) {
 	f.do(func() { f.n++; id = fmt.Sprintf("c%d", f.n); f.running[id] = false })
 	return id, nil

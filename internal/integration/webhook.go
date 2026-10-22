@@ -476,11 +476,11 @@ func (h *Hub) Redeliver(ctx context.Context, id string) (*Outcome, error) {
 		return nil, err
 	}
 	if !orig.Verified {
-		return nil, fmt.Errorf("delivery %s failed verification (%s) and cannot be redelivered", id, orig.VerifyError)
+		return nil, invalid("delivery %s failed verification (%s) and cannot be redelivered", id, orig.VerifyError)
 	}
 	l, ok := h.registry.Snapshot().Get(orig.Integration)
 	if !ok || l.Manifest.Triggers == nil {
-		return nil, fmt.Errorf("integration %q is no longer loaded", orig.Integration)
+		return nil, invalid("integration %q is no longer loaded", orig.Integration)
 	}
 	in := &inbound{integration: orig.Integration, workflow: orig.Workflow, method: orig.Method, headers: http.Header{}, body: orig.Body}
 	var hdr map[string][]string
@@ -504,6 +504,21 @@ func (h *Hub) Redeliver(ctx context.Context, id string) (*Outcome, error) {
 
 // ErrNotFound reports an unknown delivery, integration or token.
 var ErrNotFound = errors.New("not found")
+
+// ErrInvalid marks errors caused by the request itself (an unknown
+// credential, a credential without hosts, a delivery that cannot be
+// redelivered). The API returns them as 400 with their message; any
+// other error is internal and stays opaque.
+var ErrInvalid = errors.New("invalid request")
+
+type invalidError struct{ msg string }
+
+func (e *invalidError) Error() string        { return e.msg }
+func (e *invalidError) Is(target error) bool { return target == ErrInvalid }
+
+func invalid(format string, args ...any) error {
+	return &invalidError{msg: fmt.Sprintf(format, args...)}
+}
 
 // newURLToken returns a random URL-safe token.
 func newURLToken() string {
