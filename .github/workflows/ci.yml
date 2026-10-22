@@ -180,4 +180,4 @@ jobs:
           go-version-file: go.mod
       - run: make image-agent AGENT_IMAGE=icaro-agent:ci
       - name: smoke test
-        run: docker run --rm icaro-agent:ci bash -c 'asdf version && node --version && npm ls -g --depth=0 && icaro version'
+        run: docker run --rm icaro-agent:ci bash -c 'asdf version && node --version && npm ls -g --depth=0 && claude --version && codex --version && icaro version'

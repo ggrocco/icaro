@@ -24,7 +24,7 @@ ARG INSTALL_AGENTS="@anthropic-ai/claude-code @openai/codex"
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     ASDF_DATA_DIR=/opt/asdf-data \
-    PATH=/opt/asdf-data/shims:/usr/local/bin:/usr/bin:/bin
+    PATH=/opt/asdf-data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -46,11 +46,15 @@ RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
  && rm /tmp/asdf.tar.gz \
  && mkdir -p "${ASDF_DATA_DIR}" && chmod 0755 "${ASDF_DATA_DIR}"
 
-# Node.js for npm-distributed agent CLIs.
+# Node.js for npm-distributed agent CLIs. npm 11 only runs the install
+# scripts of allowed packages; allow the agent packages themselves (by bare
+# name) but none of their dependencies.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/* \
- && if [ -n "${INSTALL_AGENTS}" ]; then npm install -g ${INSTALL_AGENTS} && npm cache clean --force; fi
+ && if [ -n "${INSTALL_AGENTS}" ]; then \
+      npm install -g --allow-scripts="$(echo ${INSTALL_AGENTS} | tr ' ' ',')" ${INSTALL_AGENTS} && npm cache clean --force; \
+    fi
 
 RUN useradd --create-home --uid 1000 --shell /bin/bash icaro
 
