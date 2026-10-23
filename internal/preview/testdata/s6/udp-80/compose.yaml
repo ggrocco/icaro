@@ -1,0 +1,7 @@
+services:
+  dns:
+    image: busybox
+    ports: ["80:80/udp"]
+  app:
+    image: node:24
+    ports: ["3000:3000"]

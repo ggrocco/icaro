@@ -1,0 +1,6 @@
+services:
+  web:
+    image: node:24
+    ports: ["${PORT:-3000}:${PORT:-3000}"]
+    labels:
+      icaro.preview.port: "${PORT:-3000}"

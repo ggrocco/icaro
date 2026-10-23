@@ -139,7 +139,7 @@ Executor:
 - A watcher observes the configured root; each directory with a `compose.yaml` or `docker-compose.yml` becomes a candidate.
 - Safe name: a slug of the path plus a short hash to avoid collisions; a human-readable hostname `slug.localhost` (or `slug.<previews.domain>`) only when it does not collide ([ADR 0018](adr/0018-preview-naming-and-lint-overrides.md)).
 - Proxy: Traefik as a container managed by Ícaro, connected to a dedicated external network `icaro-preview`.
-- Port discovery: requires the `icaro.preview.port` label; falls back to `80` only if unambiguous. Do not guess exposed ports.
+- Port discovery: requires the `icaro.preview.port` label; falls back to TCP `80` only if unambiguous. Do not guess exposed ports. The stack is the compose file plus its override file, as `docker compose up` would load it, for discovery, lint and `up` alike ([ADR 0026](adr/0026-preview-port-discovery.md), spike S6).
 - Routing: Ícaro generates a Compose override that joins the routed service to `icaro-preview` under a stable alias, without editing the user's compose, and writes a Traefik file-provider route for it; Traefik never sees the Docker socket ([ADR 0017](adr/0017-preview-proxy-file-provider.md)). The compose file itself must pass the [compose lint](03-security.md#mandatory-policies).
 - Hostnames default to `*.localhost`, which resolves to loopback without setup; `.test` is opt-in (`previews.domain: test`) and needs a resolver the user configures, which `icaro doctor` checks. `curl -H 'Host: <host>' http://127.0.0.1:<port>/` always works.
 - Public HTTPS: a custom domain + a supported DNS provider; a wildcard cert with DNS-01. Never promise Let's Encrypt for `.test`.

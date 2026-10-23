@@ -67,12 +67,11 @@ Open spikes:
 - S1: macOS file propagation.
 - S4: every agent CLI authenticates from the seeded home alone. This needs real logins.
 - S5: microVM isolation (optional).
-- S6: heterogeneous compose projects.
 - S7: `.test` resolution with VPNs.
 - S8: manifests against the live APIs.
 - S9: Wails v3.
 
-S2 (home overlay, on Linux) and S3 (MCP transport, [ADR 0019](adr/0019-memory-mcp-transport.md)) have passed.
+S2 (home overlay, on Linux), S3 (MCP transport, [ADR 0019](adr/0019-memory-mcp-transport.md)) and S6 (heterogeneous compose, [ADR 0026](adr/0026-preview-port-discovery.md)) have passed.
 
 ## Existing code
 

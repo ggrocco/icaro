@@ -1,0 +1,4 @@
+services:
+  webbase:
+    image: nginx:1.27
+    ports: ["8080:80"]

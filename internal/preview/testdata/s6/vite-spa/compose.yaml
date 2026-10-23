@@ -1,0 +1,6 @@
+services:
+  web:
+    image: node:24
+    working_dir: /app
+    command: npx vite --host 0.0.0.0
+    ports: ["5173:5173"]

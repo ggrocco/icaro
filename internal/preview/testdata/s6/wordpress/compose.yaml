@@ -1,0 +1,8 @@
+services:
+  wordpress:
+    image: wordpress:6
+    ports: ["8000:80"]
+    depends_on: [db]
+  db:
+    image: mysql:8
+    environment: {MYSQL_ROOT_PASSWORD: example}
