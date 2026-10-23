@@ -50,7 +50,7 @@ triggers:
   - type: manual
 steps:
   - id: checks
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     repository: { ref: "${{ trigger.repo_url }}", revision: "${{ trigger.head_sha }}" }
     command: |
       ./scripts/check.sh > /icaro/out.txt

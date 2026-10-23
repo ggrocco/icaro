@@ -144,7 +144,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
                       d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
                     } else {
                       d.deleteIn(["steps", i, "uses"]);
-                      d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.20");
+                      d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                     }
                   })
                 }
@@ -239,7 +239,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
         type="button"
         onClick={() =>
           mutate((d) => {
-            const step = { id: `step-${n + 1}`, image: "mirror.gcr.io/library/alpine:3.20", command: "echo hello" };
+            const step = { id: `step-${n + 1}`, image: "mirror.gcr.io/library/alpine:3.24", command: "echo hello" };
             if (d.hasIn(["steps"])) d.addIn(["steps"], step);
             else d.setIn(["steps"], [step]);
           })

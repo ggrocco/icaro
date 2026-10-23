@@ -49,7 +49,7 @@ triggers:
     cron: "0 3 * * *"
 steps:
   - id: noop
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     command: "true"
 `
 

@@ -12,12 +12,12 @@ triggers:
   - type: manual
 steps:
   - id: greet
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     env:
       WHO: ${{ trigger.who }}
     command: echo "hello $WHO"
   - id: shout
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     needs: [greet]
     command: echo HI
 `

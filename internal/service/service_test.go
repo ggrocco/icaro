@@ -60,7 +60,7 @@ triggers:
   - type: manual
 steps:
   - id: say
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     command: echo ${{ trigger.who }} ${{ env.TOKEN }}
     when: ${{ !has(trigger.quiet) }}
 env:
