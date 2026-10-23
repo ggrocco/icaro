@@ -5,6 +5,8 @@
 *.db-*
 icaro.yaml
 .env
+# Preview test fixtures carry .env files on purpose (spike S6).
+!internal/preview/testdata/**/.env
 coverage.out
 /coverage/
 /internal/ui/dist/
