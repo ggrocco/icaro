@@ -10,7 +10,7 @@ Thanks for helping. Ícaro is built against one design: [`blueprint/`](blueprint
 - Set `ICARO_TEST_POSTGRES_DSN` to run the store tests against Postgres as well as SQLite:
 
   ```sh
-  docker run -d -e POSTGRES_USER=icaro -e POSTGRES_PASSWORD=icaro -e POSTGRES_DB=icaro -p 5432:5432 postgres:16
+  docker run -d -e POSTGRES_USER=icaro -e POSTGRES_PASSWORD=icaro -e POSTGRES_DB=icaro -p 5432:5432 postgres:18
   ICARO_TEST_POSTGRES_DSN='postgres://icaro:icaro@localhost:5432/icaro?sslmode=disable' make test
   ```
 
@@ -32,7 +32,7 @@ The [engineering standards](blueprint/docs/05-engineering.md) are binding. In sh
 ## Pull requests
 
 - Keep one concern per PR, and describe the user-visible effect and how you tested it.
-- CI must be green: gofmt, vet, golangci-lint, unit tests on Linux and macOS, cross-builds, integration tests, and link checks.
+- CI must be green: gofmt, vet, golangci-lint, unit tests on Linux and macOS, cross-builds, integration tests, the agent image build, and link checks.
 - Tick the phase checkboxes your change completes.
 
 ## Releases

@@ -15,7 +15,7 @@ import (
 
 // These tests need a reachable Docker daemon: `make test-integration`.
 // Images come from mirror.gcr.io to avoid Docker Hub rate limits.
-const itImage = "mirror.gcr.io/library/alpine:3.20"
+const itImage = "mirror.gcr.io/library/alpine:3.24"
 
 func newDockerFixture(t *testing.T) (*fixture, *docker.Engine) {
 	t.Helper()

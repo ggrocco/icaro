@@ -126,8 +126,6 @@ func TestSessionSpineDocker(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// stderr is silenced: docker exec interleaves it with stdout in no
-		// fixed order, which would break the prefix check below.
 		script := "id -u; pwd; echo hi > /workspace/from-" + s.ID + " && echo written; ls /icaro >/dev/null && echo icaro-dir; cat /home/icaro/.claude.json 2>/dev/null | grep -c mcp.sock || true"
 		out, err := dockerOut(container.ExecArgs(container.ExecOptions{Container: info.ContainerID, User: info.User, Cmd: []string{"sh", "-c", script}})...)
 		if err != nil {

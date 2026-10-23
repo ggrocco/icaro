@@ -97,7 +97,7 @@ func TestUICookieSessionAndCSRF(t *testing.T) {
 	if code, _ := e.do(b, "GET", "/api/v1/workflows", "", false); code != http.StatusOK {
 		t.Fatalf("cookie read = %d", code)
 	}
-	yaml := `{"yaml":"version: 1\nname: ui-wf\nsteps:\n  - id: say\n    image: alpine:3.20\n    command: echo hi\n"}`
+	yaml := `{"yaml":"version: 1\nname: ui-wf\nsteps:\n  - id: say\n    image: alpine:3.24\n    command: echo hi\n"}`
 	if code, _ := e.do(b, "POST", "/api/v1/workflows", yaml, false); code != http.StatusForbidden {
 		t.Fatalf("cookie mutation without CSRF = %d", code)
 	}

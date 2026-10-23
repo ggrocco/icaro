@@ -18,7 +18,7 @@ import (
 	"icaro/internal/container/docker"
 )
 
-const testImage = "mirror.gcr.io/library/alpine:3.20"
+const testImage = "mirror.gcr.io/library/alpine:3.24"
 
 // command runs docker or the freshly built icaro binary with arguments the
 // test controls.

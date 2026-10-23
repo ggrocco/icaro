@@ -14,7 +14,7 @@ triggers:
   - type: manual
 steps:
   - id: hello
-    image: mirror.gcr.io/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.24
     command: echo "hello" && printf '{"greeting":"hi"}' > /icaro/output.json
     outputs:
       greeting: json:greeting

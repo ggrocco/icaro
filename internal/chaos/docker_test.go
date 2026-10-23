@@ -141,7 +141,7 @@ func (f *engineFixture) wait(id string) *store.Run {
 }
 
 func wf(name string, retry int) string {
-	return "version: 1\nname: " + name + "\nsteps:\n  - id: work\n    image: alpine:3.20\n    retry: " +
+	return "version: 1\nname: " + name + "\nsteps:\n  - id: work\n    image: alpine:3.24\n    retry: " +
 		strconv.Itoa(retry) + "\n    command: echo hi\n"
 }
 

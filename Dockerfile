@@ -6,7 +6,7 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags "-s -w -X icaro/internal/cli.version=${VERSION}" -o /out/icaro ./cmd/icaro
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/icaro /icaro
 VOLUME ["/data"]
 ENV ICARO_HOME=/data

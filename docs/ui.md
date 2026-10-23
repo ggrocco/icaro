@@ -40,4 +40,4 @@ Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` sess
 
 ## Building it
 
-Release binaries embed the UI. From source, run `make web` (needs Node 22) before `make build`; without it, `/ui/` explains how to build it. The end-to-end tests in `web/e2e/` drive the UI against a real daemon and Docker engine (`cd web && npx playwright test` after `make web build`).
+Release binaries embed the UI. From source, run `make web` (needs Node 24) before `make build`; without it, `/ui/` explains how to build it. The end-to-end tests in `web/e2e/` drive the UI against a real daemon and Docker engine (`cd web && npx playwright test` after `make web build`).
