@@ -21,9 +21,30 @@ import (
 // in compose's own precedence order.
 var ComposeFileNames = []string{"compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"}
 
+// OverrideFileNames are the override files compose merges over the
+// compose file when it runs without -f, in compose's precedence order.
+var OverrideFileNames = []string{"compose.override.yml", "compose.override.yaml", "docker-compose.override.yml", "docker-compose.override.yaml"}
+
 // FindComposeFile returns the compose file in dir, or "".
-func FindComposeFile(dir string) string {
-	for _, n := range ComposeFileNames {
+func FindComposeFile(dir string) string { return firstFile(dir, ComposeFileNames) }
+
+// ComposeFiles returns the files compose itself would load from dir (the
+// compose file and its override, if any), so the preview runs and lints
+// the same stack as a plain `docker compose up`. It is nil without a
+// compose file.
+func ComposeFiles(dir string) []string {
+	file := FindComposeFile(dir)
+	if file == "" {
+		return nil
+	}
+	if o := firstFile(dir, OverrideFileNames); o != "" {
+		return []string{file, o}
+	}
+	return []string{file}
+}
+
+func firstFile(dir string, names []string) string {
+	for _, n := range names {
 		p := filepath.Join(dir, n)
 		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
 			return p
@@ -135,6 +156,49 @@ func ParseCompose(data []byte, dir string) (*Project, error) {
 	return p, nil
 }
 
+// MergeProjects overlays override on base for the raw-file fallback, used
+// only when the docker CLI is missing. It is a superset rather than
+// compose's exact merge: lists are joined and flags ORed, so lint sees
+// everything either file asks for; labels and scalar settings from the
+// override win, as in compose.
+func MergeProjects(base, override *Project) *Project {
+	for name, o := range override.Services {
+		s, ok := base.Services[name]
+		if !ok {
+			base.Services[name] = o
+			continue
+		}
+		s.Privileged = s.Privileged || o.Privileged
+		for _, f := range []struct {
+			dst *string
+			src string
+		}{
+			{&s.Pid, o.Pid}, {&s.NetworkMode, o.NetworkMode}, {&s.Ipc, o.Ipc},
+			{&s.Userns, o.Userns}, {&s.Cgroup, o.Cgroup}, {&s.Uts, o.Uts},
+		} {
+			if f.src != "" {
+				*f.dst = f.src
+			}
+		}
+		s.CapAdd = append(s.CapAdd, o.CapAdd...)
+		s.SecurityOpt = append(s.SecurityOpt, o.SecurityOpt...)
+		s.Devices = append(s.Devices, o.Devices...)
+		for _, mt := range o.Mounts {
+			mt.Index = len(s.Mounts)
+			s.Mounts = append(s.Mounts, mt)
+		}
+		for k, v := range o.Labels {
+			s.Labels[k] = v
+		}
+		s.Ports = append(s.Ports, o.Ports...)
+		s.HasNetworks = s.HasNetworks || o.HasNetworks
+	}
+	for name, v := range override.Volumes {
+		base.Volumes[name] = v
+	}
+	return base
+}
+
 // ServiceNames returns service names sorted.
 func (p *Project) ServiceNames() []string {
 	out := make([]string, 0, len(p.Services))
@@ -192,17 +256,24 @@ func resolveHostPath(src, dir string) string {
 	return filepath.Clean(src)
 }
 
+// parsePorts returns the container ports of TCP mappings; a UDP or SCTP
+// port cannot serve a preview, so it never takes part in port discovery.
 func parsePorts(v any) []int {
 	var out []int
 	for _, p := range asList(v) {
 		if m, ok := asMap(p); ok {
+			if proto := asString(m["protocol"]); proto != "" && !strings.EqualFold(proto, "tcp") {
+				continue
+			}
 			if n := atoi(asString(m["target"])); n > 0 {
 				out = append(out, n)
 			}
 			continue
 		}
-		s := asString(p)
-		s = strings.SplitN(s, "/", 2)[0]
+		s, proto, _ := strings.Cut(asString(p), "/")
+		if proto != "" && !strings.EqualFold(proto, "tcp") {
+			continue
+		}
 		parts := strings.Split(s, ":")
 		if n := atoi(parts[len(parts)-1]); n > 0 {
 			out = append(out, n)
@@ -214,7 +285,11 @@ func parsePorts(v any) []int {
 func parseExpose(v any) []int {
 	var out []int
 	for _, p := range asList(v) {
-		if n := atoi(strings.SplitN(asString(p), "/", 2)[0]); n > 0 {
+		s, proto, _ := strings.Cut(asString(p), "/")
+		if proto != "" && !strings.EqualFold(proto, "tcp") {
+			continue
+		}
+		if n := atoi(s); n > 0 {
 			out = append(out, n)
 		}
 	}
