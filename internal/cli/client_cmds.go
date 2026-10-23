@@ -84,17 +84,23 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if asJSON {
-				return printJSON(cmd.OutOrStdout(), res)
-			}
-			if res.Valid {
+			switch {
+			case asJSON:
+				if err := printJSON(cmd.OutOrStdout(), res); err != nil {
+					return err
+				}
+			case res.Valid:
 				fmt.Fprintf(cmd.OutOrStdout(), "valid: %s\n", res.Name)
-				return nil
+			default:
+				for _, is := range res.Issues {
+					fmt.Fprintln(cmd.OutOrStdout(), is.String())
+				}
 			}
-			for _, is := range res.Issues {
-				fmt.Fprintln(cmd.OutOrStdout(), is.String())
+			// Invalid fails in both output modes, so scripts can rely on it.
+			if !res.Valid {
+				return fmt.Errorf("%d issue(s)", len(res.Issues))
 			}
-			return fmt.Errorf("%d issue(s)", len(res.Issues))
+			return nil
 		},
 	}
 

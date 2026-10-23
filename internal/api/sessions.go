@@ -220,11 +220,14 @@ func (s *Server) RegisterSessions(d SessionDeps) {
 
 func sessionErr(err error) error {
 	var inv *session.ErrInvalid
+	var unavailable *session.ErrUnavailable
 	switch {
 	case errors.Is(err, session.ErrNotFound):
 		return service.ErrNotFound
 	case errors.As(err, &inv):
 		return &service.BadRequest{Msg: inv.Msg}
+	case errors.As(err, &unavailable):
+		return &service.Unavailable{Msg: unavailable.Msg}
 	}
 	return err
 }

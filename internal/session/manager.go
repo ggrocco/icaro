@@ -21,6 +21,7 @@ import (
 
 // Engine is the Docker surface the manager needs.
 type Engine interface {
+	Ping(ctx context.Context) error
 	CreateContainerOn(ctx context.Context, spec docker.Spec, net docker.NetSpec) (string, error)
 	StartContainer(ctx context.Context, id string) error
 	StopContainer(ctx context.Context, id string, timeout int) error
@@ -42,6 +43,15 @@ type ErrInvalid struct{ Msg string }
 func (e *ErrInvalid) Error() string { return e.Msg }
 
 func invalid(format string, args ...any) error { return &ErrInvalid{Msg: fmt.Sprintf(format, args...)} }
+
+// ErrUnavailable reports that Docker is not reachable, so a session cannot
+// start now.
+type ErrUnavailable struct{ Msg string }
+
+func (e *ErrUnavailable) Error() string { return e.Msg }
+
+// pingTimeout bounds the Docker check before a session is created.
+const pingTimeout = 5 * time.Second
 
 // Options wire a Manager.
 type Options struct {
@@ -247,6 +257,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Session, erro
 	info, err := InspectRepo(ctx, req.RepoPath)
 	if err != nil {
 		return nil, invalid("%v", err)
+	}
+	// Sessions start only while Docker answers (the manager's loop waits
+	// for it), so fail now instead of leaving the caller waiting on a
+	// worktree and a row that cannot start.
+	pctx, cancel := context.WithTimeout(ctx, pingTimeout)
+	err = m.o.Engine.Ping(pctx)
+	cancel()
+	if err != nil {
+		return nil, &ErrUnavailable{Msg: "docker is not reachable, so the session cannot start: " + err.Error()}
 	}
 	proj, err := m.project(ctx, info)
 	if err != nil {

@@ -98,9 +98,14 @@ workflow requires that is still missing is prompted for on a terminal.`,
 				return err
 			}
 			if asJSON {
-				return printJSON(cmd.OutOrStdout(), final)
+				if err := printJSON(cmd.OutOrStdout(), final); err != nil {
+					return err
+				}
+			} else {
+				printRun(cmd.ErrOrStderr(), final)
 			}
-			printRun(cmd.ErrOrStderr(), final)
+			// The exit status says whether the run succeeded, in both
+			// output modes, so scripts can rely on it.
 			if final.Status != "succeeded" {
 				return &ExitError{Code: 1}
 			}

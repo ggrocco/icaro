@@ -2,7 +2,6 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -39,7 +38,7 @@ func (h *Hub) AddCredential(ctx context.Context, set CredentialSetter, integrati
 		plan.Hosts = hosts
 	}
 	if !plan.Webhook && len(plan.Hosts) == 0 {
-		return plan, errors.New("a credential used by actions needs at least one host to be bound to")
+		return plan, invalid("a credential used by actions needs at least one host to be bound to")
 	}
 	if err := set.Set(ctx, plan.Secret, value, plan.Hosts); err != nil {
 		return plan, err

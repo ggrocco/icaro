@@ -57,10 +57,16 @@ func TestPreviewCommandsWithoutDocker(t *testing.T) {
 	wantCLI(t, []string{"preview", "list"}, "ID", "STATUS")
 	wantCLI(t, []string{"preview", "list", "--json"}, "")
 
-	// Up records the preview and reports the Docker failure in its status:
-	// a non-zero exit in text mode, the status field in JSON mode.
+	// Up records the preview and reports the Docker failure in its status
+	// and a non-zero exit, in text and in JSON mode.
 	failCLI(t, "preview is error", "preview", "up", safe)
-	wantCLI(t, []string{"preview", "up", "--json", "--force", safe}, `"status": "error"`)
+	out, err = runCLI(t, "", "preview", "up", "--json", "--force", safe)
+	var up struct {
+		Status string `json:"status"`
+	}
+	if err == nil || !strings.Contains(err.Error(), "preview is error") || json.Unmarshal([]byte(out), &up) != nil || up.Status != "error" {
+		t.Fatalf("preview up --json must print the preview and fail: %v\n%s", err, out)
+	}
 	// The daemon records the path with symlinks resolved (macOS temp dirs).
 	resolved, _ := filepath.EvalSymlinks(safe)
 	wantCLI(t, []string{"preview", "list"}, "error", resolved)

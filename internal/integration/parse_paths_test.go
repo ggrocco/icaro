@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,8 +70,9 @@ actions:
 
 func TestParseDecodeAndTypes(t *testing.T) {
 	// Schema-invalid and undecodable: the schema issue is what is reported.
+	// Issues come in no fixed order.
 	_, issues, err := Parse([]byte("version: one\nname: x\n"))
-	if err != nil || len(issues) == 0 || issues[0].Path != "/version" {
+	if err != nil || !slices.ContainsFunc(issues, func(i Issue) bool { return i.Path == "/version" }) {
 		t.Fatalf("%v %v", issues, err)
 	}
 	// Non-string mapping keys are normalized to strings.

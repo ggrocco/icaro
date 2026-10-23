@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-// Creating a session waits for Docker (the integration and e2e suites
-// cover it); with the engine unreachable the read and error paths of the
-// session commands still run against the daemon.
+// Starting a session needs Docker (the integration and e2e suites cover
+// it); with the engine unreachable the read and error paths of the
+// session commands still run against the daemon, and creating a session
+// fails at once with the reason.
 func TestSessionCommandsWithoutDocker(t *testing.T) {
 	startDaemon(t)
 
@@ -30,4 +34,24 @@ func TestSessionCommandsWithoutDocker(t *testing.T) {
 		t.Fatalf("rm of an unknown session: %v\n%s", err, out)
 	}
 	failCLI(t, "", "session", "rm", "ses_nope", "--yes")
+
+	// create and the implicit create of `sh` fail fast instead of waiting
+	// for Docker, and leave no session behind.
+	repo := filepath.Join(t.TempDir(), "app")
+	gitIn(t, "", "init", "--quiet", repo)
+	gitIn(t, repo, "commit", "--quiet", "--allow-empty", "-m", "init")
+	t.Chdir(repo)
+	for _, args := range [][]string{{"session", "create", "fix"}, {"sh", "--", "true"}} {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		start := time.Now()
+		out, err := runCLICtx(ctx, args...)
+		cancel()
+		if err == nil || !strings.Contains(err.Error(), "docker is not reachable") || !strings.Contains(err.Error(), "HTTP 503") {
+			t.Fatalf("icaro %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		if d := time.Since(start); d > 10*time.Second {
+			t.Fatalf("icaro %s took %v", strings.Join(args, " "), d)
+		}
+	}
+	wantCLI(t, []string{"session", "list", "--json"}, "[]")
 }

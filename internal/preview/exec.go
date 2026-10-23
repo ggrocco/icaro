@@ -44,6 +44,17 @@ func (c CLI) cmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// ComposeError is a failed docker compose command. Its message carries
+// compose's stderr, which is about the user's setup (Docker not running,
+// a bad compose file), so the API passes it on.
+type ComposeError struct {
+	msg string
+	err error
+}
+
+func (e *ComposeError) Error() string { return e.msg }
+func (e *ComposeError) Unwrap() error { return e.err }
+
 func run(cmd *exec.Cmd) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -52,7 +63,7 @@ func run(cmd *exec.Cmd) ([]byte, error) {
 		if len(msg) > 2000 {
 			msg = msg[len(msg)-2000:]
 		}
-		return stdout.Bytes(), fmt.Errorf("docker %s: %w: %s", strings.Join(cmd.Args[1:min(len(cmd.Args), 4)], " "), err, msg)
+		return stdout.Bytes(), &ComposeError{msg: fmt.Sprintf("docker %s: %v: %s", strings.Join(cmd.Args[1:min(len(cmd.Args), 4)], " "), err, msg), err: err}
 	}
 	return stdout.Bytes(), nil
 }

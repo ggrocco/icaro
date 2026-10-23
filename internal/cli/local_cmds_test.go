@@ -367,8 +367,8 @@ func TestRunWaitExitCode(t *testing.T) {
 	}
 
 	// --json waits silently and prints the final run.
+	// --json keeps the exit status: the cancelled run still exits 1.
 	restore = withStdio(t, "")
-	defer restore()
 	go func() { code <- Main([]string{"run", "hello", "--set", "who=y", "--wait", "--json"}) }()
 	id = ""
 	for deadline = time.Now().Add(10 * time.Second); id == "" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
@@ -386,10 +386,18 @@ func TestRunWaitExitCode(t *testing.T) {
 	mustCLI(t, "runs", "cancel", id)
 	select {
 	case c := <-code:
-		if c != 0 {
-			t.Fatalf("run --wait --json exit code = %d, want 0", c)
+		out := restore()
+		var final struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(out), &final); err != nil || final.Status != "cancelled" {
+			t.Fatalf("run --wait --json must still print the final run: %v\n%s", err, out)
+		}
+		if c != 1 {
+			t.Fatalf("run --wait --json exit code = %d, want 1", c)
 		}
 	case <-time.After(15 * time.Second):
+		restore()
 		t.Fatal("run --wait --json did not return")
 	}
 }

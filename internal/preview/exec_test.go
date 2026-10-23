@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -120,7 +121,9 @@ func TestCLIDownAndRunning(t *testing.T) {
 		t.Fatal(n, err)
 	}
 	cli, _ = fakeCLI(t, "FAKE_DOWN_ERR=daemon unreachable", "FAKE_PS_ERR=daemon unreachable")
-	if err := cli.Down(ctx, "proj"); err == nil || !strings.Contains(err.Error(), "daemon unreachable") {
+	// A failed command is a ComposeError, which the API passes on as a 502.
+	var ce *ComposeError
+	if err := cli.Down(ctx, "proj"); !errors.As(err, &ce) || !strings.Contains(err.Error(), "daemon unreachable") {
 		t.Fatal(err)
 	}
 	if _, err := cli.Running(ctx, "proj"); err == nil || !strings.Contains(err.Error(), "daemon unreachable") {
