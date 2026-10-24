@@ -1,0 +1,6 @@
+services:
+  web:
+    image: node:24
+    labels: ["icaro.preview.port=3000", "com.example.team=web"]
+  db:
+    image: postgres:18

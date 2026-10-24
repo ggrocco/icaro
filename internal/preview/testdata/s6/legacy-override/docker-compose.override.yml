@@ -1,0 +1,4 @@
+services:
+  app:
+    labels:
+      icaro.preview.port: "3000"

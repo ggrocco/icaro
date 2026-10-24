@@ -377,19 +377,33 @@ func (m *Manager) overridePath(project string) string {
 // loadProject returns the normalized compose model, preferring
 // `docker compose config` (which applies .env interpolation) and falling
 // back to the raw file only when the docker CLI is missing.
-func (m *Manager) loadProject(ctx context.Context, dir, file string) (*Project, error) {
-	data, err := m.compose.Config(ctx, dir, []string{file})
-	if err != nil {
-		if !errors.Is(err, exec.ErrNotFound) {
-			return nil, err
+func (m *Manager) loadProject(ctx context.Context, dir string, files []string) (*Project, error) {
+	data, err := m.compose.Config(ctx, dir, files)
+	if err == nil {
+		p, err := ParseCompose(data, dir)
+		if err != nil {
+			return nil, invalid("%s: %v", strings.Join(files, ", "), err)
 		}
-		if data, err = os.ReadFile(file); err != nil {
-			return nil, err
-		}
+		return p, nil
 	}
-	p, err := ParseCompose(data, dir)
-	if err != nil {
-		return nil, invalid("%s: %v", file, err)
+	if !errors.Is(err, exec.ErrNotFound) {
+		return nil, err
+	}
+	var p *Project
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		fp, err := ParseCompose(raw, dir)
+		if err != nil {
+			return nil, invalid("%s: %v", f, err)
+		}
+		if p == nil {
+			p = fp
+		} else {
+			p = MergeProjects(p, fp)
+		}
 	}
 	return p, nil
 }
@@ -409,11 +423,12 @@ func (m *Manager) Lint(ctx context.Context, path string) (*LintResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	file := FindComposeFile(path)
-	if file == "" {
+	files := ComposeFiles(path)
+	if files == nil {
 		return nil, invalid("%s has no compose file", path)
 	}
-	p, err := m.loadProject(ctx, path, file)
+	file := files[0]
+	p, err := m.loadProject(ctx, path, files)
 	if err != nil {
 		return nil, err
 	}
@@ -541,8 +556,8 @@ func (m *Manager) sync(ctx context.Context, path string, force bool) error {
 		m.log.Warn("preview not running", "path", path, "status", status, "err", err)
 		return err
 	}
-	file := FindComposeFile(path)
-	if file == "" {
+	files := ComposeFiles(path)
+	if files == nil {
 		_ = m.stop(ctx, p)
 		return fail(store.PreviewStopped, errors.New("no compose file in worktree"))
 	}
@@ -561,7 +576,8 @@ func (m *Manager) sync(ctx context.Context, path string, force bool) error {
 			return nil
 		}
 	}
-	proj, err := m.loadProject(ctx, path, file)
+	// Lint and up see the same files compose would load, override included.
+	proj, err := m.loadProject(ctx, path, files)
 	if err != nil {
 		return fail(store.PreviewError, err)
 	}
@@ -598,7 +614,7 @@ func (m *Manager) sync(ctx context.Context, path string, force bool) error {
 	if err := m.proxyDo(ctx, false); err != nil {
 		return fail(store.PreviewError, fmt.Errorf("preview proxy: %w", err))
 	}
-	if err := m.compose.Up(ctx, p.ComposeProject, path, []string{file, op}); err != nil {
+	if err := m.compose.Up(ctx, p.ComposeProject, path, append(append([]string{}, files...), op)); err != nil {
 		return fail(store.PreviewError, err)
 	}
 	rc, err := TraefikConfig(n, p.Hostname, route)
@@ -613,7 +629,7 @@ func (m *Manager) sync(ctx context.Context, path string, force bool) error {
 		// the proxy re-read its routes.
 		_ = m.proxyDo(ctx, true)
 	}
-	p.ComposeFile, p.Service, p.Port, p.ConfigHash = file, route.Service, route.Port, hash
+	p.ComposeFile, p.Service, p.Port, p.ConfigHash = files[0], route.Service, route.Port, hash
 	p.Status, p.Error, p.URL = store.PreviewRunning, "", m.url(p.Hostname)
 	if err := m.st.UpdatePreview(ctx, p); err != nil {
 		return err

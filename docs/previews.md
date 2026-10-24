@@ -25,6 +25,14 @@ services:
       icaro.preview.port: "5173"
 ```
 
+Ícaro reads the same files `docker compose up` would: the compose file and its override file (`compose.override.yaml` and the other names compose accepts), after `.env` interpolation, profiles, `include` and `extends`. A label or port in the override counts, and the override is linted like the compose file. Then:
+
+- A service with the label is routed, on that port.
+- Without a label, the one service that publishes or exposes TCP port 80 is routed. `8000:80` counts, because the container port is 80. UDP ports never count.
+- Anything else is refused, and the error lists each service with its ports so you can pick one. Ícaro never guesses ([ADR 0026](../blueprint/docs/adr/0026-preview-port-discovery.md)).
+
+Most dev servers need the label: Vite (5173), Next.js or Rails (3000), Django (8000), and any stack with a frontend and an API. A port that only appears in a Dockerfile's `EXPOSE` is not visible either; add the label or an `expose:` entry. Editing a file pulled in through `include` or `extends` doesn't restart the preview on its own; run `icaro preview up --force`.
+
 Ícaro never edits your compose file. It writes an override that joins the routed service to the `icaro-preview` network under a stable alias, and a route file for its Traefik proxy. The proxy uses Traefik's file provider, so it never gets the Docker socket ([ADR 0017](../blueprint/docs/adr/0017-preview-proxy-file-provider.md)). It listens only on `127.0.0.1:<previews.http_port>` (default `8780`).
 
 URLs look like `http://<slug>.localhost:8780`. `*.localhost` resolves to loopback without any DNS setup. The slug comes from the worktree's directory name; when two worktrees share a name, the second becomes `<slug>-<hash>`, so they never collide ([ADR 0018](../blueprint/docs/adr/0018-preview-naming-and-lint-overrides.md)). Every preview also prints a form that always works, `curl -H 'Host: <host>' http://127.0.0.1:8780/`. `previews.domain: test` switches to `.test` names, which need a local resolver you configure yourself; `icaro doctor` warns when it isn't set up. TLS for a custom domain is not built yet.

@@ -122,7 +122,21 @@ func SelectRoute(p *Project) (Route, error) {
 	case len(on80) > 1:
 		return Route{}, fmt.Errorf("%w: services %s all use port 80; add the label %s to the one to preview", ErrNoRoute, strings.Join(on80, ", "), PortLabel)
 	}
-	return Route{}, fmt.Errorf("%w: add `labels: {%s: \"<port>\"}` to the service to preview", ErrNoRoute, PortLabel)
+	// Name what there is to choose from, but do not choose.
+	var cands []string
+	for _, name := range p.ServiceNames() {
+		if ports := p.Services[name].Ports; len(ports) > 0 {
+			ps := make([]string, len(ports))
+			for i, port := range ports {
+				ps[i] = strconv.Itoa(port)
+			}
+			cands = append(cands, name+" ("+strings.Join(ps, ", ")+")")
+		}
+	}
+	if len(cands) == 0 {
+		return Route{}, fmt.Errorf("%w: no service publishes or exposes a TCP port; add `labels: {%s: \"<port>\"}` to the service to preview", ErrNoRoute, PortLabel)
+	}
+	return Route{}, fmt.Errorf("%w: no service uses port 80 or carries %s; services with ports: %s; add `labels: {%s: \"<port>\"}` to the one to preview", ErrNoRoute, PortLabel, strings.Join(cands, ", "), PortLabel)
 }
 
 // PollingEnv is added to the routed service on macOS, where bind-mounted
@@ -212,7 +226,7 @@ var configFiles = []string{
 // ConfigHash hashes the compose files, .env and lockfiles in dir. Code
 // edits do not change it: hot reload is the dev server's job.
 func ConfigHash(dir string) (string, error) {
-	names := append([]string{}, ComposeFileNames...)
+	names := append(append([]string{}, ComposeFileNames...), OverrideFileNames...)
 	names = append(names, configFiles...)
 	if m, _ := filepath.Glob(filepath.Join(dir, "requirements*.txt")); len(m) > 0 {
 		for _, p := range m {

@@ -1,0 +1,11 @@
+services:
+  proxy:
+    image: nginx:1.27
+    ports: ["80:80"]
+    depends_on: [app]
+  app:
+    build: ./app
+    expose: ["3000"]
+  db:
+    image: postgres:18
+    ports: ["5432:5432"]

@@ -1,0 +1,7 @@
+services:
+  web:
+    image: node:24
+    command: npx vite --host 0.0.0.0
+    ports: ["5173:5173"]
+    labels:
+      icaro.preview.port: "5173"

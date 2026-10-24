@@ -263,3 +263,105 @@ func containerIDs(t *testing.T, project string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// Spike S6, end to end: layouts the port-discovery rule routes without a
+// label in the main compose file still serve through Traefik.
+func TestIntegrationPreviewSampleRouting(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker CLI not available")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	eng, err := docker.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Ping(ctx); err != nil {
+		t.Skipf("docker not available: %v", err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+	if err := eng.EnsureImage(ctx, itBusybox); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, store.SQLite, filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	l := paths.New(t.TempDir())
+	if err := l.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	port := freePort(t)
+	m := New(Options{Layout: l, HTTPPort: port, TraefikImage: itTraefik}, st, CLI{}, eng, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	go func() { _ = m.Run(ctx) }()
+	t.Cleanup(func() {
+		c := context.Background()
+		_ = eng.RemoveContainer(c, ProxyName(l.Root))
+		_ = eng.RemoveNetwork(c, Network)
+	})
+
+	httpd := func(port string) string {
+		return `image: ` + itBusybox + `
+    command: ["httpd", "-f", "-p", "` + port + `", "-h", "/www"]
+    volumes: ["./site:/www:ro"]`
+	}
+	idle := `image: ` + itBusybox + `
+    command: ["sleep", "3600"]`
+	for _, tc := range []struct {
+		name, service string
+		port          int
+		files         map[string]string
+	}{
+		// The label comes from compose.override.yaml, as `docker compose up` would merge it.
+		{"override", "web", 8000, map[string]string{
+			"compose.yaml":          "services:\n  web:\n    " + httpd("8000") + "\n",
+			"compose.override.yaml": "services:\n  web:\n    labels: {icaro.preview.port: \"8000\"}\n",
+		}},
+		// No label: the one service on port 80 is routed; the other is not HTTP.
+		{"fallback-80", "web", 80, map[string]string{
+			"compose.yaml": "services:\n  web:\n    " + httpd("80") + "\n    expose: [\"80\"]\n  db:\n    " + idle + "\n    expose: [\"5432\"]\n",
+		}},
+		// Several services with ports; the label picks the app.
+		{"labelled-app", "app", 3000, map[string]string{
+			"compose.yaml": "services:\n  app:\n    " + httpd("3000") + "\n    expose: [\"3000\"]\n    labels: [\"icaro.preview.port=3000\"]\n  cache:\n    " + idle + "\n    expose: [\"6379\"]\n",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), tc.name)
+			if err := os.MkdirAll(filepath.Join(dir, "site"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range tc.files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, "site", "index.html"), []byte("hello "+tc.name), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := m.Remove(context.Background(), dir); err != nil {
+					t.Errorf("cleanup: %v", err)
+				}
+			})
+			p, err := m.Add(ctx, AddRequest{Path: dir, Wait: true})
+			if err != nil || p.Status != store.PreviewRunning || p.Service != tc.service || p.Port != tc.port {
+				t.Fatalf("add: %v %+v", err, p)
+			}
+			eventually(t, tc.name+" reachable through Traefik", 30*time.Second, func() error {
+				code, body, err := get(port, p.Hostname)
+				if err != nil {
+					return err
+				}
+				if code != 200 || body != "hello "+tc.name {
+					return fmt.Errorf("HTTP %d %q", code, body)
+				}
+				return nil
+			})
+		})
+	}
+}
