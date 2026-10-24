@@ -161,6 +161,26 @@ func (d *daemon) waitStep(id, step, status string, timeout time.Duration) runVie
 	}
 }
 
+// waitStepContainer waits until a step container of run id is running
+// and returns the running containers. The engine records a step as
+// running before it starts the container (so a crash in between fails
+// that attempt instead of starting a duplicate); a test that kills the
+// daemon to exercise re-attachment must wait for the container itself.
+func (d *daemon) waitStepContainer(id string, timeout time.Duration) []string {
+	d.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		out, err := command("docker", "ps", "-q", "--filter", "label=icaro.run="+id, "--filter", "status=running").Output()
+		if ids := strings.Fields(string(out)); err == nil && len(ids) > 0 {
+			return ids
+		}
+		if time.Now().After(deadline) {
+			d.t.Fatalf("no running step container for run %s: %v %q", id, err, out)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func (d *daemon) waitTerminal(id string, timeout time.Duration) runView {
 	d.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -224,6 +244,7 @@ func TestDaemonKilledMidRunReattaches(t *testing.T) {
 	d.apply(slowWorkflow)
 	id := d.startRun("chaos-slow")
 	d.waitStep(id, "slow", "running", 60*time.Second)
+	d.waitStepContainer(id, 30*time.Second)
 	d.kill()
 
 	// While the daemon is down the run is still "running" in the store;
@@ -252,12 +273,9 @@ func TestDaemonKilledAndContainerGoneFailsDeterministically(t *testing.T) {
 	d.apply(slowWorkflow)
 	id := d.startRun("chaos-slow")
 	d.waitStep(id, "slow", "running", 60*time.Second)
+	ids := d.waitStepContainer(id, 30*time.Second)
 	d.kill()
-	ids, err := command("docker", "ps", "-q", "--filter", "label=icaro.run="+id).Output()
-	if err != nil || len(strings.Fields(string(ids))) == 0 {
-		t.Fatalf("step container not found: %v %q", err, ids)
-	}
-	for _, c := range strings.Fields(string(ids)) {
+	for _, c := range ids {
 		_ = command("docker", "rm", "-f", c).Run()
 	}
 	d.start()
