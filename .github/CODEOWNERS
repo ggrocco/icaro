@@ -2,10 +2,20 @@
 * @ggrocco
 
 # Security boundaries need the owner's review (blueprint/docs/03-security.md).
+# These lines take effect once branch protection on main requires review
+# from code owners; with the catch-all above they also keep ownership
+# explicit if more owners are added.
 /internal/container/ @ggrocco
 /internal/creds/ @ggrocco
 /internal/secrets/ @ggrocco
+/internal/crypto/ @ggrocco
+/internal/api/ @ggrocco
+/internal/integration/ @ggrocco
 /internal/update/ @ggrocco
+/hack/sign/ @ggrocco
+/images/agent-base/ @ggrocco
 /install.sh @ggrocco
 /.goreleaser.yaml @ggrocco
 /.github/workflows/ @ggrocco
+/.github/dependabot.yml @ggrocco
+/.github/CODEOWNERS @ggrocco
