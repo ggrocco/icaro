@@ -122,7 +122,9 @@ func TestForwarderRefusals(t *testing.T) {
 func TestServeWithInjection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- ServeWithInjection(ctx, "127.0.0.1:0", New(nil, nil), "127.0.0.1:0", NewForwarder("/nonexistent", nil)) }()
+	go func() {
+		done <- ServeWithInjection(ctx, "127.0.0.1:0", New(nil, nil), "127.0.0.1:0", NewForwarder("/nonexistent", nil))
+	}()
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	if err := <-done; err != nil {
