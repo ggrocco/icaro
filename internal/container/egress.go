@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/moby/moby/api/types/mount"
+
 	"icaro/internal/container/docker"
 	"icaro/internal/container/sandbox"
 )
@@ -29,7 +31,20 @@ const (
 	ProxyAlias = "icaro-egress"
 	// ProxyPort is where the proxy listens.
 	ProxyPort = 3128
+	// InjectPort is where a proxy relays credential injection requests to
+	// the daemon (ADR 0028).
+	InjectPort = 3129
+	// InjectMount is where a proxy container sees the directory of the
+	// daemon's injection socket; InjectSocketName is the socket in it.
+	InjectMount      = "/icaro-inject"
+	InjectSocketName = "inject.sock"
 )
+
+// InjectSocketDir is the host directory of a profile's injection socket.
+// Only that profile's proxy container mounts it; agent containers never do.
+func InjectSocketDir(runDir, profile string) string {
+	return filepath.Join(runDir, "inject", profile)
+}
 
 // NetworkName is the internal network of a profile (no namespace).
 func NetworkName(profile string) string { return "icaro-egress-" + profile }
@@ -57,7 +72,15 @@ type DockerEgress struct {
 	// Namespace scopes network and proxy names and labels (see Namespace);
 	// empty keeps the bare profile names.
 	Namespace string
-	Log       *slog.Logger
+	// InjectDir returns the host directory of a profile's credential
+	// injection socket (InjectSocketDir), or "" when the profile injects
+	// nothing (ADR 0028). The proxy of such a profile mounts it read-only
+	// and relays InjectPort to it.
+	InjectDir func(profile string) string
+	// InjectUser runs a proxy that relays injection: it must be able to
+	// connect to the daemon's 0600 socket. Empty keeps 65534:65534.
+	InjectUser string
+	Log        *slog.Logger
 }
 
 // network is the internal network name for a profile.
@@ -76,7 +99,8 @@ func (e *DockerEgress) key(profile string) string {
 	return e.Namespace + "/" + profile
 }
 
-// Ensure provisions the network and (for a non-empty allowlist) the proxy.
+// Ensure provisions the network and, for a non-empty allowlist or a
+// profile that injects credentials, the proxy.
 func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []string) (Attachment, error) {
 	netName := e.network(profile)
 	labels := map[string]string{LabelEgress: e.key(profile)}
@@ -84,8 +108,18 @@ func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []strin
 		return Attachment{}, fmt.Errorf("egress network: %w", err)
 	}
 	att := Attachment{Network: netName}
-	if len(allow) == 0 {
+	injectDir := ""
+	if e.InjectDir != nil {
+		injectDir = e.InjectDir(profile)
+	}
+	if len(allow) == 0 && injectDir == "" {
 		return att, nil // no network access at all
+	}
+	if injectDir != "" {
+		// Create it before Docker would, as root, for the bind mount.
+		if err := os.MkdirAll(injectDir, 0o700); err != nil {
+			return Attachment{}, fmt.Errorf("injection socket directory: %w", err)
+		}
 	}
 	image, err := e.helperImage(ctx)
 	if err != nil {
@@ -93,7 +127,7 @@ func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []strin
 	}
 	sorted := append([]string(nil), allow...)
 	sort.Strings(sorted)
-	sum := sha256.Sum256([]byte(strings.Join(sorted, ",") + "|" + image))
+	sum := sha256.Sum256([]byte(strings.Join(sorted, ",") + "|" + image + "|" + injectDir + "|" + e.InjectUser))
 	hash := hex.EncodeToString(sum[:6])
 
 	ids, err := e.Engine.ListByLabel(ctx, map[string]string{LabelEgress: e.key(profile)})
@@ -113,51 +147,81 @@ func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []strin
 		_ = e.Engine.RemoveContainer(ctx, id)
 	}
 	if reuse == "" {
-		if err := e.startProxy(ctx, profile, image, hash, sorted); err != nil {
+		if err := e.startProxy(ctx, profile, image, hash, sorted, injectDir); err != nil {
 			return Attachment{}, err
 		}
 	}
-	proxy := fmt.Sprintf("http://%s:%d", ProxyAlias, ProxyPort)
-	att.Env = []string{
-		"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy, "http_proxy=" + proxy, "https_proxy=" + proxy,
-		"NO_PROXY=localhost,127.0.0.1", "no_proxy=localhost,127.0.0.1",
+	noProxy := "localhost,127.0.0.1"
+	if injectDir != "" {
+		// The injection endpoint is reached directly, not through the proxy.
+		noProxy += "," + ProxyAlias
+		att.Inject = fmt.Sprintf("http://%s:%d", ProxyAlias, InjectPort)
 	}
+	if len(allow) > 0 {
+		proxy := fmt.Sprintf("http://%s:%d", ProxyAlias, ProxyPort)
+		att.Env = []string{"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy, "http_proxy=" + proxy, "https_proxy=" + proxy}
+	}
+	att.Env = append(att.Env, "NO_PROXY="+noProxy, "no_proxy="+noProxy)
 	return att, nil
 }
 
-func (e *DockerEgress) startProxy(ctx context.Context, profile, image, hash string, allow []string) error {
+// startProxy creates and starts the proxy of profile. With injectDir it
+// also relays InjectPort to the daemon's socket in that directory; with an
+// empty allowlist it then sits on the internal network only, since it
+// forwards nothing outside.
+func (e *DockerEgress) startProxy(ctx context.Context, profile, image, hash string, allow []string, injectDir string) error {
 	outside := e.OutsideNetwork
 	if outside == "" {
 		outside = "bridge"
 	}
-	hc := sandbox.Baseline(sandbox.BaselineOptions{
-		NetworkMode: outside,
+	first := outside
+	if len(allow) == 0 {
+		first = e.network(profile)
+	}
+	opts := sandbox.BaselineOptions{
+		NetworkMode: first,
 		TmpfsHome:   true,
 		Limits:      sandbox.Limits{MemoryBytes: 128 << 20, NanoCPUs: 5e8, Pids: 128, NoFile: 4096},
-	})
+	}
+	entry := []string{"/icaro", "egress-proxy", "--listen", fmt.Sprintf(":%d", ProxyPort), "--allow", strings.Join(allow, ",")}
+	user := "65534:65534"
+	if injectDir != "" {
+		opts.Mounts = []mount.Mount{{Type: mount.TypeBind, Source: injectDir, Target: InjectMount, ReadOnly: true}}
+		entry = append(entry, "--inject-listen", fmt.Sprintf(":%d", InjectPort), "--inject-socket", InjectMount+"/"+InjectSocketName)
+		if e.InjectUser != "" {
+			user = e.InjectUser
+		}
+	}
+	hc := sandbox.Baseline(opts)
 	hc.RestartPolicy.Name = "unless-stopped"
 	spec := docker.Spec{
 		Name:       e.network(profile) + "-proxy-" + hash,
 		Image:      image,
-		Entrypoint: []string{"/icaro", "egress-proxy", "--listen", fmt.Sprintf(":%d", ProxyPort), "--allow", strings.Join(allow, ",")},
-		User:       "65534:65534",
+		Entrypoint: entry,
+		User:       user,
 		Labels:     map[string]string{LabelEgress: e.key(profile), LabelEgressHash: hash},
 		HostConfig: hc,
 	}
-	id, err := e.Engine.CreateContainerOn(ctx, spec, docker.NetSpec{Network: outside})
+	ns := docker.NetSpec{Network: outside}
+	if len(allow) == 0 {
+		ns = docker.NetSpec{Network: first, Aliases: []string{ProxyAlias}}
+	}
+	id, err := e.Engine.CreateContainerOn(ctx, spec, ns)
 	if err != nil {
 		return fmt.Errorf("create egress proxy: %w", err)
 	}
-	if err := e.Engine.ConnectNetwork(ctx, e.network(profile), id, []string{ProxyAlias}); err != nil {
-		_ = e.Engine.RemoveContainer(ctx, id)
-		return fmt.Errorf("attach egress proxy: %w", err)
+	if len(allow) > 0 {
+		if err := e.Engine.ConnectNetwork(ctx, e.network(profile), id, []string{ProxyAlias}); err != nil {
+			_ = e.Engine.RemoveContainer(ctx, id)
+			return fmt.Errorf("attach egress proxy: %w", err)
+		}
 	}
 	if err := e.Engine.StartContainer(ctx, id); err != nil {
 		_ = e.Engine.RemoveContainer(ctx, id)
 		return fmt.Errorf("start egress proxy: %w", err)
 	}
 	if e.Log != nil {
-		e.Log.Info("egress proxy started", "profile", profile, "allow", strings.Join(allow, ","))
+		e.Log.Info("egress proxy started", "profile", profile, "allow", strings.Join(allow, ","), "inject", injectDir != "")
 	}
 	return nil
 }

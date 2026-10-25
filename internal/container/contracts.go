@@ -11,6 +11,10 @@ import "context"
 type Attachment struct {
 	Network string
 	Env     []string // HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+	// Inject is the base URL of the proxy's credential injection relay
+	// (http://icaro-egress:3129), set only when the profile injects
+	// credentials (ADR 0028).
+	Inject string `json:"Inject,omitempty"`
 }
 
 // Egress provisions the per-profile egress confinement (ADR 0005).
