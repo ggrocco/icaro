@@ -180,7 +180,7 @@ func TestNewWiresEveryArea(t *testing.T) {
 		t.Error("no handler")
 	}
 	names := strings.Join(checkNames(a.Checks()), ",")
-	for _, want := range []string{"docker", "database migrations", "master key", "orphaned sessions", "pinned images", "preview proxy network"} {
+	for _, want := range []string{"docker", "database migrations", "master key", "memory socket path", "orphaned sessions", "pinned images", "preview proxy network"} {
 		if !strings.Contains(names, want) {
 			t.Errorf("check %q missing from %s", want, names)
 		}
@@ -418,7 +418,7 @@ func TestSessionChecks(t *testing.T) {
 	if r := run(t, key); r.Severity != doctor.Error {
 		t.Errorf("bad master key: %+v", r)
 	}
-	if n := len(SessionChecks(a.Cfg, nil, nil)); n != 1 {
+	if n := len(SessionChecks(a.Cfg, nil, nil)); n != 2 {
 		t.Errorf("without a store: %d checks", n)
 	}
 
@@ -569,5 +569,21 @@ func TestSetWorkflowEngineWithoutIntegrations(t *testing.T) {
 func TestDockerHint(t *testing.T) {
 	if dockerHint() == "" {
 		t.Error("empty hint")
+	}
+}
+
+func TestMemorySocketCheck(t *testing.T) {
+	cfg := &config.Config{Home: "/home/u/.icaro"}
+	if r := run(t, MemorySocketCheck(cfg)); r.Severity != doctor.OK {
+		t.Errorf("short home: %+v", r)
+	}
+	// A home this long still fits the daemon socket but not the sessions'.
+	cfg.Home = "/" + strings.Repeat("h", 60)
+	if p := cfg.Layout().Socket(); len(p) > 103 {
+		t.Fatalf("test home too long for the daemon itself: %d", len(p))
+	}
+	r := run(t, MemorySocketCheck(cfg))
+	if r.Severity != doctor.Warning || !strings.Contains(r.Detail, "without shared memory") || !strings.Contains(r.Detail, "ICARO_HOME") {
+		t.Errorf("long home: %+v", r)
 	}
 }

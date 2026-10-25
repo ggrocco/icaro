@@ -11,6 +11,7 @@ import (
 	"icaro/internal/container/docker"
 	"icaro/internal/creds"
 	"icaro/internal/doctor"
+	"icaro/internal/memory"
 	"icaro/internal/secrets"
 	"icaro/internal/session"
 	"icaro/internal/store"
@@ -37,8 +38,24 @@ func init() {
 	})
 }
 
+// MemorySocketCheck warns when ICARO_HOME is so long that a session's
+// memory MCP socket path would exceed the Unix socket limit: such
+// sessions would start without shared memory (ADR 0019).
+func MemorySocketCheck(cfg *config.Config) doctor.Check {
+	return doctor.Func("memory socket path", func(context.Context) doctor.Result {
+		// Session ids are 26-character ULIDs.
+		p := session.MemorySocketPath(cfg.Layout(), strings.Repeat("0", 26))
+		if len(p) >= memory.MaxSocketPath {
+			return doctor.Result{Severity: doctor.Warning, Detail: fmt.Sprintf(
+				"session memory sockets (%s) are %d bytes, over the %d-byte Unix socket limit, so sessions start without shared memory; use a shorter ICARO_HOME",
+				p, len(p), memory.MaxSocketPath-1)}
+		}
+		return doctor.Result{Severity: doctor.OK, Detail: fmt.Sprintf("%d of %d bytes", len(p), memory.MaxSocketPath-1)}
+	})
+}
+
 // SessionChecks are the Phase 1 doctor checks: the master key backend,
-// orphaned sessions and pinned images.
+// the memory socket path, orphaned sessions and pinned images.
 func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []doctor.Check {
 	checks := []doctor.Check{doctor.Func("master key", func(ctx context.Context) doctor.Result {
 		_, info, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: cfg.Layout().Secrets(), Keyring: secrets.DefaultKeyring(nil)})
@@ -49,7 +66,7 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 			return doctor.Result{Severity: doctor.Warning, Detail: info.Warning}
 		}
 		return doctor.Result{Severity: doctor.OK, Detail: "stored in " + info.Backend}
-	})}
+	}), MemorySocketCheck(cfg)}
 	if st == nil {
 		return checks
 	}

@@ -231,7 +231,7 @@ func (e *Engine) ServeSession(ctx context.Context, id session.Identity, socketPa
 		return nil, fmt.Errorf("%w: session %s has no project", ErrInvalid, id.SessionID)
 	}
 	if len(socketPath) >= MaxSocketPath {
-		return nil, fmt.Errorf("%w: socket path %q is %d bytes; Unix sockets need < %d (use a short path such as ~/.icaro/run/s/<short-id>.sock)", ErrInvalid, socketPath, len(socketPath), MaxSocketPath)
+		return nil, fmt.Errorf("%w: socket path %q is %d bytes; Unix sockets need < %d (use a shorter ICARO_HOME)", ErrInvalid, socketPath, len(socketPath), MaxSocketPath)
 	}
 	srv := e.sessionServer
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
