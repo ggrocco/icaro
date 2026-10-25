@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"icaro/internal/store"
 )
 
 // DefaultSince is the window a report covers when none is given.
@@ -23,6 +25,9 @@ type ReportOptions struct {
 	LimitUSD float64
 	// Now is the clock; zero means time.Now.
 	Now time.Time
+	// Store, when set, supplies saved snapshots for rows whose transcript
+	// is gone (MergeSnapshots). BuildReport only reads it.
+	Store *store.Store
 }
 
 // Report is the usage for one window: the records, the alerts they
@@ -41,9 +46,10 @@ type BadOption struct{ Msg string }
 
 func (e *BadOption) Error() string { return e.Msg }
 
-// BuildReport collects the Claude Code transcripts under opts.Roots.
-// Provider failures become unavailable rows, as in Collect; only a bad
-// option is an error.
+// BuildReport collects the Claude Code transcripts under opts.Roots and
+// fills in stored snapshots for rows whose transcript is gone. Provider
+// and snapshot failures become unavailable rows, as in Collect; only a
+// bad option is an error.
 func BuildReport(ctx context.Context, opts ReportOptions) (*Report, error) {
 	loc, err := Location(opts.Timezone)
 	if err != nil {
@@ -62,6 +68,18 @@ func BuildReport(ctx context.Context, opts ReportOptions) (*Report, error) {
 		return nil, err
 	}
 	recs := Collect(ctx, []Provider{&ClaudeCode{Roots: opts.Roots}}, since, loc)
+	if opts.Store != nil {
+		stored, err := Load(ctx, opts.Store, since.Format("2006-01-02"))
+		if err != nil {
+			recs = append(recs, Record{Provider: "snapshots", Source: "*", Confidence: ConfidenceUnavailable, Error: "stored snapshots unavailable: " + err.Error()})
+		} else {
+			sources := make(map[string]bool, len(opts.Roots))
+			for _, r := range opts.Roots {
+				sources[r.Label] = true
+			}
+			recs = MergeSnapshots(recs, stored, sources)
+		}
+	}
 	if recs == nil {
 		recs = []Record{}
 	}

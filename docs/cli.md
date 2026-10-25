@@ -902,7 +902,8 @@ icaro update [flags]
 
 Parses the Claude Code transcripts in every profile home (and, with
 --host-claude, your own ~/.claude, read-only) into per-day, per-model token
-counts. Each row names its source and confidence. Costs come from a list-price
+counts. Each row names its source and confidence; rows whose transcript is
+gone come from saved snapshots (confidence "snapshot"). Costs come from a list-price
 table and are always estimates; unpriced models show no cost. Alerts fire when
 a day's estimated spend reaches usage.daily_limit_usd, in usage.timezone.
 
