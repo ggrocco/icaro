@@ -368,15 +368,21 @@ func TestBaseChecks(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	if got := checkNames(BaseChecks(cfg, nil, nil)); len(got) != 2 {
+	if got := checkNames(BaseChecks(cfg, nil, nil, nil)); len(got) != 2 {
 		t.Errorf("without store and engine: %v", got)
 	}
 
-	cs := BaseChecks(cfg, st, pinger{errors.New("refused")})
+	// A Docker client that could not be built is an error, not a panic.
+	cs := BaseChecks(cfg, nil, nil, errors.New("unable to parse docker host"))
+	if r := run(t, findCheck(t, cs, "docker")); r.Severity != doctor.Error || !strings.Contains(r.Detail, "unable to parse docker host") {
+		t.Errorf("no client: %+v", r)
+	}
+
+	cs = BaseChecks(cfg, st, pinger{errors.New("refused")}, nil)
 	if r := run(t, findCheck(t, cs, "docker")); r.Severity != doctor.Error || !strings.Contains(r.Detail, "refused") {
 		t.Errorf("docker down: %+v", r)
 	}
-	cs = BaseChecks(cfg, st, pinger{})
+	cs = BaseChecks(cfg, st, pinger{}, nil)
 	if r := run(t, findCheck(t, cs, "docker")); r.Severity != doctor.OK {
 		t.Errorf("docker up: %+v", r)
 	}

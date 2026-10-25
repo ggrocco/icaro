@@ -82,3 +82,18 @@ func TestDoctorCoversSecurityTable(t *testing.T) {
 		}
 	}
 }
+
+// TestDoctorUnbuildableDockerClient is the regression test for the typed-nil
+// panic: a docker.host the client cannot parse used to crash doctor with a
+// nil pointer dereference instead of reporting an error.
+func TestDoctorUnbuildableDockerClient(t *testing.T) {
+	daemonEnv(t)
+	t.Setenv("ICARO_DOCKER__HOST", "notaurl")
+	out, err := runCLI(t, "", "doctor")
+	if err == nil || !strings.Contains(err.Error(), "doctor found errors") {
+		t.Fatalf("err = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "cannot build a Docker client") {
+		t.Errorf("docker check does not report the client error:\n%s", out)
+	}
+}
