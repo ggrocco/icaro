@@ -642,13 +642,6 @@ func (m *Manager) Ensure(ctx context.Context, req CreateRequest) (*Session, erro
 
 // Stop stops a session's container; its worktree and home layer stay.
 func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
-	row, err := m.o.Store.GetSession(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
 	// Claim the session first. A start still in flight writes only while
 	// the session is creating, so from here on it notices the stop,
 	// removes what it created and returns; wait for that before reading
@@ -664,9 +657,11 @@ func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
 	if stop := m.mcp.take(id); stop != nil {
 		stop()
 	}
-	if row, err = m.o.Store.GetSession(ctx, id); errors.Is(err, store.ErrNotFound) {
+	row, err := m.o.Store.GetSession(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotFound
-	} else if err != nil {
+	}
+	if err != nil {
 		return nil, err
 	}
 	if row.ContainerID != "" {
