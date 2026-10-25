@@ -206,6 +206,56 @@ func TestRemoveWhileStarting(t *testing.T) {
 	}
 }
 
+// TestStartAgainWhileStopping: a Start that lands after a stop claimed a
+// starting session wins. Its start waits for the abandoned one to unwind
+// and then runs; the stop (or removal) leaves the new container alone.
+func TestStartAgainWhileStopping(t *testing.T) {
+	t.Parallel()
+	for _, remove := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stop", true: "remove"}[remove], func(t *testing.T) {
+			t.Parallel()
+			g := newGate()
+			e := newQuietEnv(t, 4, func(o *Options) { o.Memory = gateMemory{g: g, stopped: make(chan struct{}, 4)} })
+			ctx := context.Background()
+			id, out := e.createAsync(t, g) // the first container runs; memory is attaching
+
+			stopErr := make(chan error, 1)
+			stopped := make(chan *Session, 1)
+			go func() {
+				if remove {
+					stopErr <- e.m.Remove(ctx, id, false)
+					return
+				}
+				s, err := e.m.Stop(ctx, id)
+				stopped <- s
+				stopErr <- err
+			}()
+			e.waitRowStatus(t, id, StatusStopped)
+			// Re-queued while the first start still unwinds: it must wait.
+			if s, err := e.m.Start(ctx, id); err != nil || s.Status != StatusQueued {
+				t.Fatalf("start: %+v %v", s, err)
+			}
+			close(g.release)
+			err := <-stopErr
+			if remove {
+				if !isInvalid(err) {
+					t.Fatalf("remove of a restarted session: %v", err)
+				}
+			} else if s := <-stopped; err != nil || s.Status == StatusStopped {
+				t.Fatalf("stop: %+v %v", s, err)
+			}
+			<-out
+			got := e.waitStatus(t, id, StatusRunning)
+			if st := e.state(got.ContainerID); !st.Running {
+				t.Fatalf("the restarted session's container: %+v", st)
+			}
+			if n := e.containers(); n != 1 {
+				t.Fatalf("%d containers, want only the restarted one", n)
+			}
+		})
+	}
+}
+
 // TestStopBeforeQueued: a session stopped while Create is still setting
 // it up is never queued, so it never starts.
 func TestStopBeforeQueued(t *testing.T) {

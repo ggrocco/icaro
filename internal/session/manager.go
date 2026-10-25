@@ -210,7 +210,6 @@ func (m *Manager) fill(ctx context.Context) {
 		active++
 		row.Status = StatusCreating
 		go func(row *store.SessionRow) {
-			defer m.endStart(row.ID, done)
 			bg := context.WithoutCancel(ctx)
 			switch err := m.startAgent(bg, row); {
 			case errors.Is(err, errStartAborted):
@@ -220,6 +219,9 @@ func (m *Manager) fill(ctx context.Context) {
 				row.Status, row.Error = StatusError, err.Error()
 				_, _ = m.o.Store.UpdateSessionIf(bg, row, StatusCreating)
 			}
+			// Unregister before nudging, so the fill the nudge triggers can
+			// claim this session again if it was re-queued meanwhile.
+			m.endStart(row.ID, done)
 			m.nudge()
 		}(row)
 	}
@@ -654,15 +656,20 @@ func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
 	if err := m.awaitStart(ctx, id); err != nil {
 		return nil, err
 	}
-	if stop := m.mcp.take(id); stop != nil {
-		stop()
-	}
 	row, err := m.o.Store.GetSession(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if row.Status != StatusStopped {
+		// Started again after the claim: the later request wins, and that
+		// start owns the session's container now.
+		return toSession(row), nil
+	}
+	if stop := m.mcp.take(id); stop != nil {
+		stop()
 	}
 	if row.ContainerID != "" {
 		err := m.o.Engine.StopContainer(ctx, row.ContainerID, 10)
@@ -736,8 +743,10 @@ func (m *Manager) Remove(ctx context.Context, id string, keepWorktree bool) erro
 	if row.Kind == KindRun {
 		return m.FinishRun(ctx, id, keepWorktree)
 	}
-	if _, err := m.Stop(ctx, id); err != nil {
+	if s, err := m.Stop(ctx, id); err != nil {
 		return err
+	} else if s.Status != StatusStopped {
+		return invalid("session %s was started again while it was being removed", id)
 	}
 	if err := m.o.Homes.Release(ctx, row.Profile, row.ID); err != nil {
 		return err

@@ -17,7 +17,7 @@ icaro session rm ID --yes         # remove the session and its worktree (the bra
 
 The agent gets a real TTY, and its exit code becomes `icaro`'s exit code.
 
-`session stop` and `session rm` also work on a session that is still `queued` or starting: the stop wins, and a start already under way removes the container it created instead of running it. If Docker cannot stop the container, the session is marked `error` with the reason (not `stopped`), and running `session stop` again retries.
+`session stop` and `session rm` also work on a session that is still `queued` or starting: the stop wins, and a start already under way removes the container it created instead of running it (a `session start` issued after the stop wins in turn, and `session rm` then refuses). If Docker cannot stop the container, the session is marked `error` with the reason (not `stopped`), and running `session stop` again retries.
 
 ## Worktrees
 
