@@ -256,3 +256,45 @@ func TestShadowAndCollision(t *testing.T) {
 		t.Fatalf("catalog %v %v", c.Integrations(), c.EventNames("github"))
 	}
 }
+
+// A pack's manifests/ directory, or a manifest in it, may not be a
+// symlink: it could load files from outside the pack that its permission
+// summary never showed.
+func TestPackManifestSymlinksAreIgnored(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "acme.yaml"), []byte(acmeManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "linked"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "linked", "manifests")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "filelink", "manifests"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "acme.yaml"), filepath.Join(dir, "filelink", "manifests", "acme.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if got := manifestFiles(filepath.Join(dir, "linked")); len(got) != 0 {
+		t.Fatalf("a symlinked manifests dir must be ignored: %v", got)
+	}
+	if got := manifestFiles(filepath.Join(dir, "filelink")); len(got) != 0 {
+		t.Fatalf("a symlinked manifest must be ignored: %v", got)
+	}
+	if _, ok := NewRegistry(dir, nil).Snapshot().Get("acme"); ok {
+		t.Fatal("a manifest from outside the pack was loaded")
+	}
+	// A real manifests/ directory still loads.
+	realDir := filepath.Join(dir, "real", "manifests")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "acme.yaml"), []byte(acmeManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := NewRegistry(dir, nil).Snapshot().Get("acme"); !ok {
+		t.Fatal("a manifest in a real manifests dir must load")
+	}
+}
