@@ -25,7 +25,7 @@
 - **Dangerous mounts in workflow files are rejected at validation time**, not by convention: the Docker socket and anything under `/var/run`, `/proc`, or `/sys`.
 - **The daemon's own Docker access is narrowed** by a socket proxy that allows only the API calls the daemon makes, so a compromised daemon cannot `exec` into other containers or mount host paths.
 - An allowlist of mountable directories. Never mount the entire `$HOME` by default; the "shared home" option must be an explicit profile and show its impact during setup (how it interacts with agent credential directories is [open item O4](02-decisions-risks.md#open-items)).
-- The preview Compose goes through its own lint: block `privileged`, `pid: host`, `network_mode: host`, mounts outside the allowed root, the Docker socket, and dangerous capabilities, unless overridden with user confirmation.
+- The preview Compose goes through its own lint: block `privileged`, `pid: host`, `network_mode: host`, joining or borrowing containers outside the project (`container:` namespaces, `volumes_from`), mounts outside the allowed root (after resolving symlinks), the Docker socket, dangerous capabilities, and Ícaro's reserved `icaro-*` networks and aliases, unless overridden with user confirmation.
 
 **Agent credentials and egress** ([ADR 0005](adr/0005-persistent-home-egress.md))
 

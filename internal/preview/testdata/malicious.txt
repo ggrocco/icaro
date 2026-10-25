@@ -1,6 +1,7 @@
 Malicious compose fixtures for the lint (05-engineering, security tests).
 Each section is one compose file; the second field of its header is the
-finding ID the lint must report.
+finding ID the lint must report; a trailing * matches any suffix (mount
+IDs end in a hash of what they mount).
 
 -- privileged web/privileged --
 services:
@@ -27,19 +28,19 @@ services:
   web:
     image: nginx
     userns_mode: host
--- docker-sock web/volumes/0 --
+-- docker-sock web/volumes/_var_run_docker.sock-* --
 services:
   web:
     image: nginx
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
--- docker-sock-elsewhere web/volumes/0 --
+-- docker-sock-elsewhere web/volumes/_var_run_docker.sock-* --
 services:
   web:
     image: nginx
     volumes:
       - ./docker.sock:/var/run/docker.sock
--- etc-mount web/volumes/0 --
+-- etc-mount web/volumes/_host-etc-* --
 services:
   web:
     image: nginx
@@ -47,20 +48,20 @@ services:
       - type: bind
         source: /etc
         target: /host-etc
--- proc-mount web/volumes/1 --
+-- proc-mount web/volumes/_host-proc-* --
 services:
   web:
     image: nginx
     volumes:
       - ./src:/src
       - /proc:/host-proc
--- outside-root web/volumes/0 --
+-- outside-root web/volumes/_stolen-* --
 services:
   web:
     image: nginx
     volumes:
       - ../../../../../../../../../home:/stolen:ro
--- host-root web/volumes/0 --
+-- host-root web/volumes/_host-* --
 services:
   web:
     image: nginx
@@ -96,7 +97,7 @@ services:
   web:
     image: nginx
     devices: ["/dev/kmsg:/dev/kmsg"]
--- named-volume-bind volumes/data --
+-- named-volume-bind volumes/data-* --
 services:
   web:
     image: nginx
@@ -105,7 +106,7 @@ volumes:
   data:
     driver: local
     driver_opts: {type: none, o: bind, device: /var/lib/docker}
--- env-interpolation web/volumes/0 --
+-- env-interpolation web/volumes/_home-* --
 services:
   web:
     image: nginx
@@ -117,3 +118,78 @@ services:
   db:
     image: postgres
     privileged: true
+-- volumes-from-container web/volumes_from/container_icaro-agent --
+services:
+  web:
+    image: nginx
+    volumes_from: ["container:icaro-agent"]
+-- volumes-from-unknown web/volumes_from/agent_ro --
+services:
+  web:
+    image: nginx
+    volumes_from: ["agent:ro"]
+-- pid-container web/pid/container_icaro-agent --
+services:
+  web:
+    image: nginx
+    pid: container:icaro-agent
+-- network-container web/network_mode/container_icaro-traefik-1234 --
+services:
+  web:
+    image: nginx
+    network_mode: "container:icaro-traefik-1234"
+-- ipc-container web/ipc/container_x --
+services:
+  web:
+    image: nginx
+    ipc: container:x
+-- uts-unknown-service web/uts/service_ghost --
+services:
+  web:
+    image: nginx
+    uts: service:ghost
+-- preview-network-external networks/icaro-preview --
+services:
+  web:
+    image: nginx
+    networks: [pn]
+networks:
+  pn:
+    external: true
+    name: icaro-preview
+-- preview-network-key networks/icaro-preview --
+services:
+  web:
+    image: nginx
+    networks: [icaro-preview]
+networks:
+  icaro-preview:
+    external: true
+-- preview-network-named networks/icaro-other-0123abcd_default --
+services:
+  web:
+    image: nginx
+networks:
+  default:
+    name: icaro-other-0123abcd_default
+-- preview-network-undeclared web/networks/icaro-preview --
+services:
+  web:
+    image: nginx
+    networks: [icaro-preview]
+-- preview-alias web/networks/aliases/icaro-other-0123abcd-web --
+services:
+  web:
+    image: nginx
+    networks:
+      default:
+        aliases: [icaro-other-0123abcd-web]
+-- preview-service-name icaro-other-0123abcd-web/service_name --
+services:
+  icaro-other-0123abcd-web:
+    image: nginx
+-- preview-container-name web/container_name/icaro-other-0123abcd-web --
+services:
+  web:
+    image: nginx
+    container_name: icaro-other-0123abcd-web

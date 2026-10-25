@@ -1,14 +1,20 @@
 package preview
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
 // Finding is one blocked field in a compose file (03-security, compose
-// lint). ID is stable so a user can allow exactly this finding.
+// lint). ID is stable so a user can allow exactly this finding, and it
+// changes whenever what the finding allows changes (ADR 0018).
 type Finding struct {
 	ID      string `json:"id"`
 	Service string `json:"service,omitempty"`
@@ -54,13 +60,14 @@ func Lint(p *Project, o LintOptions) []Finding {
 		}
 		out = append(out, Finding{ID: id, Service: svc, Field: field, Value: value, Reason: reason})
 	}
+	roots := resolveRoots(o.AllowedRoots)
 	for _, name := range p.ServiceNames() {
 		s := p.Services[name]
 		base := "services." + name + "."
 		if s.Privileged {
 			add(name, base+"privileged", "true", "privileged", "a privileged container has full access to the host kernel and devices")
 		}
-		for _, hostNS := range []struct{ field, val, why string }{
+		for _, ns := range []struct{ field, val, why string }{
 			{"pid", s.Pid, "shares the host process namespace (can see and signal host processes)"},
 			{"network_mode", s.NetworkMode, "shares the host network stack (bypasses the preview network and can reach host-only services)"},
 			{"ipc", s.Ipc, "shares host IPC (shared memory of host processes)"},
@@ -68,8 +75,20 @@ func Lint(p *Project, o LintOptions) []Finding {
 			{"cgroup", s.Cgroup, "shares the host cgroup namespace"},
 			{"uts", s.Uts, "shares the host UTS namespace"},
 		} {
-			if strings.EqualFold(hostNS.val, "host") {
-				add(name, base+hostNS.field, hostNS.val, hostNS.field, hostNS.why)
+			switch {
+			case strings.EqualFold(ns.val, "host"):
+				add(name, base+ns.field, ns.val, ns.field, ns.why)
+			case joinsOutside(p, ns.val):
+				// The value is part of the ID: allowing one container's
+				// namespace never allows another's, or the host's.
+				add(name, base+ns.field, ns.val, ns.field+"/"+sanitizeID(ns.val),
+					"joins the namespace of a container outside this compose project (an agent container, another preview or the proxy)")
+			}
+		}
+		for _, vf := range s.VolumesFrom {
+			if volumesFromOutside(p, vf) {
+				add(name, base+"volumes_from", vf, "volumes_from/"+sanitizeID(vf),
+					"mounts the volumes of a container outside this compose project, which can hold another container's home and credentials")
 			}
 		}
 		for _, c := range s.CapAdd {
@@ -88,15 +107,15 @@ func Lint(p *Project, o LintOptions) []Finding {
 			add(name, base+"devices", d, "devices/"+sanitizeID(d), "passes a host device into the container")
 		}
 		for _, m := range s.Mounts {
-			field := fmt.Sprintf("%svolumes[%d]", base, m.Index)
-			id := fmt.Sprintf("volumes/%d", m.Index)
 			if m.Type != "bind" {
 				continue
 			}
-			if reason := bindProblem(m.Source, o.AllowedRoots); reason != "" {
-				add(name, field, m.Source+":"+m.Target, id, reason)
+			resolved, reason := bindProblem(m.Source, roots)
+			if reason != "" {
+				add(name, fmt.Sprintf("%svolumes[%d]", base, m.Index), m.Source+":"+m.Target, mountID(resolved, m.Target, m.ReadOnly), reason)
 			}
 		}
+		lintPreviewNames(p, name, s, add)
 	}
 	vols := make([]string, 0, len(p.Volumes))
 	for n := range p.Volumes {
@@ -108,41 +127,217 @@ func Lint(p *Project, o LintOptions) []Finding {
 		if v.Device == "" || !v.Bind {
 			continue
 		}
-		if reason := bindProblem(v.Device, o.AllowedRoots); reason != "" {
-			add("", "volumes."+n+".driver_opts.device", v.Device, "volumes/"+n, "named volume binds a host path: "+reason)
+		if resolved, reason := bindProblem(v.Device, roots); reason != "" {
+			add("", "volumes."+n+".driver_opts.device", v.Device, "volumes/"+sanitizeID(n)+"-"+shortHash(resolved), "named volume binds a host path: "+reason)
 		}
 	}
+	lintNetworks(p, add)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
-// bindProblem explains why a host path may not be mounted, or "" if it may.
-func bindProblem(src string, allowed []string) string {
-	if strings.Contains(src, "$") {
-		return "host path uses variable interpolation that could not be resolved; run the lint where `docker compose config` works"
+// joinsOutside reports a namespace mode (pid, network_mode, ipc, uts, …)
+// that joins a container which is not a service of this project.
+func joinsOutside(p *Project, mode string) bool {
+	l := strings.ToLower(mode)
+	if strings.HasPrefix(l, "container:") {
+		return true
 	}
-	clean := filepath.Clean(src)
-	if strings.HasSuffix(clean, "docker.sock") || strings.HasSuffix(clean, "containerd.sock") || strings.HasSuffix(clean, "podman.sock") {
-		return "mounts a container engine socket, which is root on the host"
+	if strings.HasPrefix(l, "service:") {
+		return p.Services[mode[len("service:"):]] == nil
 	}
-	if clean == "/" {
-		return "mounts the host root filesystem"
+	return false
+}
+
+// volumesFromOutside reports a volumes_from entry ("svc", "service:svc",
+// "container:name", each with an optional ":ro"/":rw") that is not a
+// service of this project.
+func volumesFromOutside(p *Project, ref string) bool {
+	l := strings.ToLower(ref)
+	if strings.HasPrefix(l, "container:") {
+		return true
 	}
-	for _, f := range forbiddenHostPaths {
-		if clean == f || strings.HasPrefix(clean, f+"/") {
-			return "mounts the sensitive host path " + f
+	if strings.HasPrefix(l, "service:") {
+		ref = ref[len("service:"):]
+	}
+	svc, _, _ := strings.Cut(ref, ":")
+	return p.Services[svc] == nil
+}
+
+// icaroName reports a name in the icaro- namespace Ícaro uses for its own
+// networks, compose projects, aliases and containers.
+func icaroName(s string) bool { return strings.HasPrefix(strings.ToLower(s), "icaro-") }
+
+// takeoverReason explains every icaro- name finding (ADR 0017: a compose
+// project can never claim a route).
+const takeoverReason = "uses a name Ícaro reserves for its own networks and routes; it could join the preview network or answer for another preview's route"
+
+// lintPreviewNames flags a service that would answer for an Ícaro name
+// on a network: its name, container_name or a network alias. Ícaro's own
+// override (which adds the routed service's alias) is never linted.
+func lintPreviewNames(p *Project, name string, s *Service, add func(svc, field, value, idSuffix, reason string)) {
+	base := "services." + name
+	if icaroName(name) {
+		add(name, base, name, "service_name", "the service name is a DNS alias on every network it joins, and it "+takeoverReason)
+	}
+	if icaroName(s.ContainerName) {
+		add(name, base+".container_name", s.ContainerName, "container_name/"+sanitizeID(s.ContainerName), "container_name "+takeoverReason)
+	}
+	keys := make([]string, 0, len(s.Networks))
+	for k := range s.Networks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, declared := p.Networks[k]; !declared && icaroName(k) {
+			add(name, base+".networks", k, "networks/"+sanitizeID(k), "the network "+takeoverReason)
+		}
+		for _, a := range s.Networks[k] {
+			if icaroName(a) {
+				add(name, base+".networks."+k+".aliases", a, "networks/aliases/"+sanitizeID(a), "the alias "+takeoverReason)
+			}
 		}
 	}
-	for _, root := range allowed {
+}
+
+// lintNetworks flags top-level networks that resolve to an Ícaro-managed
+// engine network (icaro-preview, or another preview's project network).
+// A network compose names itself lives in this project's own namespace
+// (<project>_<key>) and is fine.
+func lintNetworks(p *Project, add func(svc, field, value, idSuffix, reason string)) {
+	own := NameFor(p.Dir).Project
+	keys := make([]string, 0, len(p.Networks))
+	for k := range p.Networks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		n := p.Networks[k]
+		name := n.Name
+		if name == "" && n.External {
+			name = k
+		}
+		if !icaroName(name) || (!n.External && name == own+"_"+k) {
+			continue
+		}
+		add("", "networks."+k, name, "networks/"+sanitizeID(name), "the network "+takeoverReason)
+	}
+}
+
+// mountID derives a bind finding's ID from what it mounts (the resolved
+// source, the target and the mode), so a changed mount is a new finding
+// that an earlier allowance does not cover.
+func mountID(src, target string, readOnly bool) string {
+	return "volumes/" + sanitizeID(target) + "-" + shortHash(fmt.Sprintf("%s\x00%s\x00%t", src, target, readOnly))
+}
+
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:4])
+}
+
+// resolveRoots resolves symlinks in the allowed roots, so a source is
+// compared with where a root really is.
+func resolveRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
 		r := filepath.Clean(root)
 		if r == "" || r == "." {
 			continue
 		}
-		if clean == r || strings.HasPrefix(clean, r+string(filepath.Separator)) {
-			return ""
+		if res, err := resolveSymlinks(r); err == nil {
+			r = res
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// bindProblem explains why a host path may not be mounted, or "" if it
+// may. Docker follows symlinks in a bind source, so the check runs on
+// where the path really leads; it returns that resolved path too.
+func bindProblem(src string, roots []string) (resolved, reason string) {
+	if strings.Contains(src, "$") {
+		return src, "host path uses variable interpolation that could not be resolved; run the lint where `docker compose config` works"
+	}
+	clean := filepath.Clean(src)
+	res, err := resolveSymlinks(clean)
+	if err != nil {
+		return clean, "host path cannot be resolved (" + err.Error() + ")"
+	}
+	via := ""
+	if res != clean {
+		via = " (it resolves to " + res + " through a symlink)"
+	}
+	// The written path is checked too: on macOS /etc and /var/run are
+	// themselves symlinks into /private.
+	for _, cand := range []string{clean, res} {
+		if strings.HasSuffix(cand, "docker.sock") || strings.HasSuffix(cand, "containerd.sock") || strings.HasSuffix(cand, "podman.sock") {
+			return res, "mounts a container engine socket, which is root on the host" + via
+		}
+		if cand == "/" {
+			return res, "mounts the host root filesystem" + via
+		}
+		for _, f := range forbiddenHostPaths {
+			if cand == f || strings.HasPrefix(cand, f+"/") {
+				return res, "mounts the sensitive host path " + f + via
+			}
 		}
 	}
-	return "mounts a host path outside the worktree and the mounts.allow list"
+	for _, r := range roots {
+		if res == r || strings.HasPrefix(res, r+string(filepath.Separator)) {
+			return res, ""
+		}
+	}
+	return res, "mounts a host path outside the worktree and the mounts.allow list" + via
+}
+
+// maxSymlinks bounds symlink resolution, as the kernel does (ELOOP).
+const maxSymlinks = 40
+
+// resolveSymlinks resolves every symlink in the absolute path p. Unlike
+// filepath.EvalSymlinks it accepts a path whose tail does not exist yet
+// (Docker creates a missing bind source): the existing part is resolved,
+// and a dangling symlink is followed to where Docker would create it.
+func resolveSymlinks(p string) (string, error) {
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("%q is not an absolute path", p)
+	}
+	sep := string(filepath.Separator)
+	resolved := sep
+	todo := strings.Split(p, sep)
+	for links := 0; len(todo) > 0; {
+		c := todo[0]
+		todo = todo[1:]
+		switch c {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		next := filepath.Join(resolved, c)
+		fi, err := os.Lstat(next)
+		if errors.Is(err, fs.ErrNotExist) || (err == nil && fi.Mode()&fs.ModeSymlink == 0) {
+			resolved = next
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if links++; links > maxSymlinks {
+			return "", fmt.Errorf("too many levels of symbolic links at %s", next)
+		}
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", err
+		}
+		if filepath.IsAbs(target) {
+			resolved = sep
+		}
+		todo = append(strings.Split(target, sep), todo...)
+	}
+	return resolved, nil
 }
 
 func sanitizeID(s string) string {

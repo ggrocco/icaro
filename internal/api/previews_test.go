@@ -23,7 +23,7 @@ import (
 // stubCompose and stubEngine stand in for Docker at the edge.
 type stubCompose struct{ running map[string]int }
 
-func (c *stubCompose) Config(_ context.Context, _ string, files []string) ([]byte, error) {
+func (c *stubCompose) Config(_ context.Context, _, _ string, files []string) ([]byte, error) {
 	return os.ReadFile(files[0])
 }
 func (c *stubCompose) Up(_ context.Context, p, _ string, _ []string) error {

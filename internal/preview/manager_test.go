@@ -32,7 +32,7 @@ func newFakeCompose() *fakeCompose {
 	return &fakeCompose{ups: map[string]int{}, downs: map[string]int{}, running: map[string]int{}, files: map[string][]string{}}
 }
 
-func (f *fakeCompose) Config(_ context.Context, _ string, files []string) ([]byte, error) {
+func (f *fakeCompose) Config(_ context.Context, _, _ string, files []string) ([]byte, error) {
 	return os.ReadFile(files[0])
 }
 
@@ -291,12 +291,22 @@ func TestDangerousComposeIsBlockedAndExplained(t *testing.T) {
 	if p.Status != store.PreviewBlocked || strings.Contains(p.Error, "web/privileged:") {
 		t.Fatalf("partial allow: %+v", p)
 	}
-	if err := e.m.Allow(e.ctx, dir, []string{"web/volumes/0"}, "test"); err != nil {
+	if err := e.m.Allow(e.ctx, dir, []string{"web/" + mountID(resolvedSock(t), "/var/run/docker.sock", false)}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	p, _ = e.m.Add(e.ctx, AddRequest{Path: dir, Wait: true, Force: true})
 	if p.Status != store.PreviewRunning {
 		t.Fatalf("all findings allowed: %+v", p)
+	}
+	// The allowed mount is swapped for a worse one in the same position:
+	// the old allowance does not carry over (ADR 0018).
+	worse := "services:\n  web:\n    image: x\n    privileged: true\n    labels: {icaro.preview.port: \"80\"}\n    volumes: [\"/:/var/run/docker.sock\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(worse), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = e.m.Add(e.ctx, AddRequest{Path: dir, Wait: true, Force: true})
+	if p.Status != store.PreviewBlocked || !strings.Contains(p.Error, "host root") {
+		t.Fatalf("a changed mount must be blocked again: %+v", p)
 	}
 }
 

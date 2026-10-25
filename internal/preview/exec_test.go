@@ -55,7 +55,7 @@ func TestCLIConfigUpLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := cli.Config(ctx, wt, []string{"a.yaml", "b.yaml"})
+	out, err := cli.Config(ctx, "proj", wt, []string{"a.yaml", "b.yaml"})
 	if err != nil || !strings.Contains(string(out), `"web"`) {
 		t.Fatalf("%s %v", out, err)
 	}
@@ -71,7 +71,7 @@ func TestCLIConfigUpLogs(t *testing.T) {
 		t.Fatal(c)
 	}
 	for _, want := range []string{
-		wt + "|compose -f a.yaml -f b.yaml --project-directory " + wt + " config --format json",
+		wt + "|compose -p proj -f a.yaml -f b.yaml --project-directory " + wt + " config --format json",
 		wt + "|compose -p proj -f a.yaml --project-directory " + wt + " up -d --build --remove-orphans --wait --wait-timeout 120",
 	} {
 		if !strings.Contains(strings.Join(c, "\n"), want) {
@@ -133,12 +133,12 @@ func TestCLIDownAndRunning(t *testing.T) {
 
 func TestCLIErrorKeepsStderrTail(t *testing.T) {
 	cli, _ := fakeCLI(t, "FAKE_BIG_ERR=1")
-	_, err := cli.Config(context.Background(), t.TempDir(), []string{"a.yaml"})
+	_, err := cli.Config(context.Background(), "proj", t.TempDir(), []string{"a.yaml"})
 	if err == nil {
 		t.Fatal("expected an error")
 	}
 	msg := err.Error()
-	if !strings.HasPrefix(msg, "docker compose -f a.yaml: exit status 2: ") || !strings.HasSuffix(msg, "END") || len(msg) > 2100 {
+	if !strings.HasPrefix(msg, "docker compose -p proj: exit status 2: ") || !strings.HasSuffix(msg, "END") || len(msg) > 2100 {
 		t.Fatalf("error must name the command and keep only the stderr tail (%d bytes): %.120s", len(msg), msg)
 	}
 }
