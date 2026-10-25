@@ -114,6 +114,67 @@ func TestWorkflows(t *testing.T) {
 	})
 }
 
+// EnqueueRun applies forbid and replace atomically, and a replace run is
+// not claimed while the run it replaced is still running.
+func TestEnqueueRunPolicies(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, s *Store) {
+		ctx := context.Background()
+		w, _ := s.ApplyWorkflow(ctx, "pol", "x", "{}", "a")
+		steps := []StepInit{{StepID: "one", Idx: 0, Kind: "image"}}
+		enq := func(policy string) (*Run, PolicyOutcome) {
+			t.Helper()
+			r := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, TriggerKind: "manual", Concurrency: policy}
+			out, err := s.EnqueueRun(ctx, r, steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r, out
+		}
+		f1, out := enq("forbid")
+		if out.Blocking != nil || len(out.Replaced) != 0 {
+			t.Fatalf("first forbid: %+v", out)
+		}
+		if f2, out := enq("forbid"); out.Blocking == nil || out.Blocking.ID != f1.ID {
+			t.Fatalf("second forbid must be blocked by %s: %+v", f1.ID, out)
+		} else if _, err := s.GetRun(ctx, f2.ID); err != ErrNotFound {
+			t.Fatalf("a blocked run is not stored: %v", err)
+		}
+		if c, err := s.ClaimRun(ctx, "daemon"); err != nil || c.ID != f1.ID {
+			t.Fatalf("claim: %v %+v", err, c)
+		}
+		// replace: queued runs are cancelled, running ones flagged.
+		q, _ := enq("allow")
+		r1, out := enq("replace")
+		if len(out.Replaced) != 2 || out.Replaced[0].ID != f1.ID || out.Replaced[0].Status != RunRunning || out.Replaced[1].ID != q.ID {
+			t.Fatalf("replaced: %+v", out.Replaced)
+		}
+		if got, _ := s.GetRun(ctx, q.ID); got.Status != RunCancelled {
+			t.Fatalf("queued run not cancelled: %s", got.Status)
+		}
+		if srs, _ := s.GetStepRuns(ctx, q.ID); srs[0].Status != StepCancelled || srs[0].Error != "run cancelled" {
+			t.Fatalf("queued run's steps: %+v", srs[0])
+		}
+		if got, _ := s.GetRun(ctx, f1.ID); got.Status != RunRunning || got.CancelRequestedAt == nil {
+			t.Fatalf("running run not flagged: %+v", got)
+		}
+		if _, err := s.ClaimRun(ctx, "daemon"); err != ErrNotFound {
+			t.Fatalf("a replace run must wait for the run it replaced: %v", err)
+		}
+		_ = s.FinishRun(ctx, f1.ID, RunCancelled, "cancelled")
+		if c, err := s.ClaimRun(ctx, "daemon"); err != nil || c.ID != r1.ID {
+			t.Fatalf("claim replace run: %v %+v", err, c)
+		}
+		dup := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, TriggerKind: "manual", Concurrency: "replace", IdempotencyKey: "k"}
+		if _, err := s.EnqueueRun(ctx, dup, steps); err != nil {
+			t.Fatal(err)
+		}
+		dup2 := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, TriggerKind: "manual", Concurrency: "allow", IdempotencyKey: "k"}
+		if _, err := s.EnqueueRun(ctx, dup2, steps); err != ErrConflict {
+			t.Fatalf("duplicate key: %v", err)
+		}
+	})
+}
+
 func TestRunsQueueAndSteps(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, s *Store) {
 		ctx := context.Background()

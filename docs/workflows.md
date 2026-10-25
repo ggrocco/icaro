@@ -156,9 +156,9 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 | `allow` (default) | Start another run |
 | `forbid` | Skip the new run; webhook deliveries record the reason |
 | `queue` | Wait until the active run finishes |
-| `replace` | Cancel the active runs, then start |
+| `replace` | Cancel the active runs; the new run starts once they have stopped |
 
-Webhook and cron runs carry an idempotency key, so a retried delivery or a repeated cron tick never starts a second run.
+The policy is checked and the run created in one transaction, so concurrent triggers cannot both slip past `forbid`. Webhook and cron runs carry an idempotency key, so a retried delivery or a repeated cron tick never starts a second run.
 
 ## Scheduling
 

@@ -43,6 +43,82 @@ type StepInit struct {
 // transaction. ID, RootRunID and CreatedAt are filled in when empty. A
 // duplicate IdempotencyKey returns ErrConflict.
 func (s *Store) CreateRun(ctx context.Context, r *Run, steps []StepInit) error {
+	s.fillRun(r)
+	err := s.tx(ctx, func(tx *sql.Tx) error { return s.insertRun(ctx, tx, r, steps) })
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
+}
+
+// PolicyOutcome is what EnqueueRun's concurrency policy did.
+type PolicyOutcome struct {
+	// Blocking is the active run that made a forbid enqueue skip; no run
+	// was created.
+	Blocking *Run
+	// Replaced are the runs a replace enqueue cancelled (queued ones) or
+	// flagged for cancellation (running ones), as they were before.
+	Replaced []*Run
+}
+
+// EnqueueRun inserts r like CreateRun, applying its workflow's
+// concurrency policy (r.Concurrency) in the same transaction, so two
+// concurrent enqueues cannot both see "no active run": forbid skips while
+// a run is queued or running; replace cancels queued runs and flags
+// running ones, and the new run then waits in ClaimRun until they stop.
+// The transaction first takes the workflow row's write lock (a no-op
+// UPDATE, portable to SQLite's single writer and Postgres row locks).
+func (s *Store) EnqueueRun(ctx context.Context, r *Run, steps []StepInit) (PolicyOutcome, error) {
+	s.fillRun(r)
+	var out PolicyOutcome
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		out = PolicyOutcome{}
+		if r.Concurrency == "forbid" || r.Concurrency == "replace" {
+			if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE workflows SET version = version WHERE id = ?`), r.WorkflowID); err != nil {
+				return err
+			}
+			active, err := s.activeRunsTx(ctx, tx, r.WorkflowID)
+			if err != nil {
+				return err
+			}
+			if r.Concurrency == "forbid" && len(active) > 0 {
+				out.Blocking = active[0]
+				return nil
+			}
+			for _, old := range active {
+				if err := s.requestCancelTx(ctx, tx, old.ID); err != nil {
+					return err
+				}
+			}
+			out.Replaced = active
+		}
+		return s.insertRun(ctx, tx, r, steps)
+	})
+	if isUniqueViolation(err) {
+		return PolicyOutcome{}, ErrConflict
+	}
+	return out, err
+}
+
+func (s *Store) activeRunsTx(ctx context.Context, tx *sql.Tx, workflowID string) ([]*Run, error) {
+	rows, err := tx.QueryContext(ctx, s.rebind(`SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?) ORDER BY created_at, id`),
+		workflowID, RunQueued, RunRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) fillRun(r *Run) {
 	if r.ID == "" {
 		r.ID = NewID()
 	}
@@ -61,26 +137,23 @@ func (s *Store) CreateRun(ctx context.Context, r *Run, steps []StepInit) error {
 	if r.Concurrency == "" {
 		r.Concurrency = "allow"
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
-			r.ID, r.WorkflowID, r.WorkflowName, r.WorkflowVersion, r.Status, r.TriggerKind, r.TriggerJSON, r.RootRunID,
-			nullStr(r.ParentRunID), r.Depth, nullStr(r.RerunOf), nullStr(r.LibraryHash), nullStr(r.ClaimedBy),
-			tsPtr(r.ClaimedAt), tsPtr(r.HeartbeatAt), tsPtr(r.StartedAt), tsPtr(r.FinishedAt), tsPtr(r.CancelRequestedAt),
-			r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor); err != nil {
+}
+
+func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, r *Run, steps []StepInit) error {
+	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+		r.ID, r.WorkflowID, r.WorkflowName, r.WorkflowVersion, r.Status, r.TriggerKind, r.TriggerJSON, r.RootRunID,
+		nullStr(r.ParentRunID), r.Depth, nullStr(r.RerunOf), nullStr(r.LibraryHash), nullStr(r.ClaimedBy),
+		tsPtr(r.ClaimedAt), tsPtr(r.HeartbeatAt), tsPtr(r.StartedAt), tsPtr(r.FinishedAt), tsPtr(r.CancelRequestedAt),
+		r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor); err != nil {
+		return err
+	}
+	for _, st := range steps {
+		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO step_runs (run_id, step_id, idx, kind, status) VALUES (?,?,?,?,?)`),
+			r.ID, st.StepID, st.Idx, st.Kind, StepPending); err != nil {
 			return err
 		}
-		for _, st := range steps {
-			if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO step_runs (run_id, step_id, idx, kind, status) VALUES (?,?,?,?,?)`),
-				r.ID, st.StepID, st.Idx, st.Kind, StepPending); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if isUniqueViolation(err) {
-		return ErrConflict
 	}
-	return err
+	return nil
 }
 
 // GetRun fetches a run by id.
@@ -146,8 +219,10 @@ func (s *Store) ActiveRuns(ctx context.Context, workflowID string) ([]*Run, erro
 }
 
 // ClaimRun atomically takes the oldest claimable queued run. A run whose
-// policy is "queue" waits while another run of the same workflow is
-// running. It returns ErrNotFound when nothing is claimable.
+// policy is "queue" or "replace" waits while another run of the same
+// workflow is running: for replace, that is the run it cancelled, whose
+// containers are still being killed. It returns ErrNotFound when nothing
+// is claimable.
 func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 	now := ts(Now())
 	var id string
@@ -155,7 +230,7 @@ func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 		WHERE id = (
 			SELECT r.id FROM runs r
 			WHERE r.status = ?
-			  AND NOT (r.concurrency = 'queue' AND EXISTS (
+			  AND NOT (r.concurrency IN ('queue', 'replace') AND EXISTS (
 			      SELECT 1 FROM runs o WHERE o.workflow_id = r.workflow_id AND o.status = ?))
 			ORDER BY r.created_at, r.id LIMIT 1)
 		AND status = ?
@@ -196,37 +271,38 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 // RequestCancel marks a run for cancellation. Queued runs are cancelled
 // immediately; running runs are flagged for the engine to stop.
 func (s *Store) RequestCancel(ctx context.Context, runID string) (*Run, error) {
-	now := ts(Now())
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, s.rebind(`UPDATE runs SET status = ?, finished_at = ?, cancel_requested_at = ? WHERE id = ? AND status = ?`),
-			RunCancelled, now, now, runID, RunQueued)
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 1 {
-			_, err := tx.ExecContext(ctx, s.rebind(`UPDATE step_runs SET status = ?, finished_at = ? WHERE run_id = ? AND status = ?`),
-				StepCancelled, now, runID, StepPending)
-			return err
-		}
-		res, err = tx.ExecContext(ctx, s.rebind(`UPDATE runs SET cancel_requested_at = ? WHERE id = ? AND status = ? AND cancel_requested_at IS NULL`), now, runID, RunRunning)
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			var exists int
-			if err := tx.QueryRowContext(ctx, s.rebind(`SELECT COUNT(*) FROM runs WHERE id = ?`), runID).Scan(&exists); err != nil {
-				return err
-			}
-			if exists == 0 {
-				return ErrNotFound
-			}
-		}
-		return nil
-	})
-	if err != nil {
+	if err := s.tx(ctx, func(tx *sql.Tx) error { return s.requestCancelTx(ctx, tx, runID) }); err != nil {
 		return nil, err
 	}
 	return s.GetRun(ctx, runID)
+}
+
+func (s *Store) requestCancelTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	now := ts(Now())
+	res, err := tx.ExecContext(ctx, s.rebind(`UPDATE runs SET status = ?, finished_at = ?, cancel_requested_at = ? WHERE id = ? AND status = ?`),
+		RunCancelled, now, now, runID, RunQueued)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		_, err := tx.ExecContext(ctx, s.rebind(`UPDATE step_runs SET status = ?, finished_at = ?, error = ? WHERE run_id = ? AND status = ?`),
+			StepCancelled, now, "run cancelled", runID, StepPending)
+		return err
+	}
+	res, err = tx.ExecContext(ctx, s.rebind(`UPDATE runs SET cancel_requested_at = ? WHERE id = ? AND status = ? AND cancel_requested_at IS NULL`), now, runID, RunRunning)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		var exists int
+		if err := tx.QueryRowContext(ctx, s.rebind(`SELECT COUNT(*) FROM runs WHERE id = ?`), runID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return ErrNotFound
+		}
+	}
+	return nil
 }
 
 // CountRunsByStatus returns counts keyed by status.

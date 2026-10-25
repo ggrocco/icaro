@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"icaro/internal/crypto"
@@ -301,6 +302,44 @@ func TestConcurrencyPoliciesAndIdempotency(t *testing.T) {
 	}
 	if _, err := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "missing"}); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
+	}
+}
+
+// forbid and replace decide and insert atomically: concurrent enqueues
+// (a webhook burst, a cron tick racing a manual run) never leave two
+// active runs of a forbid or replace workflow.
+func TestConcurrentEnqueuesHonorPolicy(t *testing.T) {
+	for _, policy := range []string{"forbid", "replace"} {
+		t.Run(policy, func(t *testing.T) {
+			svc, _ := newService(t)
+			ctx := context.Background()
+			mustApply(t, svc, policyWorkflow(policy))
+			const n = 24
+			var wg sync.WaitGroup
+			errs := make(chan error, n)
+			for range n {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if _, err := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "pol-" + policy}); err != nil {
+						errs <- err
+					}
+				}()
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				t.Fatal(err)
+			}
+			w, _ := svc.store.GetWorkflow(ctx, "pol-"+policy)
+			active, err := svc.store.ActiveRuns(ctx, w.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(active) != 1 {
+				t.Fatalf("%d active runs, want 1", len(active))
+			}
+		})
 	}
 }
 

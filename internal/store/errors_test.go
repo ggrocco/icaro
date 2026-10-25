@@ -192,6 +192,10 @@ func TestClosedDatabase(t *testing.T) {
 			return err
 		},
 		"CreateRun": func() error { return s.CreateRun(ctx, &Run{}, nil) },
+		"EnqueueRun": func() error {
+			_, err := s.EnqueueRun(ctx, &Run{Concurrency: "forbid"}, nil)
+			return err
+		},
 		"GetRun": func() error {
 			_, err := s.GetRun(ctx, "r")
 			return err
