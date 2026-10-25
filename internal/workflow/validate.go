@@ -470,17 +470,60 @@ func (v *validator) checkExpressions() {
 				v.checkWhenRefs(base+"/when", e.Refs(), i)
 			}
 		}
+		if st.Repository != nil {
+			v.checkRepoField(base+"/repository/ref", st.Repository.Ref, i)
+			v.checkRepoField(base+"/repository/revision", st.Repository.Revision, i)
+		}
 	}
+}
+
+// checkRepoField validates a repository ref or revision: a template like
+// any other field, minus secrets (the ref is stored with the run and
+// shown in errors), and never a git option once rendered.
+func (v *validator) checkRepoField(path, s string, step int) {
+	if !expr.Contains(s) {
+		if err := CheckRepoValue(s); err != nil {
+			v.add(path, err.Error())
+		}
+		return
+	}
+	t, err := expr.ParseTemplate(s)
+	if err != nil {
+		v.addExpr(path, "invalid expression: ", err)
+		return
+	}
+	v.checkRefsNoSecrets(path, t.Refs(), step, "repository cannot read secrets", "the ref is stored with the run and shown in errors; give the daemon's git access to the host instead")
+}
+
+// CheckRepoValue rejects a (rendered) repository ref or revision that git
+// would read as an option, or that carries whitespace or control
+// characters. Empty is the caller's concern.
+func CheckRepoValue(s string) error {
+	if strings.HasPrefix(s, "-") {
+		return fmt.Errorf("%q starts with '-', which git would read as an option", s)
+	}
+	for _, r := range s {
+		if r <= ' ' || r == 0x7f {
+			return fmt.Errorf("%q contains whitespace or a control character", s)
+		}
+	}
+	return nil
 }
 
 // checkWhenRefs refuses secrets in a condition: whether a step ran is
 // visible in the run, so a `when` on a secret's value would leak it one
 // bit per run. Secrets are not even exposed to `when` at run time.
 func (v *validator) checkWhenRefs(path string, refs []expr.Ref, step int) {
+	v.checkRefsNoSecrets(path, refs, step, "when cannot read secrets", "a condition on a secret leaks it through the step's status; branch on env, trigger or step outputs instead")
+}
+
+// checkRefsNoSecrets is checkRefs with the step roots, reporting msg for
+// every secrets reference.
+func (v *validator) checkRefsNoSecrets(path string, refs []expr.Ref, step int, msg, hint string) {
 	rest := refs[:0:0]
 	for _, r := range refs {
 		if len(r.Path) > 0 && r.Path[0] == "secrets" {
-			v.add(path, "when cannot read secrets", "a condition on a secret leaks it through the step's status; branch on env, trigger or step outputs instead")
+			v.add(path, msg, hint)
 			continue
 		}
 		rest = append(rest, r)
@@ -667,6 +710,10 @@ func TriggerFields(s *Spec) (required, optional []string) {
 		}
 		if st.Input != nil {
 			expr.WalkTemplates(map[string]any(st.Input), func(_, s string) { tmpl(s) })
+		}
+		if st.Repository != nil {
+			tmpl(st.Repository.Ref)
+			tmpl(st.Repository.Revision)
 		}
 		if st.When != "" {
 			if e, err := expr.ParseCondition(st.When); err == nil {

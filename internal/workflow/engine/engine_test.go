@@ -15,6 +15,7 @@ import (
 
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
+	"icaro/internal/expr"
 	"icaro/internal/session"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
@@ -888,6 +889,66 @@ steps:
 	}
 	if !seen["run:running"] || !seen["step:running"] || !seen["step:succeeded"] {
 		t.Fatalf("events: %v", seen)
+	}
+}
+
+// repository ref and revision are rendered before git sees them, and a
+// rendered value that git would read as an option, or that carries a
+// secret, fails the step without reaching git.
+func TestRepositoryIsRendered(t *testing.T) {
+	const yaml = `
+version: 1
+name: repo-tmpl
+steps:
+  - id: co
+    image: img
+    repository: { ref: "https://example.com/${{ trigger.repo }}.git", revision: "${{ trigger.sha }}" }
+`
+	cases := []struct {
+		name    string
+		trigger map[string]any
+		want    string // step error; "" = success
+	}{
+		{"rendered", map[string]any{"repo": "acme/app", "sha": "abc123"}, ""},
+		{"option revision", map[string]any{"repo": "acme/app", "sha": "--output=/tmp/x"}, "git would read as an option"},
+		{"secret in ref", map[string]any{"repo": "s3cr3t-value", "sha": "main"}, "contains a secret value"},
+		{"missing field", map[string]any{"repo": "acme/app"}, "trigger.sha is not defined"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			ss := &stubSessions{dir: t.TempDir()}
+			f.deps.Sessions = ss
+			f.deps.Secrets = fakeSecrets{"tok": "s3cr3t-value"}
+			run := f.enqueue(yaml, c.trigger)
+			_, stop := f.start()
+			defer stop()
+			if c.want == "" {
+				f.wait(run.ID, store.RunSucceeded)
+				if len(ss.repos) != 1 || ss.repos[0] != "https://example.com/acme/app.git@abc123" {
+					t.Fatalf("repos %v", ss.repos)
+				}
+				return
+			}
+			f.wait(run.ID, store.RunFailed)
+			if r := f.step(run.ID, "co"); r.Status != store.StepFailed || !strings.Contains(r.Error, c.want) {
+				t.Fatalf("step %+v, want %q", r, c.want)
+			}
+			if len(ss.repos) != 0 {
+				t.Fatalf("git was reached: %v", ss.repos)
+			}
+		})
+	}
+	// A literal ref is checked the same way at run time.
+	rx := &runExec{}
+	if _, _, err := rx.renderRepository(&workflow.RepositoryRef{Ref: "  "}, expr.Env{}); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty ref: %v", err)
+	}
+	if _, _, err := rx.renderRepository(&workflow.RepositoryRef{Ref: "-x"}, expr.Env{}); err == nil {
+		t.Fatal("option ref accepted")
+	}
+	if _, _, err := rx.renderRepository(&workflow.RepositoryRef{Ref: "r", Revision: "${{ x }}"}, expr.Env{}); err == nil || !strings.Contains(err.Error(), "repository.revision") {
+		t.Fatalf("revision render: %v", err)
 	}
 }
 

@@ -382,6 +382,46 @@ func TestCapture(t *testing.T) {
 	}
 }
 
+// repository ref and revision are templates like any other field, minus
+// secrets, and a literal git option is refused.
+func TestRepositoryFields(t *testing.T) {
+	src := `
+version: 1
+name: repo-rules
+steps:
+  - id: aa
+    image: x
+    outputs: { sha: json:sha }
+  - id: bb
+    image: x
+    repository: { ref: "${{ trigger.repo }}", revision: "${{ steps.aa.outputs.sha }}" }
+  - id: cc
+    image: x
+    needs: [aa]
+    repository: { ref: "https://h/${{ secrets.tok }}", revision: "${{ steps.aa.outputs.sah }}" }
+  - id: dd
+    image: x
+    repository: { ref: "--upload-pack=touch /tmp/x", revision: "a b" }
+  - id: ee
+    image: x
+    repository: { ref: "${{ tigger.repo }}", revision: "${{ lower( }}" }
+`
+	s, issues := parseT(t, src, Options{})
+	mustHave(t, issues, "/steps/1/repository/revision", "not an ancestor of step bb", `add "aa" to needs`)
+	mustHave(t, issues, "/steps/2/repository/ref", "repository cannot read secrets", "git access")
+	mustHave(t, issues, "/steps/2/repository/revision", `declares no output "sah"`, "")
+	mustHave(t, issues, "/steps/3/repository/ref", "git would read as an option", "")
+	mustHave(t, issues, "/steps/3/repository/revision", "whitespace", "")
+	mustHave(t, issues, "/steps/4/repository/ref", `unknown name "tigger"`, "")
+	mustHave(t, issues, "/steps/4/repository/revision", "invalid expression", "")
+	if req, _ := TriggerFields(s); !reflect.DeepEqual(req, []string{"repo"}) {
+		t.Fatalf("required trigger fields %v", req)
+	}
+	if err := CheckRepoValue("https://github.com/acme/app.git"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Integration credentials (host-bound, or named after an installed
 // integration) are not interpolable, and no condition may read a secret.
 func TestSecretRestrictions(t *testing.T) {

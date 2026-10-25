@@ -63,7 +63,7 @@ Both forms take the same scheduling fields:
 | `when` | A boolean expression; false records the step as `skipped`. It is evaluated once, after every need is final. |
 | `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. |
 | `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). |
-| `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. |
+| `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. Both fields may use `${{ }}` (for example `https://github.com/${{ trigger.repo }}.git`) with the same root and `needs` rules as other fields, but not `secrets`. A rendered value that is empty (ref), starts with `-`, contains whitespace or carries a secret fails the step before git runs. |
 | `env` | Image steps only. Merged over the workflow `env`. |
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
 | `outputs` | Image steps only. A map from name to capture source; see below. |
