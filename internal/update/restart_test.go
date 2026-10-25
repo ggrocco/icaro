@@ -5,14 +5,17 @@ package update
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"icaro/internal/autostart"
 	"icaro/internal/daemon"
 	"icaro/internal/paths"
 	"icaro/internal/platform"
@@ -20,7 +23,7 @@ import (
 
 func TestRestartDaemonWithoutDaemon(t *testing.T) {
 	l := paths.New(filepath.Join(t.TempDir(), "root"))
-	restarted, err := RestartDaemon(context.Background(), l, "/nonexistent", nil)
+	restarted, err := RestartDaemon(context.Background(), l, "/nonexistent", nil, nil)
 	if err != nil || restarted {
 		t.Fatalf("restarted=%v err=%v", restarted, err)
 	}
@@ -78,7 +81,7 @@ func TestRestartDaemonStopsAndStarts(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	exe := script(t, `echo "$@" > `+argsFile)
 
-	restarted, err := RestartDaemon(ctx, l, exe, []string{"--home", l.Root})
+	restarted, err := RestartDaemon(ctx, l, exe, []string{"--home", l.Root}, nil)
 	if err != nil || !restarted {
 		t.Fatalf("restarted=%v err=%v", restarted, err)
 	}
@@ -94,7 +97,7 @@ func TestRestartDaemonStopsAndStarts(t *testing.T) {
 func TestRestartDaemonStartFailure(t *testing.T) {
 	l := paths.New(filepath.Join(t.TempDir(), "r"))
 	startDaemon(t, l)
-	restarted, err := RestartDaemon(context.Background(), l, script(t, "echo cannot start; exit 1"), nil)
+	restarted, err := RestartDaemon(context.Background(), l, script(t, "echo cannot start; exit 1"), nil, nil)
 	if !restarted || err == nil || !strings.Contains(err.Error(), "cannot start") {
 		t.Fatalf("restarted=%v err=%v", restarted, err)
 	}
@@ -125,7 +128,7 @@ func TestRestartDaemonRefusals(t *testing.T) {
 	t.Run("unknown pid", func(t *testing.T) {
 		l := paths.New(filepath.Join(t.TempDir(), "r"))
 		holdLock(t, l, 0)
-		if restarted, err := RestartDaemon(ctx, l, "/nonexistent", nil); !restarted || err == nil || !strings.Contains(err.Error(), "pid is unknown") {
+		if restarted, err := RestartDaemon(ctx, l, "/nonexistent", nil, nil); !restarted || err == nil || !strings.Contains(err.Error(), "pid is unknown") {
 			t.Fatalf("restarted=%v err=%v", restarted, err)
 		}
 	})
@@ -134,7 +137,7 @@ func TestRestartDaemonRefusals(t *testing.T) {
 		l := paths.New(filepath.Join(t.TempDir(), "r"))
 		// A pid no process can have.
 		holdLock(t, l, 1<<22+1)
-		if _, err := RestartDaemon(ctx, l, "/nonexistent", nil); err == nil || !strings.Contains(err.Error(), "stop daemon") {
+		if _, err := RestartDaemon(ctx, l, "/nonexistent", nil, nil); err == nil || !strings.Contains(err.Error(), "stop daemon") {
 			t.Fatalf("err=%v", err)
 		}
 	})
@@ -151,7 +154,7 @@ func TestRestartDaemonRefusals(t *testing.T) {
 		holdLock(t, l, sleeper.Process.Pid)
 		cctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 		defer cancel()
-		if _, err := RestartDaemon(cctx, l, "/nonexistent", nil); err != context.DeadlineExceeded {
+		if _, err := RestartDaemon(cctx, l, "/nonexistent", nil, nil); err != context.DeadlineExceeded {
 			t.Fatalf("err=%v", err)
 		}
 	})
@@ -165,8 +168,67 @@ func TestRestartDaemonRefusals(t *testing.T) {
 		if err := os.WriteFile(filepath.Dir(l.Lock()), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := RestartDaemon(ctx, l, "/nonexistent", nil); err == nil {
+		if _, err := RestartDaemon(ctx, l, "/nonexistent", nil, nil); err == nil {
 			t.Fatal("an unprobeable run dir must fail")
 		}
 	})
+}
+
+// fakeSupervisor stands in for the login service.
+type fakeSupervisor struct {
+	status     autostart.Status
+	statusErr  error
+	restartErr error
+	restarts   int
+}
+
+func (f *fakeSupervisor) Status(context.Context) (autostart.Status, error) {
+	return f.status, f.statusErr
+}
+
+func (f *fakeSupervisor) Restart(context.Context) error {
+	f.restarts++
+	return f.restartErr
+}
+
+// TestRestartDaemonThroughLoginService is the regression test for update
+// leaving a service-managed daemon unsupervised: SIGTERM makes it exit 0,
+// which the units do not restart, and the replacement ran outside them.
+func TestRestartDaemonThroughLoginService(t *testing.T) {
+	ctx := context.Background()
+	l := paths.New(filepath.Join(t.TempDir(), "r"))
+	cmd := startDaemon(t, l)
+	sv := &fakeSupervisor{status: autostart.Status{Installed: true, Active: true}}
+	restarted, err := RestartDaemon(ctx, l, "/nonexistent", nil, sv)
+	if err != nil || !restarted || sv.restarts != 1 {
+		t.Fatalf("restarted=%v err=%v restarts=%d", restarted, err, sv.restarts)
+	}
+	// The service manager does the stopping; RestartDaemon signals nothing.
+	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("the daemon was signalled directly: %v", err)
+	}
+
+	sv.restartErr = errors.New("unit failed")
+	if _, err := RestartDaemon(ctx, l, "/nonexistent", nil, sv); err == nil || !strings.Contains(err.Error(), "unit failed") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRestartDaemonInactiveServiceFallsBack(t *testing.T) {
+	for name, sv := range map[string]*fakeSupervisor{
+		"installed, inactive": {status: autostart.Status{Installed: true}},
+		"status fails":        {statusErr: errors.New("no systemctl")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := paths.New(filepath.Join(t.TempDir(), "r"))
+			cmd := startDaemon(t, l)
+			restarted, err := RestartDaemon(context.Background(), l, script(t, "exit 0"), nil, sv)
+			if err != nil || !restarted || sv.restarts != 0 {
+				t.Fatalf("restarted=%v err=%v restarts=%d", restarted, err, sv.restarts)
+			}
+			if err := cmd.Wait(); err == nil || !strings.Contains(err.Error(), "terminated") {
+				t.Fatalf("the daemon must be stopped by SIGTERM: %v", err)
+			}
+		})
+	}
 }

@@ -22,7 +22,7 @@ func init() { register(newServeCmd) }
 
 func newServeCmd(opts *rootOpts) *cobra.Command {
 	var logLevel, listen string
-	var background, pprofOn bool
+	var background, pprofOn, allowRemote bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the daemon (one per user; Unix socket, optional TCP with --listen)",
@@ -33,6 +33,12 @@ func newServeCmd(opts *rootOpts) *cobra.Command {
 			}
 			if listen != "" {
 				cfg.Daemon.Listen = listen
+			}
+			if allowRemote {
+				cfg.Daemon.AllowRemote = true
+			}
+			if err := cfg.Validate(); err != nil {
+				return err
 			}
 			if pprofOn {
 				cfg.Daemon.Pprof = true
@@ -53,6 +59,7 @@ func newServeCmd(opts *rootOpts) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "", "also listen on TCP (e.g. 127.0.0.1:8787); every TCP request needs an API token")
+	cmd.Flags().BoolVar(&allowRemote, "allow-remote", false, "let --listen bind a non-loopback address (plain HTTP; prefer a TLS reverse proxy to 127.0.0.1)")
 	cmd.Flags().BoolVar(&background, "background", false, "start the daemon detached and return once it answers")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "debug | info | warn | error")
 	cmd.Flags().BoolVar(&pprofOn, "pprof", false, "serve /debug/pprof on the Unix socket only (also daemon.pprof)")
@@ -95,6 +102,9 @@ func runDaemon(ctx context.Context, cfg *config.Config, log *slog.Logger) error 
 		servers = append(servers, srv)
 		go serve(srv, tcpLn, errCh)
 		log.Info("daemon listening on TCP (token required)", "addr", tcpLn.Addr().String())
+		if cfg.Daemon.RemoteListen() {
+			log.Warn("daemon.listen is not loopback: plain HTTP is reachable from the network and tokens cross it in clear; prefer a TLS-terminating reverse proxy in front of 127.0.0.1", "addr", tcpLn.Addr().String())
+		}
 	}
 
 	go func() { errCh <- a.Run(runCtx) }()

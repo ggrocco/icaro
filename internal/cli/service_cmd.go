@@ -8,10 +8,23 @@ import (
 	"github.com/spf13/cobra"
 
 	"icaro/internal/autostart"
+	"icaro/internal/config"
 	"icaro/internal/update"
 )
 
 func init() { register(newServiceCmd) }
+
+// serviceManager describes the login service for this home.
+func serviceManager(opts *rootOpts, cfg *config.Config, exe string) (*autostart.Manager, error) {
+	userDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	return &autostart.Manager{
+		GOOS: runtime.GOOS, UserDir: userDir, UID: os.Getuid(), Exe: exe, Args: opts.daemonArgs(),
+		Home: cfg.Home, LogFile: cfg.Layout().DaemonLog(), Run: autostart.ExecRunner,
+	}, nil
+}
 
 func newServiceCmd(opts *rootOpts) *cobra.Command {
 	cmd := &cobra.Command{
@@ -27,14 +40,7 @@ func newServiceCmd(opts *rootOpts) *cobra.Command {
 		if err != nil {
 			return nil, err
 		}
-		userDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		return &autostart.Manager{
-			GOOS: runtime.GOOS, UserDir: userDir, UID: os.Getuid(), Exe: exe, Args: opts.daemonArgs(),
-			Home: cfg.Home, LogFile: cfg.Layout().DaemonLog(), Run: autostart.ExecRunner,
-		}, nil
+		return serviceManager(opts, cfg, exe)
 	}
 	var dryRun bool
 	install := &cobra.Command{

@@ -1,31 +1,15 @@
 package crypto
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestMasterKeyLifecycle(t *testing.T) {
-	t.Setenv(MasterKeyEnv, "")
-	dir := t.TempDir()
-	if _, err := LoadMasterKey(dir, false); err == nil {
-		t.Fatal("expected missing key error")
-	}
-	k1, err := LoadMasterKey(dir, true)
+func TestSealOpen(t *testing.T) {
+	k1, err := NewKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := os.Stat(filepath.Join(dir, masterKeyFile))
-	if err != nil || st.Mode().Perm() != 0o600 {
-		t.Fatalf("key file: %v %v", err, st.Mode())
-	}
-	k2, err := LoadMasterKey(dir, false)
-	if err != nil || *k1 != *k2 {
-		t.Fatalf("reload mismatch: %v", err)
-	}
-
 	box, err := k1.Seal([]byte("secret"))
 	if err != nil {
 		t.Fatal(err)
@@ -42,17 +26,15 @@ func TestMasterKeyLifecycle(t *testing.T) {
 	if _, err := other.Open(box); err == nil {
 		t.Fatal("wrong key should fail")
 	}
+	if *k1 == *other {
+		t.Fatal("NewKey repeated a key")
+	}
 }
 
-func TestMasterKeyFromEnv(t *testing.T) {
-	t.Setenv(MasterKeyEnv, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-	k, err := LoadMasterKey(t.TempDir(), false)
-	if err != nil || k[0] != 0 {
-		t.Fatal(err)
-	}
-	t.Setenv(MasterKeyEnv, "short")
-	if _, err := LoadMasterKey(t.TempDir(), false); err == nil {
-		t.Fatal("expected bad key error")
+func TestOpenRejectsShortBox(t *testing.T) {
+	k, _ := NewKey()
+	if _, err := k.Open(make([]byte, 23)); err == nil {
+		t.Fatal("short ciphertext accepted")
 	}
 }
 

@@ -136,6 +136,35 @@ func TestValidateRanges(t *testing.T) {
 	}
 }
 
+// TestValidateRemoteListen is the regression test for daemon.listen
+// accepting any address with plain HTTP (MVP cut 2).
+func TestValidateRemoteListen(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, addr := range []string{"0.0.0.0:8787", ":8787", "10.0.0.1:80"} {
+		cfg.Daemon.Listen, cfg.Daemon.AllowRemote = addr, false
+		if !cfg.Daemon.RemoteListen() {
+			t.Errorf("%s: not remote", addr)
+		}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "daemon.allow_remote") {
+			t.Errorf("%s accepted without allow_remote: %v", addr, err)
+		}
+		cfg.Daemon.AllowRemote = true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s with allow_remote: %v", addr, err)
+		}
+	}
+	for _, addr := range []string{"", "127.0.0.1:8787", "localhost:0"} {
+		cfg.Daemon.Listen, cfg.Daemon.AllowRemote = addr, false
+		if cfg.Daemon.RemoteListen() || cfg.Validate() != nil {
+			t.Errorf("%s: refused: %v", addr, cfg.Validate())
+		}
+	}
+}
+
 func TestIsLoopback(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"127.0.0.1:8787": true,

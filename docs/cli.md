@@ -641,6 +641,7 @@ icaro serve [flags]
 ```
 
 ```text
+      --allow-remote       let --listen bind a non-loopback address (plain HTTP; prefer a TLS reverse proxy to 127.0.0.1)
       --background         start the daemon detached and return once it answers
       --listen string      also listen on TCP (e.g. 127.0.0.1:8787); every TCP request needs an API token
       --log-level string   debug | info | warn | error (default "info")
@@ -862,10 +863,14 @@ icaro token list
 
 ## `icaro token revoke`
 
-Revoke a token
+Revoke a token and end the browser sessions signed in with it
 
 ```text
-icaro token revoke NAME
+icaro token revoke NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro ui`
@@ -903,7 +908,8 @@ icaro update [flags]
 
 Parses the Claude Code transcripts in every profile home (and, with
 --host-claude, your own ~/.claude, read-only) into per-day, per-model token
-counts. Each row names its source and confidence. Costs come from a list-price
+counts. Each row names its source and confidence; rows whose transcript is
+gone come from saved snapshots (confidence "snapshot"). Costs come from a list-price
 table and are always estimates; unpriced models show no cost. Alerts fire when
 a day's estimated spend reaches usage.daily_limit_usd, in usage.timezone.
 
@@ -953,7 +959,11 @@ icaro workflow apply FILE
 Delete a workflow (runs are kept)
 
 ```text
-icaro workflow delete NAME
+icaro workflow delete NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro workflow disable`

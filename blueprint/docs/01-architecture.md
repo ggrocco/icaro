@@ -66,7 +66,7 @@ schemas/                      # versioned JSON Schema
 
 ## 3. Transport between UI, CLI and daemon
 
-- **Daemon API:** HTTP over a Unix socket on macOS/Linux by default; TCP only with an explicit `--listen`, a mandatory token, and loopback as the default.
+- **Daemon API:** HTTP over a Unix socket on macOS/Linux by default; TCP only with an explicit `--listen`, a mandatory token, and loopback as the default (a non-loopback address also needs `--allow-remote`; TLS comes from a reverse proxy in front of a loopback listener).
 - **Wails UI:** minimal bindings for lifecycle and window opening; operational data uses the same HTTP contract as the CLI to avoid forking.
 - **Events:** SSE for logs/status; one stream per run. Do not use WebSocket before proving it is needed.
 - **One service layer.** The CLI, HTTP API, MCP server (§10), and UIs are thin clients over the same daemon service layer; business rules live only there.

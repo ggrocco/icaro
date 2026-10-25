@@ -37,7 +37,12 @@ never touched; a running daemon is restarted and re-attaches its sessions.`,
 				if noRestart {
 					return nil
 				}
-				restarted, err := update.RestartDaemon(cmd.Context(), cfg.Layout(), exe, opts.daemonArgs())
+				// A daemon the login service runs is restarted through it.
+				var sv update.Supervisor
+				if m, err := serviceManager(opts, cfg, exe); err == nil {
+					sv = m
+				}
+				restarted, err := update.RestartDaemon(cmd.Context(), cfg.Layout(), exe, opts.daemonArgs(), sv)
 				if err != nil {
 					return fmt.Errorf("binary updated, but restarting the daemon failed: %w", err)
 				}

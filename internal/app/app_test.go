@@ -19,6 +19,7 @@ import (
 	"icaro/internal/config"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
+	"icaro/internal/secrets"
 	"icaro/internal/session"
 	"icaro/internal/store"
 )
@@ -368,15 +369,21 @@ func TestBaseChecks(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	if got := checkNames(BaseChecks(cfg, nil, nil)); len(got) != 2 {
+	if got := checkNames(BaseChecks(cfg, nil, nil, nil)); len(got) != 2 {
 		t.Errorf("without store and engine: %v", got)
 	}
 
-	cs := BaseChecks(cfg, st, pinger{errors.New("refused")})
+	// A Docker client that could not be built is an error, not a panic.
+	cs := BaseChecks(cfg, nil, nil, errors.New("unable to parse docker host"))
+	if r := run(t, findCheck(t, cs, "docker")); r.Severity != doctor.Error || !strings.Contains(r.Detail, "unable to parse docker host") {
+		t.Errorf("no client: %+v", r)
+	}
+
+	cs = BaseChecks(cfg, st, pinger{errors.New("refused")}, nil)
 	if r := run(t, findCheck(t, cs, "docker")); r.Severity != doctor.Error || !strings.Contains(r.Detail, "refused") {
 		t.Errorf("docker down: %+v", r)
 	}
-	cs = BaseChecks(cfg, st, pinger{})
+	cs = BaseChecks(cfg, st, pinger{}, nil)
 	if r := run(t, findCheck(t, cs, "docker")); r.Severity != doctor.OK {
 		t.Errorf("docker up: %+v", r)
 	}
@@ -413,6 +420,21 @@ func TestSessionChecks(t *testing.T) {
 	key := findCheck(t, SessionChecks(a.Cfg, nil, nil), "master key")
 	if r := run(t, key); r.Severity != doctor.OK || !strings.Contains(r.Detail, "stored in") {
 		t.Errorf("master key: %+v", r)
+	}
+	// A Phase 0 plaintext key left on disk is an error that names the
+	// migration, even while ICARO_MASTER_KEY is what the daemon uses.
+	legacy := secrets.LegacyKeyPath(a.Cfg.Layout().Secrets())
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(base64.StdEncoding.EncodeToString(make([]byte, 32))+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, key); r.Severity != doctor.Error || !strings.Contains(r.Detail, legacy) || !strings.Contains(r.Detail, "icaro init") {
+		t.Errorf("plaintext key on disk: %+v", r)
+	}
+	if err := os.Remove(legacy); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv(crypto.MasterKeyEnv, "short")
 	if r := run(t, key); r.Severity != doctor.Error {

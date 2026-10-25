@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"icaro/internal/api"
@@ -10,6 +11,7 @@ import (
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
 	"icaro/internal/creds"
+	"icaro/internal/crypto"
 	"icaro/internal/doctor"
 	"icaro/internal/memory"
 	"icaro/internal/secrets"
@@ -58,12 +60,21 @@ func MemorySocketCheck(cfg *config.Config) doctor.Check {
 // the memory socket path, orphaned sessions and pinned images.
 func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []doctor.Check {
 	checks := []doctor.Check{doctor.Func("master key", func(ctx context.Context) doctor.Result {
-		_, info, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: cfg.Layout().Secrets(), Keyring: secrets.DefaultKeyring(nil)})
-		switch {
-		case err != nil:
+		dir := cfg.Layout().Secrets()
+		_, info, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: dir, Keyring: secrets.DefaultKeyring(nil)})
+		if err != nil {
 			return doctor.Result{Severity: doctor.Error, Detail: err.Error()}
-		case info.Warning != "":
-			return doctor.Result{Severity: doctor.Warning, Detail: info.Warning}
+		}
+		// Loading moves a plaintext key into a backend when one is
+		// available; one still on disk (no backend, or ICARO_MASTER_KEY
+		// in use) can decrypt every secret. This also covers the only
+		// case LoadMasterKey warns about.
+		if legacy := secrets.LegacyKeyPath(dir); fileExists(legacy) {
+			fix := secrets.LegacyKeyMigration
+			if info.Backend == secrets.BackendEnv {
+				fix = crypto.MasterKeyEnv + " is set, so the file is not used: delete it if it holds the same key, otherwise unset " + crypto.MasterKeyEnv + " and " + fix
+			}
+			return doctor.Result{Severity: doctor.Error, Detail: "a plaintext master key is on disk at " + legacy + "; " + fix}
 		}
 		return doctor.Result{Severity: doctor.OK, Detail: "stored in " + info.Backend}
 	}), MemorySocketCheck(cfg)}
@@ -133,4 +144,9 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 		}))
 	}
 	return checks
+}
+
+func fileExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
 }

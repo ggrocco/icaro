@@ -22,7 +22,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 
 **Integrations.** Inbound webhooks are verified (signatures, replay protection, size caps, rate limits) and deduplicated, and every delivery is recorded. Outbound actions cannot reach loopback, private or link-local addresses unless you opt in per integration, and they never follow redirects. Installing a pack shows its complete permission summary first, which is complete because manifests run no code.
 
-**Local access.** The daemon listens on a `0600` Unix socket in a `0700` directory. TCP, whether `--listen` or the `icaro ui` loopback listener, requires a hashed, scoped API token or a browser session. Cookie-authenticated requests that change something also need a CSRF header. See [Web UI](ui.md).
+**Local access.** The daemon listens on a `0600` Unix socket in a `0700` directory. TCP, whether `--listen` or the `icaro ui` loopback listener, requires a hashed, scoped API token or a browser session. Both are plain HTTP and loopback-only by default: a non-loopback `--listen` needs `--allow-remote` (`daemon.allow_remote`); put a TLS-terminating reverse proxy in front of a loopback listener instead. Cookie-authenticated requests that change something also need a CSRF header. See [Web UI](ui.md).
 
 **Agents over MCP.** No tool returns a secret value or deletes anything, and memory scope comes from the session, not from the agent's arguments.
 
@@ -41,7 +41,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 - permissions on `~/.icaro`;
 - that Docker is reachable;
 - pending migrations;
-- the master-key backend;
+- the master-key backend, and that no plaintext `master.key` from an early release is left in `~/.icaro/secrets` (an error; `icaro init` moves it into the OS key store or a password-protected file);
 - orphaned sessions;
 - that every egress network (`icaro-egress-*`) is internal;
 - pinned image digests;

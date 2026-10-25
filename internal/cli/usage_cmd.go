@@ -22,7 +22,8 @@ func newUsageCmd(opts *rootOpts) *cobra.Command {
 		Short: "Show agent token usage parsed from local logs (costs are estimates)",
 		Long: `Parses the Claude Code transcripts in every profile home (and, with
 --host-claude, your own ~/.claude, read-only) into per-day, per-model token
-counts. Each row names its source and confidence. Costs come from a list-price
+counts. Each row names its source and confidence; rows whose transcript is
+gone come from saved snapshots (confidence "snapshot"). Costs come from a list-price
 table and are always estimates; unpriced models show no cost. Alerts fire when
 a day's estimated spend reaches usage.daily_limit_usd, in usage.timezone.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -36,20 +37,24 @@ a day's estimated spend reaches usage.daily_limit_usd, in usage.timezone.`,
 					roots = append(roots, usage.Root{Label: "host", Dir: filepath.Join(home, ".claude"), Required: true})
 				}
 			}
-			rep, err := usage.BuildReport(cmd.Context(), usage.ReportOptions{
-				Roots: roots, Timezone: cfg.Usage.Timezone, Since: sinceFlag, LimitUSD: cfg.Usage.DailyLimit,
-			})
+			// The database is best effort: it fills in rows whose
+			// transcript is gone and stores this run's snapshots.
+			ropts := usage.ReportOptions{Roots: roots, Timezone: cfg.Usage.Timezone, Since: sinceFlag, LimitUSD: cfg.Usage.DailyLimit}
+			if st, err := openStore(cmd.Context(), cfg); err == nil {
+				defer func() { _ = st.Close() }()
+				if err := st.Migrate(cmd.Context()); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "warning: could not migrate the database:", err)
+				} else {
+					ropts.Store = st
+				}
+			}
+			rep, err := usage.BuildReport(cmd.Context(), ropts)
 			if err != nil {
 				return err
 			}
-			if !noSave {
-				if st, err := openStore(cmd.Context(), cfg); err == nil {
-					if err := st.Migrate(cmd.Context()); err != nil {
-						fmt.Fprintln(cmd.ErrOrStderr(), "warning: could not migrate the database:", err)
-					} else if err := usage.Save(cmd.Context(), st, rep.Records); err != nil {
-						fmt.Fprintln(cmd.ErrOrStderr(), "warning: could not save usage snapshots:", err)
-					}
-					_ = st.Close()
+			if !noSave && ropts.Store != nil {
+				if err := usage.Save(cmd.Context(), ropts.Store, rep.Records); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "warning: could not save usage snapshots:", err)
 				}
 			}
 			out := cmd.OutOrStdout()

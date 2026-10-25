@@ -71,8 +71,18 @@ func TestWorkflowLifecycle(t *testing.T) {
 	wantCLI(t, []string{"workflow", "enable", "hello"}, "hello is active")
 	failCLI(t, "", "workflow", "enable", "nope")
 
-	mustCLI(t, "workflow", "delete", "hello")
-	failCLI(t, "", "workflow", "delete", "hello")
+	// Deleting asks first; declining keeps the workflow.
+	if out, err := runCLI(t, "n\n", "workflow", "delete", "hello"); err != nil || !strings.Contains(out, "Delete workflow hello") {
+		t.Fatalf("declined delete: %v\n%s", err, out)
+	}
+	mustCLI(t, "workflow", "get", "hello")
+	if _, err := runCLI(t, "y\n", "workflow", "delete", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	failCLI(t, "", "workflow", "get", "hello")
+	mustCLI(t, "workflow", "apply", file)
+	mustCLI(t, "workflow", "delete", "hello", "--yes")
+	failCLI(t, "", "workflow", "delete", "hello", "--yes")
 	wantCLI(t, []string{"schema"}, `"$schema"`)
 }
 

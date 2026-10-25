@@ -49,6 +49,7 @@ func (s *Service) UILogin(ctx context.Context, secret string) (string, *UIPrinci
 		return "", nil, ErrUnauthorized
 	}
 	var p UIPrincipal
+	var tokenID string // empty for login codes, which no token backs
 	if code, err := s.store.ConsumeUILoginCode(ctx, crypto.HashToken(secret)); err == nil {
 		p = UIPrincipal{Name: code.Name, Scope: code.Scope}
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -58,13 +59,13 @@ func (s *Service) UILogin(ctx context.Context, secret string) (string, *UIPrinci
 		if err != nil {
 			return "", nil, ErrUnauthorized
 		}
-		p = UIPrincipal{Name: tok.Name, Scope: tok.Scope}
+		p, tokenID = UIPrincipal{Name: tok.Name, Scope: tok.Scope}, tok.ID
 	}
 	cookie, err := randomSecret()
 	if err != nil {
 		return "", nil, err
 	}
-	row := &store.UISessionRow{ID: crypto.HashToken(cookie), Kind: store.UISession, Name: p.Name, Scope: p.Scope, ExpiresAt: store.Now().Add(UISessionTTL)}
+	row := &store.UISessionRow{ID: crypto.HashToken(cookie), Kind: store.UISession, Name: p.Name, Scope: p.Scope, TokenID: tokenID, ExpiresAt: store.Now().Add(UISessionTTL)}
 	if err := s.store.CreateUISession(ctx, row); err != nil {
 		return "", nil, err
 	}

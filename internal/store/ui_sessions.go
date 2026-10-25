@@ -19,6 +19,7 @@ type UISessionRow struct {
 	Kind      string
 	Name      string
 	Scope     string
+	TokenID   string // the API token a session was signed in with; "" for login codes
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
@@ -26,8 +27,8 @@ type UISessionRow struct {
 // CreateUISession inserts a session or login code.
 func (s *Store) CreateUISession(ctx context.Context, r *UISessionRow) error {
 	r.CreatedAt = Now()
-	_, err := s.exec(ctx, `INSERT INTO ui_sessions (id, kind, name, scope, created_at, expires_at) VALUES (?,?,?,?,?,?)`,
-		r.ID, r.Kind, r.Name, r.Scope, ts(r.CreatedAt), ts(r.ExpiresAt))
+	_, err := s.exec(ctx, `INSERT INTO ui_sessions (id, kind, name, scope, token_id, created_at, expires_at) VALUES (?,?,?,?,?,?,?)`,
+		r.ID, r.Kind, r.Name, r.Scope, nullStr(r.TokenID), ts(r.CreatedAt), ts(r.ExpiresAt))
 	return err
 }
 
@@ -35,14 +36,16 @@ func (s *Store) CreateUISession(ctx context.Context, r *UISessionRow) error {
 func (s *Store) GetUISession(ctx context.Context, id, kind string) (*UISessionRow, error) {
 	var r UISessionRow
 	var created, expires string
-	err := s.queryRow(ctx, `SELECT id, kind, name, scope, created_at, expires_at FROM ui_sessions WHERE id = ? AND kind = ? AND expires_at > ?`,
-		id, kind, ts(Now())).Scan(&r.ID, &r.Kind, &r.Name, &r.Scope, &created, &expires)
+	var tokenID sql.NullString
+	err := s.queryRow(ctx, `SELECT id, kind, name, scope, token_id, created_at, expires_at FROM ui_sessions WHERE id = ? AND kind = ? AND expires_at > ?`,
+		id, kind, ts(Now())).Scan(&r.ID, &r.Kind, &r.Name, &r.Scope, &tokenID, &created, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	r.TokenID = tokenID.String
 	r.CreatedAt, r.ExpiresAt = parseTS(created), parseTS(expires)
 	return &r, nil
 }

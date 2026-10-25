@@ -20,7 +20,7 @@ You can also paste an API token (`icaro token create --name me --scope write`) i
 
 ## Sessions and CSRF
 
-Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` session cookie that lasts 12 hours. Every request that changes something, sign-in included, must also carry the `X-Icaro-CSRF: 1` header. A cross-site page cannot send that header without a CORS preflight, and the daemon answers none. The UI is served with a strict Content-Security-Policy (`frame-ancestors 'none'`, same-origin scripts and connections). **Sign out** deletes the session. The token's scope applies: a `read` token can look but not change anything.
+Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` session cookie that lasts 12 hours. Every request that changes something, sign-in included, must also carry the `X-Icaro-CSRF: 1` header. A cross-site page cannot send that header without a CORS preflight, and the daemon answers none. The UI is served with a strict Content-Security-Policy (`frame-ancestors 'none'`, same-origin scripts and connections). **Sign out** deletes the session, and `icaro token revoke` ends every session signed in with that token. The token's scope applies: a `read` token can look but not change anything.
 
 ## What's in it
 

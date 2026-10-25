@@ -66,11 +66,22 @@ func (s *Store) ListTokens(ctx context.Context) ([]*APIToken, error) {
 	return out, rows.Err()
 }
 
-// RevokeToken revokes by name.
+// RevokeToken revokes by name and ends the browser sessions signed in
+// with that token, in one transaction.
 func (s *Store) RevokeToken(ctx context.Context, name string) error {
-	res, err := s.exec(ctx, `UPDATE api_tokens SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL`, ts(Now()), name)
-	if err != nil {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		var id string
+		err := tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM api_tokens WHERE name = ? AND revoked_at IS NULL`), name).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE api_tokens SET revoked_at = ? WHERE id = ?`), ts(Now()), id); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, s.rebind(`DELETE FROM ui_sessions WHERE token_id = ?`), id)
 		return err
-	}
-	return affected(res)
+	})
 }

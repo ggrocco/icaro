@@ -158,6 +158,17 @@ func TestUILogin(t *testing.T) {
 	if _, err := svc.UISession(ctx, cookie); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("a logged-out cookie must not resolve: %v", err)
 	}
+
+	// Revoking the token ends the browser session made from it.
+	if _, err := svc.UISession(ctx, tokCookie); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.RevokeToken(ctx, "ci"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UISession(ctx, tokCookie); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("a session from a revoked token must not resolve: %v", err)
+	}
 }
 
 func TestUILoginStoreFailures(t *testing.T) {

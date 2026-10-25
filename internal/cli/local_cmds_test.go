@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,12 +32,19 @@ func TestTokenInitMigrateAndConfig(t *testing.T) {
 	failCLI(t, "scope must be read, write or admin", "token", "create", "--name", "x", "--scope", "root")
 	failCLI(t, `required flag(s) "name"`, "token", "create")
 	wantCLI(t, []string{"token", "list"}, "NAME", "ci", "read", "-")
-	mustCLI(t, "token", "revoke", "ci")
+	// Revoking asks first; declining keeps the token.
+	if out, err := runCLI(t, "n\n", "token", "revoke", "ci"); err != nil || !strings.Contains(out, "Revoke token ci?") {
+		t.Fatalf("declined revoke: %v\n%s", err, out)
+	}
+	if out := mustCLI(t, "token", "list"); !strings.HasSuffix(strings.TrimSpace(strings.Split(out, "\n")[1]), " -") {
+		t.Fatalf("a declined revoke revoked:\n%s", out)
+	}
+	mustCLI(t, "token", "revoke", "ci", "--yes")
 	out := mustCLI(t, "token", "list")
 	if strings.Count(strings.Split(out, "\n")[1], "-") == 0 || strings.HasSuffix(strings.TrimSpace(strings.Split(out, "\n")[1]), " -") {
 		t.Errorf("revoked token shows no revocation time:\n%s", out)
 	}
-	failCLI(t, `no active token named "ci"`, "token", "revoke", "ci")
+	failCLI(t, `no active token named "ci"`, "token", "revoke", "ci", "--yes")
 
 	// config show redacts the API token.
 	t.Setenv("ICARO_DAEMON__TOKEN", "super-secret")
@@ -263,6 +273,37 @@ func TestUICommandPrintsLink(t *testing.T) {
 	}
 }
 
+// TestServeRemoteListen: a non-loopback --listen needs --allow-remote, and
+// the daemon warns when it is given.
+func TestServeRemoteListen(t *testing.T) {
+	daemonEnv(t)
+	failCLI(t, "not a loopback address", "serve", "--listen", "0.0.0.0:0")
+	t.Setenv("ICARO_DAEMON__LISTEN", ":8787")
+	failCLI(t, "daemon.allow_remote", "config", "show")
+	t.Setenv("ICARO_DAEMON__ALLOW_REMOTE", "true")
+	mustCLI(t, "config", "show")
+	t.Setenv("ICARO_DAEMON__ALLOW_REMOTE", "")
+	t.Setenv("ICARO_DAEMON__LISTEN", "")
+
+	cfg, err := (&rootOpts{}).loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Daemon.Listen, cfg.Daemon.AllowRemote = "0.0.0.0:0", true
+	var logs syncBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemon(ctx, cfg, slog.New(slog.NewTextHandler(&logs, nil))) }()
+	waitDaemon(t, cfg, done)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "daemon.listen is not loopback") {
+		t.Errorf("no warning for a remote listener:\n%s", logs.String())
+	}
+}
+
 func TestServeCommand(t *testing.T) {
 	daemonEnv(t)
 	failCLI(t, "invalid --log-level", "serve", "--log-level", "loud")
@@ -400,4 +441,22 @@ func TestRunWaitExitCode(t *testing.T) {
 		restore()
 		t.Fatal("run --wait --json did not return")
 	}
+}
+
+// syncBuffer is a bytes.Buffer safe for a logger in another goroutine.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 
@@ -26,12 +27,17 @@ var doctorChecks = func(cmd *cobra.Command, opts *rootOpts) ([]doctor.Check, fun
 		return nil, nil, err
 	}
 	cleanup = append(cleanup, func() { _ = st.Close() })
+	// eng stays a nil *docker.Engine for the component factories (which
+	// test it directly), but BaseChecks takes an interface: hand it a nil
+	// interface, not a typed nil, plus the reason the client failed.
 	var eng *docker.Engine
-	if e, err := docker.New(cfg.Docker.Host); err == nil {
-		eng = e
+	var pinger interface{ Ping(context.Context) error }
+	e, engErr := docker.New(cfg.Docker.Host)
+	if engErr == nil {
+		eng, pinger = e, e
 		cleanup = append(cleanup, func() { _ = e.Close() })
 	}
-	checks := app.BaseChecks(cfg, st, eng)
+	checks := app.BaseChecks(cfg, st, pinger, engErr)
 	for _, extra := range extraDoctorChecks {
 		checks = append(checks, extra(cmd.Context(), cfg, st, eng)...)
 	}

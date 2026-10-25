@@ -77,7 +77,7 @@ The binding defaults to the manifest's `hosts` plus the host of a `base_url` you
 
 ## Webhooks
 
-Each integration has one endpoint: `POST /hooks/<integration>`. The generic `webhook` integration uses `POST /hooks/webhook/<token>`, with one random token per subscribed workflow (`icaro integration webhook-tokens`, `--rotate WORKFLOW`). The daemon must be reachable by the provider, which means a TCP listener (`icaro serve --listen 0.0.0.0:8787` behind TLS, or a reverse proxy). Set `daemon.public_url` so the generated URLs are correct. On a laptop, use manual or `cron` triggers instead; a `cron` workflow whose first step checks the source and gates the rest with `when` stands in for polling.
+Each integration has one endpoint: `POST /hooks/<integration>`. The generic `webhook` integration uses `POST /hooks/webhook/<token>`, with one random token per subscribed workflow (`icaro integration webhook-tokens`, `--rotate WORKFLOW`). The daemon must be reachable by the provider. The supported way is a TLS-terminating reverse proxy (Caddy, nginx, a tunnel) on the same host in front of a loopback listener: `icaro serve --listen 127.0.0.1:8787`. The daemon speaks plain HTTP, so it refuses a non-loopback `--listen` / `daemon.listen` unless you also pass `--allow-remote` (`daemon.allow_remote: true`), and then logs a warning. Set `daemon.public_url` so the generated URLs are correct. On a laptop, use manual or `cron` triggers instead; a `cron` workflow whose first step checks the source and gates the rest with `when` stands in for polling.
 
 Every request goes through the same pipeline ([ADR 0015](../blueprint/docs/adr/0015-manifest-schema-webhook-pipeline.md)):
 
