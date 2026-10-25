@@ -68,7 +68,7 @@ Both forms take the same scheduling fields:
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
 | `outputs` | Image steps only. A map from name to capture source; see below. |
 
-A step runs only when each of its `needs` **succeeded** or was **skipped by its own `when`**. If a need failed, was cancelled, or did not run, the step is recorded as `skipped` with `not run: needs <id> <status>`, its dependents skip in turn, and the run fails. The details are in [ADR 0013](../blueprint/docs/adr/0013-workflow-execution-semantics.md).
+A step runs only when each of its `needs` **succeeded** or was **skipped by its own `when`**. If a need failed, was cancelled, or did not run, the step is recorded as `skipped` with `not run: needs <id> <status>`, its dependents skip in turn, and the run fails. If the run fails before any step starts (its session, egress or workflow `env` could not be set up), every step is recorded as `skipped` with `not run: <run error>`, or as `cancelled` if the run was cancelled. The details are in [ADR 0013](../blueprint/docs/adr/0013-workflow-execution-semantics.md).
 
 ## The image-step contract
 
@@ -176,7 +176,7 @@ steps:
     command: echo "sweeping"
 ```
 
-Cron expressions have five fields (minute, hour, day of month, month, day of week) or use an `@daily`-style descriptor. The scheduler persists each trigger's next fire time. A fire missed while the daemon was down runs **once** on restart, however many ticks were missed. `icaro schedules` lists the triggers with their next fire times.
+Cron expressions have five fields (minute, hour, day of month, month, day of week) or use an `@daily`-style descriptor. A cron run's `trigger` holds only `scheduled_at`, `fired_at` (RFC 3339) and `late` (fired more than a minute after its time), so a workflow with a cron trigger can read other `trigger.*` fields only behind `has()`; validation rejects it otherwise. The scheduler persists each trigger's next fire time. A fire missed while the daemon was down runs **once** on restart, however many ticks were missed. `icaro schedules` lists the triggers with their next fire times.
 
 ## More examples
 

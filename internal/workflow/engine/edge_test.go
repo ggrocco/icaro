@@ -370,7 +370,48 @@ func TestPrepareFailures(t *testing.T) {
 			if len(f.containersForStep("s1")) != 0 {
 				t.Fatal("no step may start")
 			}
+			// Every step still ends in a terminal state with the reason.
+			if r := f.step(run.ID, "s1"); r.Status != store.StepSkipped || r.Error != notRunPrefix+got.Error || r.FinishedAt == nil {
+				t.Fatalf("step left %+v", r)
+			}
 		})
+	}
+}
+
+// A cancel while the run is starting is a cancel, not a failure, and the
+// steps are recorded as cancelled.
+func TestCancelDuringPrepare(t *testing.T) {
+	f := newFixture(t)
+	bs := &blockingSessions{entered: make(chan struct{})}
+	f.deps.Sessions = bs
+	run := f.enqueue("version: 1\nname: prep-cancel\nsteps:\n  - { id: s1, image: img }\n  - { id: s2, image: img, needs: [s1] }\n", nil)
+	e, stop := f.start()
+	defer stop()
+	<-bs.entered
+	e.Cancel(run.ID)
+	got := f.wait(run.ID, store.RunCancelled, store.RunFailed)
+	if got.Status != store.RunCancelled {
+		t.Fatalf("run %s: %s", got.Status, got.Error)
+	}
+	for _, id := range []string{"s1", "s2"} {
+		if r := f.step(run.ID, id); r.Status != store.StepCancelled || r.Error != "run cancelled" {
+			t.Fatalf("%s left %+v", id, r)
+		}
+	}
+}
+
+// A step a previous daemon left running is failed (and its container
+// killed) when the resumed run cannot even start.
+func TestResumedRunFailingEarlySettlesRunningStep(t *testing.T) {
+	f := newFixture(t)
+	f.deps.Egress = failingEgress{}
+	run := f.enqueue("version: 1\nname: resume-fail\nsteps:\n  - { id: s1, image: img }\n", nil)
+	f.claimRunning(run, 1, "ctr-left")
+	_, stop := f.start()
+	defer stop()
+	got := f.wait(run.ID, store.RunFailed)
+	if r := f.step(run.ID, "s1"); r.Status != store.StepFailed || r.Error != got.Error {
+		t.Fatalf("step left %+v", r)
 	}
 }
 

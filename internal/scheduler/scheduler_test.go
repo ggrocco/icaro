@@ -120,6 +120,12 @@ func TestMissedFireDuringRestartRunsExactlyOnce(t *testing.T) {
 	if late := e.reqs[1].Trigger["late"]; late != true || e.reqs[1].Trigger["scheduled_at"] != "2026-10-20T12:00:00Z" {
 		t.Fatalf("%v", e.reqs[1].Trigger)
 	}
+	// The validator checks cron workflows against these fields.
+	for _, k := range workflow.CronFields {
+		if _, ok := e.reqs[1].Trigger[k]; !ok || len(e.reqs[1].Trigger) != len(workflow.CronFields) {
+			t.Fatalf("cron payload %v does not match workflow.CronFields", e.reqs[1].Trigger)
+		}
+	}
 	if !next.Equal(time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)) {
 		t.Fatal(next)
 	}

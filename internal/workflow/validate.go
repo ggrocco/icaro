@@ -657,9 +657,19 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 }
 
 // checkTriggerRef requires trigger.<field> to be provided by every
-// integration event the workflow subscribes to, when all are known.
+// trigger that can start the workflow: a cron trigger (CronFields), and
+// every integration event when all are known. Manual runs supply any
+// field. Without this a cron run of a workflow that reads, say,
+// trigger.repo always fails.
 func (v *validator) checkTriggerRef(path string, r expr.Ref) {
-	if r.Guarded || v.opts.Catalog == nil {
+	if r.Guarded {
+		return
+	}
+	if field := r.Path[1]; len(v.s.CronTriggers()) > 0 && !contains(CronFields, field) {
+		v.add(path, fmt.Sprintf("a cron trigger does not provide trigger.%s", field), fieldHint(field, CronFields)+"; guard it with has(trigger."+field+") or put the cron trigger in its own workflow")
+		return
+	}
+	if v.opts.Catalog == nil {
 		return
 	}
 	triggers := v.s.IntegrationTriggers()

@@ -148,6 +148,11 @@ func IntegrationCredentialHint(name string) string {
 	return "call the integration through its uses: actions, which attach the credential to its bound hosts; store a container secret without --host"
 }
 
+// CronFields are the trigger.* fields of a cron run (scheduler.fire):
+// the scheduled and actual fire times (RFC 3339) and whether the fire
+// was more than a minute late.
+var CronFields = []string{"fired_at", "late", "scheduled_at"}
+
 // Trigger kinds recorded on runs.
 const (
 	RunTriggerManual      = "manual"

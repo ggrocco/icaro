@@ -65,6 +65,7 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 	// so a terminal run never has a live session or workspace behind it. A
 	// crash in between leaves a running run with finished steps, which the
 	// next engine resumes and closes.
+	e.settleLeftovers(fctx, run.ID, status, errMsg)
 	cur, err := e.d.Store.GetRun(fctx, run.ID)
 	if err == nil && cur.SessionID != "" {
 		if err := e.d.Sessions.FinishRun(fctx, cur.SessionID, keep); err != nil {
@@ -76,6 +77,45 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 	}
 	log.Info("run finished", "status", status, "error", errMsg)
 	e.publish(events.Event{Type: events.TypeRun, RunID: run.ID, Status: status})
+}
+
+// settleLeftovers gives every step still pending or running a terminal
+// state with a reason (ADR 0013). After a normal schedule there are none;
+// a run that fails or is cancelled before its DAG starts (bad stored
+// version, session, egress, secrets, workflow env) leaves them all. A
+// step left running by a previous daemon has its container killed.
+func (e *Engine) settleLeftovers(ctx context.Context, runID, status, errMsg string) {
+	rows, err := e.d.Store.GetStepRuns(ctx, runID)
+	if err != nil {
+		e.log.Error("load steps to settle", "run", runID, "err", err)
+		return
+	}
+	for _, row := range rows {
+		if terminal(row.Status) {
+			continue
+		}
+		if row.Status == store.StepRunning && row.ContainerID != "" {
+			_ = e.d.Docker.Kill(ctx, row.ContainerID)
+			_ = e.d.Docker.RemoveContainer(ctx, row.ContainerID)
+		}
+		switch {
+		case status == store.RunCancelled:
+			row.Status, row.Error = store.StepCancelled, "run cancelled"
+		case row.Status == store.StepRunning:
+			row.Status, row.Error = store.StepFailed, errMsg
+		default:
+			row.Status, row.Error = store.StepSkipped, notRunPrefix+errMsg
+		}
+		now := time.Now()
+		row.FinishedAt = &now
+		if row.StartedAt == nil {
+			row.StartedAt = &now
+		}
+		if err := e.d.Store.UpdateStepRun(ctx, row); err != nil {
+			e.log.Error("persist step", "run", runID, "step", row.StepID, "err", err)
+		}
+		e.publish(events.Event{Type: events.TypeStep, RunID: runID, Step: row.StepID, Status: row.Status})
+	}
 }
 
 // heartbeat refreshes liveness and turns a persisted cancel request (made
@@ -102,6 +142,11 @@ func (e *Engine) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, 
 // shutting down and the run must stay running for re-attach.
 func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (status, errMsg string, keep bool) {
 	fail := func(format string, args ...any) (string, string, bool) {
+		if cancelled(ctx) {
+			// A cancel while the run is starting surfaces as whatever
+			// call it interrupted; it is still a cancel.
+			return store.RunCancelled, "cancelled", false
+		}
 		return store.RunFailed, fmt.Sprintf(format, args...), e.cfg.KeepWorkspaceOnFailure
 	}
 	ver, err := e.d.Store.GetWorkflowVersion(ctx, run.WorkflowID, run.WorkflowVersion)

@@ -61,8 +61,6 @@ env:
   TOKEN: ${{ secrets.gh_token }}
 triggers:
   - type: manual
-  - type: cron
-    cron: "0 9 * * 1-5"
   - integration: github
     event: pull_request.opened
     filter: trigger.branch != 'main'
@@ -114,7 +112,7 @@ func TestParseValid(t *testing.T) {
 	if s.Name != "review-pr" || len(s.Steps) != 5 || s.Steps[3].Kind() != KindUses || s.ConcurrencyPolicy() != ConcurrencyQueue {
 		t.Fatalf("decoded: %+v", s)
 	}
-	if got := s.CronTriggers(); len(got) != 1 || len(s.IntegrationTriggers()) != 1 {
+	if got := s.CronTriggers(); len(got) != 0 || len(s.IntegrationTriggers()) != 1 {
 		t.Fatalf("triggers %v", got)
 	}
 	req, opt := TriggerFields(s)
@@ -379,6 +377,39 @@ func TestCapture(t *testing.T) {
 	}
 	if c, _ := ParseCapture("stdout:last-line"); c.Kind != CaptureStdoutLast {
 		t.Fatal("last-line kind")
+	}
+}
+
+// A cron run carries only CronFields, so a workflow with a cron trigger
+// must not read any other trigger field unguarded: its cron runs would
+// all fail.
+func TestCronTriggerFields(t *testing.T) {
+	src := `
+version: 1
+name: cron-fields
+triggers:
+  - type: cron
+    cron: "0 9 * * 1-5"
+  - type: manual
+steps:
+  - id: aa
+    image: x
+    command: echo ${{ trigger.scheduled_at }} ${{ trigger.late }}
+    env:
+      R: ${{ trigger.repo }}
+      F: ${{ trigger.fired_a }}
+      G: ${{ has(trigger.repo) && trigger.repo == 'x' }}
+`
+	s, issues := parseT(t, src, Options{})
+	mustHave(t, issues, "/steps/0/env/R", "a cron trigger does not provide trigger.repo", "put the cron trigger in its own workflow")
+	mustHave(t, issues, "/steps/0/env/F", "a cron trigger does not provide trigger.fired_a", "did you mean trigger.fired_at?")
+	for _, is := range issues {
+		if is.Path == "/steps/0/command" || is.Path == "/steps/0/env/G" {
+			t.Fatalf("unexpected: %s", is)
+		}
+	}
+	if got := s.CronTriggers(); len(got) != 1 {
+		t.Fatalf("cron triggers %v", got)
 	}
 }
 
