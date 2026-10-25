@@ -642,6 +642,49 @@ func (s fakeSecrets) Names(context.Context) ([]string, error) {
 	return out, nil
 }
 
+func (s fakeSecrets) Hosts(context.Context, string) ([]string, error) { return nil, nil }
+
+// boundSecrets adds host bindings (integration credentials).
+type boundSecrets struct {
+	fakeSecrets
+	hosts map[string][]string
+}
+
+func (s boundSecrets) Hosts(_ context.Context, n string) ([]string, error) { return s.hosts[n], nil }
+
+type fakeCatalog struct{ workflow.Catalog }
+
+func (fakeCatalog) Integrations() []string { return []string{"github"} }
+
+// Integration credentials never reach a template or a container, even
+// when the workflow was saved before the secret was bound.
+func TestIntegrationCredentialsAreRefused(t *testing.T) {
+	cases := map[string]string{
+		"bound":   "deploy_key",
+		"by name": "github.webhook_secret",
+	}
+	for name, secret := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.deps.Secrets = boundSecrets{
+				fakeSecrets: fakeSecrets{"deploy_key": "k3y-value-123", "github.webhook_secret": "wh-secret-456"},
+				hosts:       map[string][]string{"deploy_key": {"api.example.com"}},
+			}
+			f.deps.Catalog = fakeCatalog{}
+			run := f.enqueue("version: 1\nname: creds\nsteps:\n  - id: s1\n    image: img\n    env: { K: \"${{ secrets['"+secret+"'] }}\" }\n", nil)
+			_, stop := f.start()
+			defer stop()
+			got := f.wait(run.ID, store.RunFailed)
+			if !strings.Contains(got.Error, "integration credential") || !strings.Contains(got.Error, "uses:") {
+				t.Fatalf("run error %q", got.Error)
+			}
+			if len(f.containersForStep("s1")) != 0 {
+				t.Fatal("no step may start")
+			}
+		})
+	}
+}
+
 // echoActions returns its text input in nested outputs, the way an
 // integration response may echo a credential back.
 type echoActions struct{}

@@ -381,3 +381,44 @@ func TestCapture(t *testing.T) {
 		t.Fatal("last-line kind")
 	}
 }
+
+// Integration credentials (host-bound, or named after an installed
+// integration) are not interpolable, and no condition may read a secret.
+func TestSecretRestrictions(t *testing.T) {
+	src := `
+version: 1
+name: secret-rules
+env:
+  GH: ${{ secrets['github.token'] }}
+steps:
+  - id: aa
+    image: x
+    env:
+      KEY: ${{ secrets.deploy_key }}
+      OK: ${{ secrets.plain }}
+      HOOK: ${{ has(secrets['slack.webhook_secret']) }}
+    when: secrets.plain == 'x'
+  - id: bb
+    image: x
+    when: ${{ has(secrets.plain) && trigger.go }}
+`
+	_, issues := parseT(t, src, Options{Catalog: fakeCatalog{}, SecretBound: func(n string) bool { return n == "deploy_key" }})
+	mustHave(t, issues, "/env/GH", `secret "github.token" is an integration credential`, "call github through its uses: actions")
+	mustHave(t, issues, "/steps/0/env/KEY", `secret "deploy_key" is an integration credential`, "uses: actions")
+	mustHave(t, issues, "/steps/0/env/HOOK", `secret "slack.webhook_secret" is an integration credential`, "call slack")
+	mustHave(t, issues, "/steps/0/when", "when cannot read secrets", "leaks")
+	mustHave(t, issues, "/steps/1/when", "when cannot read secrets", "")
+	for _, is := range issues {
+		if is.Path == "/steps/0/env/OK" {
+			t.Fatalf("a container secret is allowed: %s", is)
+		}
+	}
+	// Without a catalog or bindings only the when rule applies.
+	_, issues = parseT(t, src, Options{})
+	if len(issues) != 2 {
+		t.Fatalf("issues without environment knowledge: %v", issues)
+	}
+	if !IntegrationCredential("x", true, nil) || IntegrationCredential("a.b", false, []string{"c"}) || IntegrationCredentialHint("plain") == "" {
+		t.Fatal("IntegrationCredential")
+	}
+}

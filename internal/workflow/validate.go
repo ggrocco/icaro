@@ -57,6 +57,10 @@ type Options struct {
 	Catalog Catalog
 	// SecretExists reports whether a secret exists. Nil skips the check.
 	SecretExists func(name string) bool
+	// SecretBound reports whether a secret has a host binding (an
+	// integration credential). Nil skips the binding check; credentials
+	// named after an integration in Catalog are refused regardless.
+	SecretBound func(name string) bool
 }
 
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
@@ -463,10 +467,25 @@ func (v *validator) checkExpressions() {
 			if err != nil {
 				v.addExpr(base+"/when", "invalid expression: ", err)
 			} else {
-				v.checkRefs(base+"/when", e.Refs(), RootsStep, i)
+				v.checkWhenRefs(base+"/when", e.Refs(), i)
 			}
 		}
 	}
+}
+
+// checkWhenRefs refuses secrets in a condition: whether a step ran is
+// visible in the run, so a `when` on a secret's value would leak it one
+// bit per run. Secrets are not even exposed to `when` at run time.
+func (v *validator) checkWhenRefs(path string, refs []expr.Ref, step int) {
+	rest := refs[:0:0]
+	for _, r := range refs {
+		if len(r.Path) > 0 && r.Path[0] == "secrets" {
+			v.add(path, "when cannot read secrets", "a condition on a secret leaks it through the step's status; branch on env, trigger or step outputs instead")
+			continue
+		}
+		rest = append(rest, r)
+	}
+	v.checkRefs(path, rest, RootsStep, step)
 }
 
 func (v *validator) checkTemplate(path, s string, roots []string, step int) {
@@ -505,6 +524,10 @@ func (v *validator) checkRefs(path string, refs []expr.Ref, roots []string, step
 				}
 			}
 		case "secrets":
+			if v.integrationCredential(r.Path[1]) {
+				v.add(path, fmt.Sprintf("secret %q is an integration credential: it is only sent to its bound hosts by uses: actions and never enters a template or a container", r.Path[1]), IntegrationCredentialHint(r.Path[1]))
+				continue
+			}
 			if v.opts.SecretExists != nil && !r.Guarded && !v.opts.SecretExists(r.Path[1]) {
 				v.add(path, fmt.Sprintf("secret %q does not exist", r.Path[1]), "create it with: icaro secret set "+r.Path[1])
 			}
@@ -512,6 +535,15 @@ func (v *validator) checkRefs(path string, refs []expr.Ref, roots []string, step
 			v.checkTriggerRef(path, r)
 		}
 	}
+}
+
+func (v *validator) integrationCredential(name string) bool {
+	bound := v.opts.SecretBound != nil && v.opts.SecretBound(name)
+	var integrations []string
+	if v.opts.Catalog != nil {
+		integrations = v.opts.Catalog.Integrations()
+	}
+	return IntegrationCredential(name, bound, integrations)
 }
 
 func (v *validator) checkStepRef(path string, r expr.Ref, step int) {

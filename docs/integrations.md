@@ -73,7 +73,7 @@ printf %s "$WEBHOOK_SECRET" | icaro credential add github webhook_secret
 icaro credential list                                           # names and hosts, never values
 ```
 
-The binding defaults to the manifest's `hosts` plus the host of a `base_url` you configured. Use `--host` to choose it yourself, and `--yes` to skip the confirmation. `<integration>.webhook_secret` verifies inbound webhooks and is never sent anywhere, so it has no binding. Credentials never enter a container.
+The binding defaults to the manifest's `hosts` plus the host of a `base_url` you configured. Use `--host` to choose it yourself, and `--yes` to skip the confirmation. `<integration>.webhook_secret` verifies inbound webhooks and is never sent anywhere, so it has no binding. Credentials never enter a container, and a workflow cannot read one through `${{ secrets.NAME }}`: validation and the engine refuse any host-bound secret and any secret named `<integration>.<name>` for an installed integration. Use the integration's `uses:` actions instead.
 
 ## Webhooks
 

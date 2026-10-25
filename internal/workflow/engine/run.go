@@ -181,9 +181,23 @@ func (rx *runExec) prepare(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("list secrets: %w", err)
 		}
+		var integrations []string
+		if e.d.Catalog != nil {
+			integrations = e.d.Catalog.Integrations()
+		}
 		referenced := map[string]bool{}
 		for _, n := range workflow.SecretRefs(rx.spec) {
 			referenced[n] = true
+			// Integration credentials reach only uses: actions, which send
+			// them to their bound hosts (03-security); validation refuses
+			// them too, but a binding can be added after the workflow.
+			hosts, err := e.d.Secrets.Hosts(ctx, n)
+			if err != nil {
+				return fmt.Errorf("secret %s: %w", n, err)
+			}
+			if workflow.IntegrationCredential(n, len(hosts) > 0, integrations) {
+				return fmt.Errorf("secret %s is an integration credential and cannot be interpolated: %s", n, workflow.IntegrationCredentialHint(n))
+			}
 		}
 		for _, n := range names {
 			v, err := e.d.Secrets.Resolve(ctx, n)

@@ -116,6 +116,20 @@ func (s *Store) ResolveFor(ctx context.Context, name, host string) (string, erro
 	return string(plain), nil
 }
 
+// Hosts returns a secret's host binding (empty: container env only). A
+// bound secret is an integration credential, which workflows cannot
+// interpolate.
+func (s *Store) Hosts(ctx context.Context, name string) ([]string, error) {
+	r, err := s.db.GetSecret(ctx, name)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return orEmpty(r.Hosts), nil
+}
+
 // HostAllowed matches host against bindings ("api.github.com" exact,
 // "*.slack.com" any subdomain). An empty binding allows nothing.
 func HostAllowed(bindings []string, host string) bool {

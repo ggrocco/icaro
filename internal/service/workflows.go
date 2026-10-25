@@ -53,6 +53,10 @@ func (s *Service) validateOptions(ctx context.Context) workflow.Options {
 				set[n] = true
 			}
 			opts.SecretExists = func(n string) bool { return set[n] }
+			opts.SecretBound = func(n string) bool {
+				hosts, err := s.secrets.Hosts(ctx, n)
+				return err == nil && len(hosts) > 0
+			}
 		}
 	}
 	return opts

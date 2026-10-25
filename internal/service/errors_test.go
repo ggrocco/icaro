@@ -431,3 +431,6 @@ func (brokenSecrets) Resolve(context.Context, string) (string, error) {
 	return "", errors.New("locked")
 }
 func (brokenSecrets) Names(context.Context) ([]string, error) { return nil, errors.New("locked") }
+func (brokenSecrets) Hosts(context.Context, string) ([]string, error) {
+	return nil, errors.New("locked")
+}

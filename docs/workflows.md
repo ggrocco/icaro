@@ -99,7 +99,7 @@ Later steps read the values as `${{ steps.<id>.outputs.<name> }}`, but only from
 
 `${{ … }}` is one small language shared with integration manifests ([ADR 0009](../blueprint/docs/adr/0009-expression-language.md)). Expressions are parsed when you validate, and a missing key is an error, never an empty string.
 
-- **Roots:** `steps`, `trigger`, `env`, `secrets`, `run` (`run.id`), `workflow` (`workflow.name`, `workflow.version`).
+- **Roots:** `steps`, `trigger`, `env`, `secrets`, `run` (`run.id`), `workflow` (`workflow.name`, `workflow.version`). A `when` cannot read `secrets`: whether a step ran is visible to anyone who can see the run, so a condition on a secret would leak it a bit at a time.
 - **Operators:** `== != < <= > >= && || !`, parentheses, literals (`'text'`, `"text"`, numbers, `true`, `false`, `null`) and indexing (`headers['x-github-event']`, `trigger.labels[0]`). There is no arithmetic.
 - **Functions:** `contains startsWith endsWith lower upper trim length toJSON fromJSON join split format coalesce string number`, plus `has(ref)`, the only construct for which a missing key is not an error.
 - **Templates:** a string that is exactly one `${{ }}` keeps the value's type, so `number: ${{ trigger.pr_number }}` passes a number. Mixed text renders values as strings, and objects as JSON.
@@ -139,7 +139,7 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 
 ## Secrets
 
-`${{ secrets.NAME }}` in `env` is resolved by the daemon at run time. Its value is never stored in the workflow, and it is redacted from logs and captured outputs. Create secrets with `icaro secret set NAME` (the value is read from stdin or a hidden prompt). A workflow that references a secret that does not exist fails validation, with a hint to create it. Integration credentials for `uses` steps are separate and host-bound; see [Integrations](integrations.md#credentials).
+`${{ secrets.NAME }}` in `env` is resolved by the daemon at run time. Its value is never stored in the workflow, and it is redacted from logs and captured outputs. Create secrets with `icaro secret set NAME` (the value is read from stdin or a hidden prompt). A workflow that references a secret that does not exist fails validation, with a hint to create it. Integration credentials for `uses` steps are separate and host-bound: a secret with a host binding, or one named `<integration>.<name>` for an installed integration, cannot be interpolated, and the run fails if one is referenced anyway. Call the integration through its `uses:` actions; see [Integrations](integrations.md#credentials).
 
 ## Runs
 

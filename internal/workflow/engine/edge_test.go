@@ -318,7 +318,14 @@ func (failingEgress) Ensure(context.Context, string, []string) (container.Attach
 	return container.Attachment{}, errors.New("no proxy")
 }
 
-type brokenSecrets struct{ namesErr bool }
+type brokenSecrets struct{ namesErr, hostsErr bool }
+
+func (s brokenSecrets) Hosts(context.Context, string) ([]string, error) {
+	if s.hostsErr {
+		return nil, errors.New("keychain locked")
+	}
+	return nil, nil
+}
 
 func (s brokenSecrets) Names(context.Context) ([]string, error) {
 	if s.namesErr {
@@ -343,6 +350,7 @@ func TestPrepareFailures(t *testing.T) {
 		{name: "egress", setup: func(f *fixture) { f.deps.Egress = failingEgress{} }, want: "egress for profile workflow: no proxy"},
 		{name: "secret names", setup: func(f *fixture) { f.deps.Secrets = brokenSecrets{namesErr: true} }, want: "list secrets: keychain locked"},
 		{name: "secret value", setup: func(f *fixture) { f.deps.Secrets = brokenSecrets{} }, want: "resolve secret tok: decrypt failed"},
+		{name: "secret binding", yaml: "env:\n  A: ${{ secrets.tok }}\n", setup: func(f *fixture) { f.deps.Secrets = brokenSecrets{hostsErr: true} }, want: "secret tok: keychain locked"},
 		{name: "workflow env", yaml: "env:\n  A: ${{ trigger.missing }}\n", want: "env.A: trigger.missing is not defined"},
 	}
 	for _, c := range cases {

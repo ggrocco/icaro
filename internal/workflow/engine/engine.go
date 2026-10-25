@@ -81,7 +81,8 @@ type Config struct {
 // Deps are the engine's collaborators. Store and Docker are required;
 // the rest degrade safely when nil: no Sessions => local scratch
 // workspaces, no Egress => network none, no Actions => uses steps fail,
-// no Secrets => ${{ secrets.* }} fails.
+// no Secrets => ${{ secrets.* }} fails, no Catalog => only host-bound
+// secrets count as integration credentials.
 type Deps struct {
 	Store    *store.Store
 	Docker   Docker
@@ -89,6 +90,7 @@ type Deps struct {
 	Egress   container.Egress
 	Actions  workflow.ActionExecutor
 	Secrets  workflow.SecretResolver
+	Catalog  workflow.Catalog
 	Events   *events.Bus
 	Log      *slog.Logger
 }

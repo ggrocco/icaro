@@ -81,7 +81,10 @@ steps:
   lower upper trim length toJSON fromJSON join split format coalesce
   string number has`. A missing key is an error; guard optional fields
   with `has(trigger.x)`.
-- `${{ secrets.NAME }}` is resolved by the daemon and redacted from logs.
+- `${{ secrets.NAME }}` is resolved by the daemon and redacted from logs
+  and outputs. It cannot read an integration credential (a host-bound
+  secret, or `<integration>.<name>`): call the integration through its
+  `uses:` actions instead. A `when` cannot read secrets at all.
 - **Never interpolate `trigger.*` or step outputs straight into `command`.**
   They can carry text an outsider controls (a PR title, an issue body),
   and the command is a shell script. Pass them through `env` and quote the

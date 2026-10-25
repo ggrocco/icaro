@@ -31,6 +31,15 @@ func (s fakeSecrets) Names(context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+func (s fakeSecrets) Hosts(context.Context, string) ([]string, error) { return nil, nil }
+
+// boundSecrets adds host bindings (integration credentials).
+type boundSecrets struct {
+	fakeSecrets
+	hosts map[string][]string
+}
+
+func (s boundSecrets) Hosts(_ context.Context, n string) ([]string, error) { return s.hosts[n], nil }
 
 func newService(t *testing.T) (*Service, *fakeRunner) {
 	t.Helper()
@@ -66,6 +75,19 @@ steps:
 env:
   TOKEN: ${{ secrets.api }}
 `
+
+// A host-bound secret is an integration credential: workflows cannot
+// interpolate it, whatever its name.
+func TestIntegrationCredentialIsRefused(t *testing.T) {
+	svc, _ := newService(t)
+	ctx := context.Background()
+	svc.SetSecrets(boundSecrets{fakeSecrets: fakeSecrets{"api": "x"}, hosts: map[string][]string{"api": {"api.example.com"}}})
+	_, err := svc.ApplyWorkflow(ctx, hello, "alice")
+	var ve *ValidationError
+	if !errors.As(err, &ve) || ve.Issues[0].Path != "/env/TOKEN" || !strings.Contains(ve.Issues[0].Message, "integration credential") || !strings.Contains(ve.Issues[0].Hint, "uses:") {
+		t.Fatalf("expected an integration credential issue, got %v", err)
+	}
+}
 
 func TestWorkflowLifecycle(t *testing.T) {
 	svc, _ := newService(t)
