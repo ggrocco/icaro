@@ -36,7 +36,7 @@ A daemon shutdown never kills step containers; a user cancel always does.
 
 **Concurrency.** An unset `concurrency` means `allow`. `forbid` skips an enqueue while a run of the workflow is queued or running. `queue` lets the run wait in the queue until no run of the workflow is running. `replace` cancels the active runs and then enqueues. An enqueue with an idempotency key that was already used returns the earlier run instead of creating one.
 
-**Manual runs.** The engine computes the `trigger.*` fields a workflow reads outside `has()`. A manual run must supply all of them: the API rejects the run with the list of missing fields, and the CLI prompts for them.
+**Manual runs.** The engine computes the `trigger.*` fields a workflow reads outside `has()`; a read on the right of `&&` (or `||`) whose left side has already proven the field present with `has()` counts as guarded, because evaluation short-circuits. A manual run must supply all of them: the API rejects the run with the list of missing fields, and the CLI prompts for them.
 
 ## Consequences
 

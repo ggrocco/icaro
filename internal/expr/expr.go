@@ -60,7 +60,9 @@ type Ref struct {
 	Path []string
 	// Partial is true when a dynamic index follows Path.
 	Partial bool
-	// Guarded is true inside has(...), where absence is not an error.
+	// Guarded is true inside has(...), where absence is not an error, and
+	// on the right of && / || when the left side proved the reference
+	// present with has() (has(trigger.x) && trigger.x == 'y').
 	Guarded bool
 }
 

@@ -208,7 +208,90 @@ func (n *logicNode) eval(env Env) (any, error) {
 	}
 	return rb, nil
 }
-func (n *logicNode) refs(out *[]Ref, g bool) { n.l.refs(out, g); n.r.refs(out, g) }
+
+// refs marks references on the right of && (or ||) as guarded when the
+// left side, evaluated first, has proven them present with has(): the
+// right side only runs after `has(trigger.x) &&` is true, or after
+// `!has(trigger.x) ||` is false. Short-circuit evaluation makes this
+// exact, so `has(trigger.x) && trigger.x == 'y'` reads trigger.x only
+// when it exists.
+func (n *logicNode) refs(out *[]Ref, g bool) {
+	n.l.refs(out, g)
+	start := len(*out)
+	n.r.refs(out, g)
+	proven := present(n.l, n.op == "&&")
+	for i := start; i < len(*out); i++ {
+		if coveredBy((*out)[i].Path, proven) {
+			(*out)[i].Guarded = true
+		}
+	}
+}
+
+// present returns the reference paths that n proves exist when it
+// evaluates to want.
+func present(n node, want bool) [][]string {
+	switch x := n.(type) {
+	case *hasNode:
+		if p := staticPath(x.ref); want && p != nil {
+			return [][]string{p}
+		}
+	case *notNode:
+		return present(x.n, !want)
+	case *logicNode:
+		// a && b is true only when both are; a || b is false only when
+		// both are. Other outcomes prove nothing about either side.
+		if (x.op == "&&") == want {
+			return append(present(x.l, want), present(x.r, want)...)
+		}
+	}
+	return nil
+}
+
+// staticPath is the root and literal segments of a reference, up to the
+// first dynamic index; nil when n is not rooted.
+func staticPath(n node) []string {
+	in, ok := n.(*indexNode)
+	if !ok {
+		return nil
+	}
+	base, chain := in.chain()
+	root, ok := base.(*rootNode)
+	if !ok {
+		return nil
+	}
+	p := []string{root.name}
+	for _, c := range chain {
+		if c.static == "" {
+			break
+		}
+		p = append(p, c.static)
+	}
+	return p
+}
+
+// coveredBy reports whether a has() of one of proven guards path: the
+// same reference, a parent (has(trigger.label) && trigger.label.name) or
+// a child (has(trigger.label.name) && trigger.label).
+func coveredBy(path []string, proven [][]string) bool {
+	for _, p := range proven {
+		if isPrefix(p, path) || isPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPrefix(a, b []string) bool {
+	if len(a) > len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
 
 type cmpNode struct {
 	op   string
