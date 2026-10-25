@@ -11,37 +11,45 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write     # create the release
-  packages: write     # push the agent base image to GHCR
-  id-token: write     # cosign keyless signing + provenance
-  attestations: write # build provenance
+# Every job holds the signing key or a publishing token, so third-party
+# actions are pinned to commit SHAs (Dependabot bumps them) and each job
+# gets only the permissions it needs.
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write     # create the release
+      id-token: write     # cosign keyless signing + provenance
+      attestations: write # build provenance
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       # The binary embeds the web UI; without a build it serves a
       # "not built" page (web/dist is gitignored, so the tree stays clean).
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: make web
       - run: go test -count=1 ./...
-      - uses: anchore/sbom-action/download-syft@v0
-      - uses: sigstore/cosign-installer@v3
-      - uses: goreleaser/goreleaser-action@v7
+      # Exact tool versions: they run with the signing key in the env.
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: v1.42.3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        with:
+          cosign-release: v2.5.2
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.19.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,7 +60,7 @@ jobs:
         run: |
           printf '%s' "${{ vars.ICARO_RELEASE_PUBKEY }}" > pub.b64
           go run ./hack/sign verify -pub pub.b64 -in dist/checksums.txt -sig dist/checksums.txt.sig
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.tar.gz
@@ -65,16 +73,20 @@ jobs:
     # an ed25519 signature (go run ./hack/sign verify).
     needs: release
     runs-on: macos-latest
+    permissions:
+      contents: write     # upload to the release
+      id-token: write     # provenance
+      attestations: write # provenance
     env:
       HAS_CERT: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: desktop/go.mod
           cache-dependency-path: desktop/go.sum
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -128,7 +140,7 @@ jobs:
           (cd dist && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
           go run ./hack/sign sign -in "$zip" -out "$zip.sig"
           gh release upload "$GITHUB_REF_NAME" "$zip" "$zip.sha256" "$zip.sig" --clobber
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*.zip
 
@@ -137,11 +149,15 @@ jobs:
     # profiles. Override the name with the AGENT_IMAGE repository variable;
     # the default matches config.DefaultAgentImage.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the agent base image to GHCR
+      id-token: write # cosign keyless signing
     env:
       IMAGE: ${{ vars.AGENT_IMAGE || 'ghcr.io/icaro-dev/agent-base' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: static icaro for each image architecture
@@ -149,15 +165,15 @@ jobs:
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags "-s -w -X icaro/internal/cli.version=${GITHUB_REF_NAME}" -o bin/icaro-linux-$arch ./cmd/icaro
           done
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: images/agent-base/Dockerfile
@@ -168,6 +184,8 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}
             ${{ env.IMAGE }}:latest
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        with:
+          cosign-release: v2.5.2
       - name: sign the image by digest (keyless)
         run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
