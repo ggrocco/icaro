@@ -58,6 +58,8 @@ internal/store/               # migrations + repositories
 internal/integration/         # manifest packs, webhook router, HTTP action executor (ADR 0007)
 internal/platform/            # small macOS/Linux abstractions
 internal/doctor/              # checks and remediations
+internal/desktop/             # desktop app logic: attach/start, tray menu, notifications (ADR 0027)
+desktop/                      # the Wails shell, its own Go module (cgo); builds Icaro.app
 web/                          # React/Vite, Wails bindings, UI served by the daemon
 schemas/                      # versioned JSON Schema
 ```

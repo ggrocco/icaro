@@ -42,16 +42,30 @@ func main() {
 	npmDir := flag.String("npm", "", "audit npm production dependencies of this package directory instead of Go modules")
 	out := flag.String("out", "THIRD_PARTY_LICENSES.md", "output file")
 	pkg := flag.String("pkg", "./cmd/icaro", "Go package whose linked dependencies are audited")
+	dir := flag.String("dir", "", "module directory to run in (desktop for the desktop app); -pkg and -out are relative to it")
+	goos := flag.String("goos", "", "list the dependencies of this GOOS's build (with cgo), e.g. darwin for the macOS app")
 	flag.Parse()
+	if *dir != "" {
+		if err := os.Chdir(*dir); err != nil {
+			fmt.Fprintln(os.Stderr, "licenses:", err)
+			os.Exit(2)
+		}
+	}
 
 	var deps []Dep
 	var err error
 	title := "Go modules linked into " + *pkg
+	if *dir != "" {
+		title = "Go modules linked into " + *dir
+	}
+	if *goos != "" {
+		title += " (" + *goos + ")"
+	}
 	if *npmDir != "" {
 		title = "npm production dependencies of " + *npmDir
 		deps, err = npmDeps(*npmDir)
 	} else {
-		deps, err = goDeps(*pkg)
+		deps, err = goDeps(*pkg, *goos)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "licenses:", err)
@@ -65,7 +79,7 @@ func main() {
 	if *check {
 		cur, _ := os.ReadFile(*out)
 		if !bytes.Equal(cur, []byte(doc)) {
-			fmt.Fprintf(os.Stderr, "%s is stale; run go run ./hack/licenses%s\n", *out, flagsFor(*npmDir, *out))
+			fmt.Fprintf(os.Stderr, "%s is stale; run go run ./hack/licenses%s\n", *out, flagsFor(*npmDir, *dir, *pkg, *goos, *out))
 			os.Exit(1)
 		}
 	} else if err := os.WriteFile(*out, []byte(doc), 0o644); err != nil { //nolint:gosec // a checked-in document
@@ -78,11 +92,14 @@ func main() {
 	fmt.Printf("%d dependencies, all allowed\n", len(deps))
 }
 
-func flagsFor(npm, out string) string {
-	if npm == "" {
-		return ""
+func flagsFor(npm, dir, pkg, goos, out string) string {
+	switch {
+	case npm != "":
+		return fmt.Sprintf(" -npm %s -out %s", npm, out)
+	case dir != "":
+		return fmt.Sprintf(" -dir %s -goos %s -pkg %s -out %s", dir, goos, pkg, out)
 	}
-	return fmt.Sprintf(" -npm %s -out %s", npm, out)
+	return ""
 }
 
 // Disallowed returns the deps whose license is not allowed.
@@ -140,9 +157,12 @@ type goPkg struct {
 	}
 }
 
-func goDeps(pkg string) ([]Dep, error) {
+func goDeps(pkg, goos string) ([]Dep, error) {
 	cmd := exec.Command("go", "list", "-deps", "-json", pkg) //nolint:gosec // a package path from the developer's own flag
 	cmd.Stderr = os.Stderr
+	if goos != "" {
+		cmd.Env = append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=1")
+	}
 	outp, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("go list: %w", err)
@@ -158,6 +178,11 @@ func goDeps(pkg string) ([]Dep, error) {
 			return nil, err
 		}
 		if p.Standard || p.Module == nil || p.Module.Main || seen[p.Module.Path] {
+			continue
+		}
+		// A module replaced by a local directory is this repository's own
+		// main module, seen from the desktop app's module.
+		if r := p.Module.Replace; r != nil && r.Version == "" && (strings.HasPrefix(r.Path, ".") || filepath.IsAbs(r.Path)) {
 			continue
 		}
 		seen[p.Module.Path] = true

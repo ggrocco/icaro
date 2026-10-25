@@ -28,7 +28,7 @@ A workflow that references `${{ secrets.NAME }}` validates only once that secret
 Sessions, previews, memory, manual and cron workflows do. Inbound webhooks need a daemon the provider can reach; on a laptop, use a `cron` workflow whose first step checks the source.
 
 **What about the macOS app and tray?**
-The native app is deferred until the session spine is stable (MVP cut 7). Today the surfaces are the CLI and the web UI (`icaro ui`), and `icaro service install` starts the daemon at login.
+`Icaro.app` is a menu bar app over the same daemon: runs, previews, usage, quick actions and notifications ([Desktop app](desktop.md)). It has not yet been through a clean-install test on a Mac. Everything it does is also in the CLI and the web UI (`icaro ui`), and `icaro service install` starts the daemon at login without it.
 
 **Is there a usage or cost limit?**
 `icaro usage` estimates spend from local transcripts and can alert on a daily limit. It tracks cost; it does not limit compute. The concurrency cap and container limits bound resources.

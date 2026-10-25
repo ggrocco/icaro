@@ -56,7 +56,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [4 — Workflow UI and agent authoring](phases/04-workflow-ui.md) | Done | The run graph is read-only; drag/drop editing is deferred, as planned |
 | [5 — Previews](phases/05-previews.md) | Done on Linux | An agent-container edit reaching the preview is verified on Linux (`hack/e2e`); macOS is not (spike S1); DNS-01/TLS is deferred |
 | [6 — Shared memory](phases/06-memory.md) | Done | The importers are prototypes over assumed export formats |
-| [7 — macOS app](phases/07-macos.md) | Partial | Only launch at login (`icaro service install`) is done. The Wails app, tray, notifications, tray-only mode, Apple signing/notarization and the clean-install smoke test need macOS hardware (spike S9) |
+| [7 — macOS app](phases/07-macos.md) | Built; not run on a Mac | The tray app, notifications, launch at login and tray-only mode are built ([ADR 0027](adr/0027-desktop-app.md)), tested in CI and run on Linux. The clean-install smoke test needs macOS hardware, and notarization needs an Apple Developer ID (spike S9) |
 | [8 — Distribution](phases/08-distribution.md) | Done on Linux | A fresh install on macOS |
 | [9 — Usage](phases/09-usage.md) (optional) | Done | Only Claude Code transcripts are parsed; other CLIs wait on spike S10 |
 | [10 — Docs and landing page](phases/10-docs-landing.md) | Done | — |
@@ -69,7 +69,7 @@ Open spikes:
 - S5: microVM isolation (optional).
 - S7: `.test` resolution with VPNs.
 - S8: manifests against the live APIs.
-- S9: Wails v3.
+- S9: Wails v3. The app is built; the clean-install run on a Mac is open.
 
 S2 (home overlay, on Linux), S3 (MCP transport, [ADR 0019](adr/0019-memory-mcp-transport.md)) and S6 (heterogeneous compose, [ADR 0026](adr/0026-preview-port-discovery.md)) have passed.
 

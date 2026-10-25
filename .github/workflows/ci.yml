@@ -169,6 +169,50 @@ jobs:
       - name: coverage gate (Docker adapter)
         run: go run ./hack/covercheck -profile integration.out -prefix icaro/internal/container/docker -default 75 -thresholds /dev/null
 
+  desktop:
+    # The desktop app (ADR 0027) is its own module and needs cgo, so it is
+    # built and tested on both platforms here rather than in unit/lint.
+    # The macOS job also assembles Icaro.app (signed ad hoc) and runs it.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - name: GTK 4 and WebKitGTK 6 headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: go.mod is tidy and the icons match gen.go
+        run: cd desktop && go mod tidy -diff && go generate ./icons && git diff --exit-code
+      - run: make app-test
+      - run: make app && bin/icaro-app --version
+      - name: Icaro.app
+        if: runner.os == 'macOS'
+        run: |
+          make app-macos
+          bin/Icaro.app/Contents/MacOS/icaro version
+          bin/Icaro.app/Contents/MacOS/icaro-app --version
+      - name: Go module licenses (the macOS app)
+        if: runner.os == 'Linux'
+        run: go run ./hack/licenses -dir desktop -goos darwin -pkg . -out THIRD_PARTY_LICENSES.md -check
+      - uses: actions/setup-go@v7
+        if: runner.os == 'Linux'
+        with:
+          go-version: stable
+      - name: govulncheck
+        if: runner.os == 'Linux'
+        run: cd desktop && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - uses: golangci/golangci-lint-action@v9
+        if: runner.os == 'Linux'
+        with:
+          version: v2.15.0
+          install-mode: goinstall
+          working-directory: desktop
+
   agent-image:
     # Releases build the agent base image; building it here (amd64, not
     # pushed) catches base image, Node and asdf breakage before a tag does.

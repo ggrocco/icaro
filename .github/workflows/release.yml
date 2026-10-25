@@ -3,6 +3,10 @@ name: release
 # Builds, signs and publishes a release for every v* tag (ADR 0021).
 # Secrets: ICARO_SIGNING_KEY (base64 ed25519 seed), HOMEBREW_TAP_TOKEN.
 # Variables: ICARO_RELEASE_PUBKEY (base64 ed25519 public key).
+# The macOS app (ADR 0027) is signed and notarized when these secrets are
+# set, and signed ad hoc otherwise: MACOS_CERTIFICATE (base64 .p12 of a
+# "Developer ID Application" identity), MACOS_CERTIFICATE_PASSWORD,
+# APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password).
 on:
   push:
     tags: ["v*"]
@@ -23,6 +27,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The binary embeds the web UI; without a build it serves a
+      # "not built" page (web/dist is gitignored, so the tree stays clean).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make web
       - run: go test -count=1 ./...
       - uses: anchore/sbom-action/download-syft@v0
       - uses: sigstore/cosign-installer@v3
@@ -47,6 +59,78 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
+
+  macos-app:
+    # Icaro.app, attached to the release as a zip with a SHA-256 file and
+    # an ed25519 signature (go run ./hack/sign verify).
+    needs: release
+    runs-on: macos-latest
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make web
+      - name: import the Developer ID identity
+        if: env.HAS_CERT == 'true'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          pw=$(uuidgen)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          id=$(security find-identity -v -p codesigning "$kc" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+          test -n "$id" || { echo "no Developer ID Application identity in MACOS_CERTIFICATE" >&2; exit 1; }
+          echo "MACOS_SIGN_IDENTITY=$id" >> "$GITHUB_ENV"
+      - name: build Icaro.app
+        env:
+          ICARO_RELEASE_PUBKEY: ${{ vars.ICARO_RELEASE_PUBKEY }}
+        run: desktop/build/bundle.sh dist "$GITHUB_REF_NAME"
+      - name: notarize
+        if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist/Icaro.app dist/notarize.zip
+          xcrun notarytool submit dist/notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple dist/Icaro.app
+          spctl --assess --type execute --verbose dist/Icaro.app
+          rm dist/notarize.zip
+      - name: unsigned build
+        if: env.HAS_CERT != 'true' || env.HAS_NOTARY != 'true'
+        run: echo "::warning::Icaro.app is not notarized; set the MACOS_* and APPLE_* secrets (see the top of release.yml)"
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ICARO_SIGNING_KEY: ${{ secrets.ICARO_SIGNING_KEY }}
+        run: |
+          zip="dist/Icaro_${GITHUB_REF_NAME#v}_macos_universal.zip"
+          ditto -c -k --keepParent dist/Icaro.app "$zip"
+          (cd dist && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
+          go run ./hack/sign sign -in "$zip" -out "$zip.sig"
+          gh release upload "$GITHUB_REF_NAME" "$zip" "$zip.sha256" "$zip.sig" --clobber
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.zip
 
   agent-image:
     # The agent base image (architecture §5) referenced by the default

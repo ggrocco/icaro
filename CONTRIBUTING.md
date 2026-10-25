@@ -15,7 +15,8 @@ Thanks for helping. Ícaro is built against one design: [`blueprint/`](blueprint
   ```
 
 - `make lint` runs golangci-lint (gosec, staticcheck, errcheck, unused).
-- `make upgrade` moves Go modules and npm packages to their latest minor/patch releases and regenerates both `THIRD_PARTY_LICENSES.md` files; major upgrades are done by hand.
+- `make upgrade` moves Go modules and npm packages to their latest minor/patch releases and regenerates the `THIRD_PARTY_LICENSES.md` files; major upgrades are done by hand. Wails, in the desktop app, is pinned to an exact beta and moves only by hand ([ADR 0027](blueprint/docs/adr/0027-desktop-app.md)).
+- The desktop app is its own module under `desktop/` and needs cgo: the Xcode command line tools on macOS, `libgtk-4-dev libwebkitgtk-6.0-dev` on Linux. `make app-test` vets and tests it, `make app` builds `bin/icaro-app`, and `make app-macos` builds `bin/Icaro.app` on a Mac.
 - `go run ./hack/linkcheck .` checks the relative links in every Markdown and HTML file.
 
 ## Rules
@@ -32,7 +33,7 @@ The [engineering standards](blueprint/docs/05-engineering.md) are binding. In sh
 ## Pull requests
 
 - Keep one concern per PR, and describe the user-visible effect and how you tested it.
-- CI must be green: gofmt, vet, golangci-lint, unit tests on Linux and macOS, cross-builds, integration tests, the agent image build, and link checks.
+- CI must be green: gofmt, vet, golangci-lint, unit tests on Linux and macOS, cross-builds, integration tests, the agent image build, the desktop app on Linux and macOS, and link checks.
 - Tick the phase checkboxes your change completes.
 
 ## Releases
