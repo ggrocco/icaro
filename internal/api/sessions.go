@@ -180,6 +180,11 @@ func (s *Server) RegisterSessions(d SessionDeps) {
 			s.writeError(w, err)
 			return
 		}
+		// The login rewrites the seed that live sessions may be using.
+		if err := d.Sessions.CheckLogin(r.Context(), name, r.URL.Query().Get("force") == "true"); err != nil {
+			s.writeError(w, sessionErr(err))
+			return
+		}
 		writeJSON(w, http.StatusOK, LoginInfo{Profile: name, Image: image, SeedDir: seed, User: d.Sessions.User(), Command: agent.Login, Egress: att})
 	}))
 
@@ -221,7 +226,10 @@ func (s *Server) RegisterSessions(d SessionDeps) {
 func sessionErr(err error) error {
 	var inv *session.ErrInvalid
 	var unavailable *session.ErrUnavailable
+	var busy *session.ErrBusy
 	switch {
+	case errors.As(err, &busy):
+		return &service.Conflict{Msg: busy.Msg}
 	case errors.Is(err, session.ErrNotFound):
 		return service.ErrNotFound
 	case errors.As(err, &inv):

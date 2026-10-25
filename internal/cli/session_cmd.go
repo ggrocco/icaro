@@ -324,10 +324,14 @@ func newAgentCmd(opts *rootOpts, agent string) *cobra.Command {
 }
 
 func newLoginCmd(opts *rootOpts) *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "login PROFILE",
 		Short: "Log the profile's agent in once; the login seeds every session of the profile",
-		Args:  cobra.ExactArgs(1),
+		Long: "Log the profile's agent in once; the login seeds every session of the profile.\n\n" +
+			"The login rewrites the profile's home seed, which running sessions may be using, so it is refused " +
+			"while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := opts.loadConfig()
 			if err != nil {
@@ -337,7 +341,7 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			info, err := c.PrepareLogin(cmd.Context(), args[0])
+			info, err := c.PrepareLogin(cmd.Context(), args[0], force)
 			if err != nil {
 				return err
 			}
@@ -350,6 +354,8 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			return runDockerCLI(cmd.Context(), dargs)
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "log in even while sessions of the profile use its home seed")
+	return cmd
 }
 
 // loginArgs builds `docker run` for a login under the container baseline,

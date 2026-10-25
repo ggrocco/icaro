@@ -53,7 +53,7 @@ Agent CLIs authenticate from their own home directory, so each profile has a per
 
 - `icaro login <profile>` runs the agent's login once, with the profile's **seed** home mounted read-write. It is the only command that writes to the seed.
 - Every session mounts the seed **read-only** and gets its own writable layer on top (a Docker overlay volume on Linux, a per-session copy elsewhere; `sessions.home_mode: auto | overlay | copy`). Concurrent sessions share the login and never corrupt each other's `~/.claude`.
-- A token an agent refreshes lands in that session's layer. Run `icaro login` again to refresh the seed.
+- A token an agent refreshes lands in that session's layer. Run `icaro login` again to refresh the seed. Because the seed is the lower layer of every running overlay session, the daemon refuses a login while sessions of the profile are queued, starting, or running on overlay homes, and names them; stop them first (`icaro session stop ID`), or pass `--force`.
 - Your own `~/.claude`, `~/.codex`, `~/.ssh`, `~/.aws` and similar directories are never mounted.
 
 Ícaro writes two things into each session's layer: the memory MCP server entry (`icaro mcp --socket /icaro/mcp.sock`) and the handoff preamble from `memory.preamble`. See [Shared memory](memory.md).

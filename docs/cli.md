@@ -264,10 +264,16 @@ icaro integration webhook-tokens [flags]
 
 ## `icaro login`
 
-Log the profile's agent in once; the login seeds every session of the profile
+Log the profile's agent in once; the login seeds every session of the profile.
+
+The login rewrites the profile's home seed, which running sessions may be using, so it is refused while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.
 
 ```text
-icaro login PROFILE
+icaro login PROFILE [flags]
+```
+
+```text
+      --force   log in even while sessions of the profile use its home seed
 ```
 
 ## `icaro mcp`
