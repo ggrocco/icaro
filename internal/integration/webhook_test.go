@@ -497,3 +497,21 @@ func TestHubPrunesDeliveries(t *testing.T) {
 	}
 }
 
+// Misses on the generic webhook share one bucket; once it is spent they
+// get 429.
+func TestWebhookTokenMissesAreRateLimited(t *testing.T) {
+	spec := &workflow.Spec{Version: 1, Name: "ingest", Triggers: []workflow.TriggerSpec{{Integration: "webhook", Event: "received"}}}
+	f := newHookFixture(t, fakeSpecs{spec}, config.WebhooksConfig{RatePerMin: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go f.hub.limiter.run(ctx)
+	for !f.hub.limiter.running.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	if code, _, _ := f.post("/hooks/webhook/guess-1", []byte(`{}`), nil); code != http.StatusNotFound {
+		t.Fatal(code)
+	}
+	if code, _, _ := f.post("/hooks/webhook/guess-2", []byte(`{}`), nil); code != http.StatusTooManyRequests {
+		t.Fatal("a spent miss bucket must answer 429", code)
+	}
+}

@@ -238,8 +238,14 @@ func (h *Hub) ServeHookToken(w http.ResponseWriter, r *http.Request) {
 	}
 	tok, err := h.store.WebhookTokenByToken(r.Context(), r.PathValue("token"))
 	if err != nil {
-		// Rate-limit misses too, so tokens cannot be brute-forced quickly.
-		h.limiter.allow("webhook:miss")
+		// Misses share one bucket: once it is spent a token scan gets 429s,
+		// which throttles it and makes it visible. (Tokens carry 192
+		// random bits, so guessing is hopeless anyway.)
+		if !h.limiter.allow("webhook:miss") {
+			w.Header().Set("Retry-After", "60")
+			writeHookJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+			return
+		}
 		writeHookJSON(w, http.StatusNotFound, map[string]string{"error": "unknown webhook token"})
 		return
 	}
