@@ -32,6 +32,13 @@ func newFakeCompose() *fakeCompose {
 	return &fakeCompose{ups: map[string]int{}, downs: map[string]int{}, running: map[string]int{}, files: map[string][]string{}}
 }
 
+// filesFor returns the compose files the last up of project got.
+func (c *fakeCompose) filesFor(project string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.files[project]...)
+}
+
 func (f *fakeCompose) Config(_ context.Context, _, _ string, files []string) ([]byte, error) {
 	return os.ReadFile(files[0])
 }
@@ -82,6 +89,14 @@ type fakeEngine struct {
 }
 
 func newFakeEngine() *fakeEngine { return &fakeEngine{networks: map[string]bool{}} }
+
+// snapshot reads the counters under the lock: the manager's proxy loop
+// writes them from its own goroutine.
+func (e *fakeEngine) snapshot() (network bool, creates, restarts int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.networks[Network], e.creates, e.restarts
+}
 
 func (e *fakeEngine) EnsureImage(context.Context, string) error { return nil }
 func (e *fakeEngine) EnsureNetwork(_ context.Context, n string, _ map[string]string) (bool, error) {
@@ -192,10 +207,10 @@ func TestAddSyncAndNoRestartWithoutConfigChange(t *testing.T) {
 	if p.Status != store.PreviewRunning || p.Hostname != "feature-x.localhost" || p.URL != "http://feature-x.localhost:18780" || p.Port != 8000 || p.Service != "web" {
 		t.Fatalf("%+v", p)
 	}
-	if e.compose.count(e.compose.ups, p.ComposeProject) != 1 || !e.engine.networks[Network] || e.engine.creates != 1 {
+	if network, creates, _ := e.engine.snapshot(); e.compose.count(e.compose.ups, p.ComposeProject) != 1 || !network || creates != 1 {
 		t.Fatal("expected one up, the network and the proxy")
 	}
-	files := e.compose.files[p.ComposeProject]
+	files := e.compose.filesFor(p.ComposeProject)
 	if len(files) != 2 || files[0] != filepath.Join(p.WorktreePath, "compose.yaml") {
 		t.Fatalf("user compose must be passed unchanged: %v", files)
 	}
@@ -388,11 +403,11 @@ func TestMacOSPollingAndProxyKick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	override, _ := os.ReadFile(e.compose.files[p.ComposeProject][1])
+	override, _ := os.ReadFile(e.compose.filesFor(p.ComposeProject)[1])
 	if !strings.Contains(string(override), "CHOKIDAR_USEPOLLING") {
 		t.Fatal("macOS override must enable polling watch")
 	}
-	if e.engine.restarts == 0 {
+	if _, _, restarts := e.engine.snapshot(); restarts == 0 {
 		t.Fatal("macOS must kick the proxy after a route change")
 	}
 }
