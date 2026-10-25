@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 	"errors"
-	"net/http/cgi"
+	"net/http/cgi" //nolint:gosec // test-only smart-HTTP git remote; Go >= 1.6.3 is not vulnerable to httpoxy
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
