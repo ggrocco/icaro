@@ -180,7 +180,7 @@ type UpdateConfig struct {
 func DefaultProfiles() map[string]ProfileConfig {
 	return map[string]ProfileConfig{
 		"claude": {Agent: "claude", Image: DefaultAgentImage, Egress: []string{
-			"api.anthropic.com", "console.anthropic.com", "claude.ai", "statsig.anthropic.com", "sentry.io",
+			"api.anthropic.com", "console.anthropic.com", "claude.ai", "statsig.anthropic.com",
 		}},
 		"codex": {Agent: "codex", Image: DefaultAgentImage, Egress: []string{
 			"api.openai.com", "auth.openai.com", "chatgpt.com",

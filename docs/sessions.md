@@ -30,7 +30,7 @@ profiles:
   claude:
     agent: claude
     image: ghcr.io/icaro-dev/agent-base:latest
-    egress: [api.anthropic.com, console.anthropic.com, claude.ai, statsig.anthropic.com, sentry.io]
+    egress: [api.anthropic.com, console.anthropic.com, claude.ai, statsig.anthropic.com]
   codex:
     agent: codex
     image: ghcr.io/icaro-dev/agent-base:latest
@@ -44,6 +44,8 @@ profiles:
 sessions:
   default_profile: claude
 ```
+
+The `claude` allowlist leaves out `sentry.io`, Claude Code's error reporting: Sentry is a shared ingest service anyone can send data to, so allowing it gives a prompt-injected agent a way out. Claude Code works without it. To send its crash reports anyway, add `sentry.io` to the profile's `egress` list. Configs written by an older `icaro setup` may still list it; remove it there to close that path.
 
 `--profile NAME` on `session create`, `sh`, `claude` and `codex` picks another profile. `icaro setup` pulls each image and pins it by digest; `icaro doctor` reports a pinned image that is missing or changed, and `--fix` pulls it again by its digest. The agent base image is built from [`images/agent-base/Dockerfile`](../images/agent-base/Dockerfile) (`make image-agent`).
 
