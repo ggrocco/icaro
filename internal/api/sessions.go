@@ -132,6 +132,19 @@ func (s *Server) RegisterSessions(d SessionDeps) {
 		}
 		writeJSON(w, http.StatusOK, out)
 	}))
+	m.Handle("POST /api/v1/sessions/{id}/push", s.auth(store.ScopeWrite, func(w http.ResponseWriter, r *http.Request) {
+		var in session.PushRequest
+		if err := readJSON(r, &in); err != nil {
+			s.writeError(w, err)
+			return
+		}
+		out, err := d.Sessions.Push(r.Context(), r.PathValue("id"), in)
+		if err != nil {
+			s.writeError(w, sessionErr(err))
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	}))
 	m.Handle("DELETE /api/v1/sessions/{id}", s.auth(store.ScopeWrite, func(w http.ResponseWriter, r *http.Request) {
 		keep := r.URL.Query().Get("keep_worktree") == "true"
 		if err := d.Sessions.Remove(r.Context(), r.PathValue("id"), keep); err != nil {
@@ -227,7 +240,10 @@ func sessionErr(err error) error {
 	var inv *session.ErrInvalid
 	var unavailable *session.ErrUnavailable
 	var busy *session.ErrBusy
+	var push *session.ErrPush
 	switch {
+	case errors.As(err, &push):
+		return &service.Upstream{Msg: push.Msg}
 	case errors.As(err, &busy):
 		return &service.Conflict{Msg: busy.Msg}
 	case errors.Is(err, session.ErrNotFound):

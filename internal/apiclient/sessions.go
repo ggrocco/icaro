@@ -64,6 +64,12 @@ func (c *Client) StartSession(ctx context.Context, id string) (*session.Session,
 	return &out, c.doJSON(ctx, http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/start", nil, &out)
 }
 
+// PushSession pushes the session's own branch from the host.
+func (c *Client) PushSession(ctx context.Context, id string, req session.PushRequest) (*session.PushResult, error) {
+	var out session.PushResult
+	return &out, c.doJSON(ctx, http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/push", req, &out)
+}
+
 // RemoveSession removes a session (and its worktree unless keep).
 func (c *Client) RemoveSession(ctx context.Context, id string, keepWorktree bool) error {
 	path := "/api/v1/sessions/" + url.PathEscape(id)

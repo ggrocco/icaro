@@ -139,3 +139,21 @@ func TestReadSecretAndPasswordPromptWithoutTerminal(t *testing.T) {
 		t.Fatalf("%v %q", err, pw)
 	}
 }
+
+func TestSessionPushCommand(t *testing.T) {
+	fakeAPI(t, map[string]string{
+		"POST /api/v1/sessions/s1/push": `{"session_id":"s1","remote":"origin","branch":"icaro/x","commit":"0123456789abcdef0123","forced":false}`,
+		"POST /api/v1/sessions/s2/push": `{"session_id":"s2","remote":"up","branch":"icaro/y","commit":"abc","forced":true}`,
+	})
+	wantCLI(t, []string{"session", "push", "s1"}, "pushed icaro/x (0123456789ab) to origin")
+	wantCLI(t, []string{"session", "push", "s1", "--json"}, `"branch": "icaro/x"`)
+	// --force-with-lease asks first; "no" sends nothing.
+	if out, err := runCLI(t, "n\n", "session", "push", "s2", "--remote", "up", "--force-with-lease"); err != nil || !strings.Contains(out, "Overwrite the remote branch of session s2 on up") {
+		t.Fatalf("declined: %v\n%s", err, out)
+	}
+	if out, err := runCLI(t, "y\n", "session", "push", "s2", "--remote", "", "--force-with-lease"); err != nil || !strings.Contains(out, "on origin") || !strings.Contains(out, "force-pushed (with lease) icaro/y (abc) to up") {
+		t.Fatalf("confirmed: %v\n%s", err, out)
+	}
+	wantCLI(t, []string{"session", "push", "s2", "--force-with-lease", "--yes"}, "force-pushed")
+	failCLI(t, "not found", "session", "push", "nope")
+}

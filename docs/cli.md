@@ -695,7 +695,7 @@ Aliases: sessions
       --json   print JSON
 ```
 
-Subcommands: `attach` `create` `get` `list` `projects` `rm` `start` `stop`
+Subcommands: `attach` `create` `get` `list` `projects` `push` `rm` `start` `stop`
 
 ## `icaro session attach`
 
@@ -747,6 +747,20 @@ List projects (repositories with sessions)
 
 ```text
 icaro session projects
+```
+
+## `icaro session push`
+
+Push the session's own branch (icaro/NAME) to a remote configured in the repository, from the host, with your git credentials, so agent containers never hold any. Only that branch is pushed (no tags, no submodules); host git runs with hooks and fsmonitor disabled and the file transport refused, because the agent controlled the worktree. --force-with-lease overwrites the remote branch only while it still points where your remote-tracking ref says (fetch first); a plain force push is never done.
+
+```text
+icaro session push ID [flags]
+```
+
+```text
+      --force-with-lease   overwrite the remote branch if it still matches your remote-tracking ref
+      --remote string      name of a remote configured in the repository (default "origin")
+      --yes                do not ask before --force-with-lease
 ```
 
 ## `icaro session rm`
