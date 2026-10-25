@@ -31,6 +31,8 @@
 
 - Agent credentials live only in the managed per-profile home, seeded at login. The host's real `~/.claude`/`~/.config/gh`/`~/.aws` is never bind-mounted.
 - **Egress allowlist: mandatory, on by default, locked to provider endpoints.** With the credential inside the container, this allowlist is the primary mitigation for threat #1. The allowlist is defined per profile.
+- **Credential injection, opt-in per profile** ([ADR 0028](adr/0028-credential-injection.md)). A profile with `inject` keeps its provider API key in the secret store, host-bound to the provider's API host. Its containers get a base URL on the profile's egress proxy and a per-session capability token. The proxy relays to the daemon over a socket only it mounts. The daemon checks the token (current token of a running session of that profile), allows only the provider paths the agent CLIs need, drops client credentials, adds the key, calls the provider over verified TLS, filters the key out of the streamed response and writes a per-session audit line. The key is in no container, so it cannot be exfiltrated. It can still be **used** through the proxy within the path allowlist, for example to burn quota. Subscription OAuth logins are not covered and stay as above (spike S4).
+- **Git credentials stay on the host.** `icaro session push` pushes a session's own branch from the host with the user's git credentials, so no container needs them. Every host-side git command on session worktrees runs with `core.fsmonitor=false`, `core.hooksPath=/dev/null`, `protocol.file.allow=never` and no submodule recursion, because the agent controlled the worktree.
 - Docker non-root is documented as a weak boundary; stronger isolation is spike S5 in the [feasibility gate](02-decisions-risks.md#feasibility-gate).
 
 **Secrets and logs**
@@ -57,6 +59,7 @@
 | Docker missing/inactive | error | OS-specific instructions |
 | Orphaned lock/socket/PID (lock held by a non-existent PID, unreachable socket) | warning/error | `icaro doctor --fix` removes after validation |
 | Orphaned sessions (container/worktree/preview gone after restart) | warning | re-attach or clean up the session ([ADR 0006](adr/0006-session-persistence-recovery.md)) |
+| A profile's `inject` names a missing secret, or one not bound to its provider's API host | warning | `icaro secret set NAME --host <provider host>` ([ADR 0028](adr/0028-credential-injection.md)) |
 | Insecure permissions on `~/.icaro` | error | fixes to 0700/0600 |
 | Pending or failed migrations | error | runs or reports the migration |
 | Unverified image | error | re-pull by known digest |
