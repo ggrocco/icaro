@@ -66,7 +66,7 @@ On macOS, set `docker.helper_image` (for example to the agent base image), becau
 
 ## Mounts
 
-The session manager adds its own mounts: the worktree at `/workspace`, the profile home, the session's `/icaro` directory, and the repository's `.git` (with `hooks/` and `config` read-only, so an agent cannot plant a hook that your git would later run). You can add more with `profiles.<name>.mounts` (`host:container[:ro]`), but only under directories listed in `mounts.allow`:
+The session manager adds its own mounts: the worktree at `/workspace`, the profile home, the session's `/icaro` directory, and the repository's `.git`. Inside `.git`, everything your git reads to decide what to run is read-only: `config`, `hooks/` (created empty if missing), submodule config and hooks, other worktrees' admin files, and the session worktree's `.git` link files, so an agent cannot plant a hook or setting that your git would later run. Objects, refs and the session's own index stay writable, so the agent can commit. You can add more with `profiles.<name>.mounts` (`host:container[:ro]`), but only under directories listed in `mounts.allow`:
 
 ```yaml
 mounts:

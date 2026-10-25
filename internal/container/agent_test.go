@@ -30,7 +30,7 @@ func TestAgentSpecBuild(t *testing.T) {
 	for _, m := range spec.HostConfig.Mounts {
 		got = append(got, string(m.Type)+":"+m.Target+":"+map[bool]string{true: "ro", false: "rw"}[m.ReadOnly])
 	}
-	want := []string{"bind:/workspace:rw", "bind:" + git + ":rw", "bind:" + git + "/hooks:ro", "bind:" + git + "/config:ro",
+	want := []string{"bind:/workspace:rw", "bind:" + git + ":rw", "bind:" + git + "/config:ro", "bind:" + git + "/hooks:ro",
 		"volume:/home/icaro:rw", "bind:/icaro:rw", "bind:/home/host:rw", "tmpfs:/home/host/.ssh:rw", "bind:/home/host/.netrc:ro"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("mounts:\n%v\nwant\n%v", got, want)
