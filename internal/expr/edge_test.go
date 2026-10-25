@@ -197,6 +197,20 @@ func TestRefsEdges(t *testing.T) {
 		{"trigger['a'][0]", []string{"trigger.a.0"}},
 		{"fromJSON(trigger.body).a[steps.k]", []string{"trigger.body", "steps.k"}},
 		{"has(trigger.x) || !steps.x", []string{"trigger.x?", "steps.x"}},
+		// has() guards what short-circuit evaluation reads after it.
+		{"has(trigger.label) && trigger.label == 'bug'", []string{"trigger.label?", "trigger.label?"}},
+		{"has(trigger.a) && has(trigger.b) && trigger.b.c == trigger.d", []string{"trigger.a?", "trigger.b?", "trigger.b.c?", "trigger.d"}},
+		{"!has(trigger.x) || trigger.x == 1", []string{"trigger.x?", "trigger.x?"}},
+		{"!(has(trigger.x) && has(trigger.y)) || trigger.y", []string{"trigger.x?", "trigger.y?", "trigger.y?"}},
+		{"has(trigger.x.y) && trigger.x", []string{"trigger.x.y?", "trigger.x?"}},
+		{"has(trigger.l[steps.i].n) && trigger.l", []string{"steps.i?", "trigger.l*?", "trigger.l?"}},
+		// Not guards: the wrong operator, the wrong side, another path.
+		{"has(trigger.x) || trigger.x == 1", []string{"trigger.x?", "trigger.x"}},
+		{"trigger.x == 1 && has(trigger.x)", []string{"trigger.x", "trigger.x?"}},
+		{"has(trigger.x) && trigger.xy", []string{"trigger.x?", "trigger.xy"}},
+		{"(has(trigger.x) || has(trigger.y)) && trigger.x", []string{"trigger.x?", "trigger.y?", "trigger.x"}},
+		{"!has(trigger.x) && trigger.x", []string{"trigger.x?", "trigger.x"}},
+		{"has(fromJSON(trigger.b).k) && trigger.b", []string{"trigger.b?", "trigger.b"}},
 	}
 	for _, c := range cases {
 		e, err := Parse(c.src)

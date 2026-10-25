@@ -105,13 +105,41 @@ func (s *Store) SetWebhook(ctx context.Context, id, token string, secretCT []byt
 	return affected(res)
 }
 
-// DeleteWorkflow removes a workflow and its versions (runs are kept).
-func (s *Store) DeleteWorkflow(ctx context.Context, id string) error {
-	res, err := s.exec(ctx, `DELETE FROM workflows WHERE id = ?`, id)
-	if err != nil {
+// DeleteWorkflow removes a workflow in one transaction: its queued runs
+// are cancelled and its running runs flagged for cancellation (returned
+// as they were, so the caller can stop the running ones), and its
+// versions are removed except those a run still executes or shows. Runs
+// are kept. EnqueueRun takes the same row lock, so no run of the
+// workflow can be created concurrently.
+func (s *Store) DeleteWorkflow(ctx context.Context, id string) ([]*Run, error) {
+	var active []*Run
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, s.rebind(`UPDATE workflows SET version = version WHERE id = ?`), id)
+		if err != nil {
+			return err
+		}
+		if err := affected(res); err != nil {
+			return err
+		}
+		if active, err = s.activeRunsTx(ctx, tx, id); err != nil {
+			return err
+		}
+		for _, r := range active {
+			if err := s.requestCancelTx(ctx, tx, r.ID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM workflow_versions WHERE workflow_id = ?
+			AND version NOT IN (SELECT workflow_version FROM runs WHERE workflow_id = ?)`), id, id); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, s.rebind(`DELETE FROM workflows WHERE id = ?`), id)
 		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	return affected(res)
+	return active, nil
 }
 
 // ListWorkflowVersions returns versions newest first.

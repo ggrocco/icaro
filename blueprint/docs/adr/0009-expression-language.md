@@ -15,7 +15,7 @@
 - **Grammar:** literals (`'str'`, `"str"`, numbers, `true`, `false`, `null`), references (`steps.build.outputs.url`, `headers['x-github-event']`, `trigger.labels[0]`), `== != < <= > >=`, `&& || !`, parentheses, and calls to allow-listed functions. Identifiers may contain `-`, so step ids such as `build-app` work in paths. There is no arithmetic.
 - **Functions:** `contains startsWith endsWith lower upper trim length toJSON fromJSON join split format coalesce string number`, plus `has(ref)`, the only construct for which an absent key is not an error.
 - **Static analysis:** every expression exposes its references, so validators check roots, `needs` ancestry and declared outputs before a run starts; unknown names and functions carry nearest-match hints.
-- **Roots:** workflows see `steps`, `trigger`, `env`, `secrets`, `run`, `workflow`; trigger filters see `trigger`; manifests see the roots their section defines (`headers`, `body`, `query`, `raw_body` for triggers; `input`, `config`, `response` for actions).
+- **Roots:** workflows see `steps`, `trigger`, `env`, `secrets`, `run`, `workflow` (a `when` does not see `secrets`: a step's status would leak a condition on one; host-bound integration credentials are never interpolable); trigger filters see `trigger`; manifests see the roots their section defines (`headers`, `body`, `query`, `raw_body` for triggers; `input`, `config`, `response` for actions).
 
 ## Consequences
 

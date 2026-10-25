@@ -50,6 +50,12 @@ func TestSecretsLifecycle(t *testing.T) {
 	if len(infos) != 1 || infos[0].Hosts[0] != "*.githubusercontent.com" {
 		t.Fatalf("%+v", infos)
 	}
+	if hosts, err := s.Hosts(ctx, "github.token"); err != nil || len(hosts) != 2 || hosts[0] != "*.githubusercontent.com" {
+		t.Fatalf("hosts: %v %v", hosts, err)
+	}
+	if _, err := s.Hosts(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("hosts of a missing secret: %v", err)
+	}
 	vals, _ := s.Values(ctx)
 	names, _ := s.Names(ctx)
 	if len(vals) != 1 || names[0] != "github.token" {

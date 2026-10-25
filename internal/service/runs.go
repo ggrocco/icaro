@@ -64,7 +64,8 @@ func Terminal(status string) bool {
 // EnqueueRun starts a run (workflow.Enqueuer). It deduplicates on the
 // idempotency key and applies the workflow's concurrency policy: forbid
 // skips while a run is active, queue waits for the active run, replace
-// cancels active runs first, allow runs side by side.
+// cancels active runs first (and waits for them to stop), allow runs
+// side by side. The policy check and the insert are one transaction.
 func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (workflow.EnqueueResult, error) {
 	w, err := s.lookup(ctx, req.Workflow)
 	if err != nil {
@@ -85,28 +86,6 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 		return workflow.EnqueueResult{}, err
 	}
 	policy := spec.ConcurrencyPolicy()
-	switch policy {
-	case workflow.ConcurrencyForbid:
-		active, err := s.store.ActiveRuns(ctx, w.ID)
-		if err != nil {
-			return workflow.EnqueueResult{}, err
-		}
-		if len(active) > 0 {
-			reason := fmt.Sprintf("concurrency forbid: run %s is %s", active[0].ID, active[0].Status)
-			s.log.Info("run skipped", "workflow", w.Name, "reason", reason)
-			return workflow.EnqueueResult{Skipped: reason}, nil
-		}
-	case workflow.ConcurrencyReplace:
-		active, err := s.store.ActiveRuns(ctx, w.ID)
-		if err != nil {
-			return workflow.EnqueueResult{}, err
-		}
-		for _, r := range active {
-			if _, err := s.CancelRun(ctx, r.ID); err != nil {
-				return workflow.EnqueueResult{}, err
-			}
-		}
-	}
 	steps, err := engine.StepInits(spec)
 	if err != nil {
 		return workflow.EnqueueResult{}, err
@@ -127,13 +106,29 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 		WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: w.Version, TriggerKind: kind, TriggerJSON: string(tj),
 		IdempotencyKey: req.IdempotencyKey, Concurrency: policy, DeliveryID: req.DeliveryID, Actor: req.Actor,
 	}
-	if err := s.store.CreateRun(ctx, run, steps); err != nil {
+	out, err := s.store.EnqueueRun(ctx, run, steps)
+	if err != nil {
 		if errors.Is(err, store.ErrConflict) && req.IdempotencyKey != "" {
 			if prev, err := s.store.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
 				return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true}, nil
 			}
 		}
 		return workflow.EnqueueResult{}, err
+	}
+	if b := out.Blocking; b != nil {
+		reason := fmt.Sprintf("concurrency forbid: run %s is %s", b.ID, b.Status)
+		s.log.Info("run skipped", "workflow", w.Name, "reason", reason)
+		return workflow.EnqueueResult{Skipped: reason}, nil
+	}
+	for _, old := range out.Replaced {
+		s.log.Info("run replaced", "run", old.ID, "workflow", w.Name, "by", run.ID)
+		if old.Status == store.RunRunning {
+			if s.runner != nil {
+				s.runner.Cancel(old.ID)
+			}
+		} else {
+			s.events.Publish(events.Event{Type: events.TypeRun, RunID: old.ID, Status: store.RunCancelled})
+		}
 	}
 	if s.runner != nil {
 		s.runner.Wake()

@@ -15,6 +15,7 @@ import (
 
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
+	"icaro/internal/expr"
 	"icaro/internal/session"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
@@ -642,11 +643,63 @@ func (s fakeSecrets) Names(context.Context) ([]string, error) {
 	return out, nil
 }
 
+func (s fakeSecrets) Hosts(context.Context, string) ([]string, error) { return nil, nil }
+
+// boundSecrets adds host bindings (integration credentials).
+type boundSecrets struct {
+	fakeSecrets
+	hosts map[string][]string
+}
+
+func (s boundSecrets) Hosts(_ context.Context, n string) ([]string, error) { return s.hosts[n], nil }
+
+type fakeCatalog struct{ workflow.Catalog }
+
+func (fakeCatalog) Integrations() []string { return []string{"github"} }
+
+// Integration credentials never reach a template or a container, even
+// when the workflow was saved before the secret was bound.
+func TestIntegrationCredentialsAreRefused(t *testing.T) {
+	cases := map[string]string{
+		"bound":   "deploy_key",
+		"by name": "github.webhook_secret",
+	}
+	for name, secret := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.deps.Secrets = boundSecrets{
+				fakeSecrets: fakeSecrets{"deploy_key": "k3y-value-123", "github.webhook_secret": "wh-secret-456"},
+				hosts:       map[string][]string{"deploy_key": {"api.example.com"}},
+			}
+			f.deps.Catalog = fakeCatalog{}
+			run := f.enqueue("version: 1\nname: creds\nsteps:\n  - id: s1\n    image: img\n    env: { K: \"${{ secrets['"+secret+"'] }}\" }\n", nil)
+			_, stop := f.start()
+			defer stop()
+			got := f.wait(run.ID, store.RunFailed)
+			if !strings.Contains(got.Error, "integration credential") || !strings.Contains(got.Error, "uses:") {
+				t.Fatalf("run error %q", got.Error)
+			}
+			if len(f.containersForStep("s1")) != 0 {
+				t.Fatal("no step may start")
+			}
+		})
+	}
+}
+
+// echoActions returns its text input in nested outputs, the way an
+// integration response may echo a credential back.
+type echoActions struct{}
+
+func (echoActions) Execute(_ context.Context, _ string, input map[string]any) (map[string]any, error) {
+	return map[string]any{"echo": input["text"], "nested": map[string]any{"list": []any{input["text"], 1.0}}}, nil
+}
+
 func TestSecretsAreInjectedAndRedacted(t *testing.T) {
 	f := newFixture(t)
 	f.deps.Secrets = fakeSecrets{"api_token": "s3cr3t-value", "other": "another-secret"}
+	f.deps.Actions = echoActions{}
 	f.docker.OnStart = func(c *docker.FakeContainer) docker.Behavior {
-		return docker.Behavior{Stdout: "token=s3cr3t-value other=another-secret\n", Output: []byte(`{"leak":"s3cr3t-value"}`)}
+		return docker.Behavior{Stdout: "token=s3cr3t-value other=another-secret\n", Output: []byte(`{"leak":"s3cr3t-value","deep":{"items":[{"v":"x another-secret y"}],"another-secret":true,"n":2}}`)}
 	}
 	run := f.enqueue(`
 version: 1
@@ -656,7 +709,10 @@ env:
 steps:
   - id: use
     image: img
-    outputs: { out: stdout }
+    outputs: { out: stdout, leak: json:leak, deep: json:deep, item: json:deep.items.0.v, doc: json:$ }
+  - id: call
+    uses: slack.post-message
+    input: { text: "${{ secrets.api_token }}" }
 `, nil)
 	_, stop := f.start()
 	defer stop()
@@ -669,8 +725,21 @@ steps:
 	if strings.Contains(string(b), "s3cr3t") || strings.Contains(string(b), "another-secret") || !strings.Contains(string(b), "token=***") {
 		t.Fatalf("log not redacted: %q", b)
 	}
-	if out := f.outputs(run.ID, "use")["out"]; out != "token=*** other=***" {
+	outs := f.outputs(run.ID, "use")
+	if out := outs["out"]; out != "token=*** other=***" {
 		t.Fatalf("stdout capture not redacted: %v", out)
+	}
+	if outs["leak"] != "***" || outs["item"] != "x *** y" {
+		t.Fatalf("json capture not redacted: %v", outs)
+	}
+	for _, step := range []string{"use", "call"} {
+		raw := f.step(run.ID, step).OutputsJSON
+		if strings.Contains(raw, "s3cr3t") || strings.Contains(raw, "another-secret") {
+			t.Fatalf("%s outputs leak a secret: %s", step, raw)
+		}
+	}
+	if call := f.outputs(run.ID, "call"); call["echo"] != "***" {
+		t.Fatalf("uses outputs not redacted: %v", call)
 	}
 }
 
@@ -820,6 +889,66 @@ steps:
 	}
 	if !seen["run:running"] || !seen["step:running"] || !seen["step:succeeded"] {
 		t.Fatalf("events: %v", seen)
+	}
+}
+
+// repository ref and revision are rendered before git sees them, and a
+// rendered value that git would read as an option, or that carries a
+// secret, fails the step without reaching git.
+func TestRepositoryIsRendered(t *testing.T) {
+	const yaml = `
+version: 1
+name: repo-tmpl
+steps:
+  - id: co
+    image: img
+    repository: { ref: "https://example.com/${{ trigger.repo }}.git", revision: "${{ trigger.sha }}" }
+`
+	cases := []struct {
+		name    string
+		trigger map[string]any
+		want    string // step error; "" = success
+	}{
+		{"rendered", map[string]any{"repo": "acme/app", "sha": "abc123"}, ""},
+		{"option revision", map[string]any{"repo": "acme/app", "sha": "--output=/tmp/x"}, "git would read as an option"},
+		{"secret in ref", map[string]any{"repo": "s3cr3t-value", "sha": "main"}, "contains a secret value"},
+		{"missing field", map[string]any{"repo": "acme/app"}, "trigger.sha is not defined"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			ss := &stubSessions{dir: t.TempDir()}
+			f.deps.Sessions = ss
+			f.deps.Secrets = fakeSecrets{"tok": "s3cr3t-value"}
+			run := f.enqueue(yaml, c.trigger)
+			_, stop := f.start()
+			defer stop()
+			if c.want == "" {
+				f.wait(run.ID, store.RunSucceeded)
+				if len(ss.repos) != 1 || ss.repos[0] != "https://example.com/acme/app.git@abc123" {
+					t.Fatalf("repos %v", ss.repos)
+				}
+				return
+			}
+			f.wait(run.ID, store.RunFailed)
+			if r := f.step(run.ID, "co"); r.Status != store.StepFailed || !strings.Contains(r.Error, c.want) {
+				t.Fatalf("step %+v, want %q", r, c.want)
+			}
+			if len(ss.repos) != 0 {
+				t.Fatalf("git was reached: %v", ss.repos)
+			}
+		})
+	}
+	// A literal ref is checked the same way at run time.
+	rx := &runExec{}
+	if _, _, err := rx.renderRepository(&workflow.RepositoryRef{Ref: "  "}, expr.Env{}); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty ref: %v", err)
+	}
+	if _, _, err := rx.renderRepository(&workflow.RepositoryRef{Ref: "-x"}, expr.Env{}); err == nil {
+		t.Fatal("option ref accepted")
+	}
+	if _, _, err := rx.renderRepository(&workflow.RepositoryRef{Ref: "r", Revision: "${{ x }}"}, expr.Env{}); err == nil || !strings.Contains(err.Error(), "repository.revision") {
+		t.Fatalf("revision render: %v", err)
 	}
 }
 

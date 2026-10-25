@@ -190,6 +190,9 @@ func (rx *runExec) usesAttempt(ctx context.Context, st *workflow.StepSpec, row *
 		lc.line("error: " + err.Error())
 		return nil, err
 	}
+	// The executor already redacts responses; the run's redactor also
+	// covers values it does not know (an image step's secrets).
+	outputs, _ = redactValue(rx.redact, outputs).(map[string]any)
 	keys := make([]string, 0, len(outputs))
 	for k := range outputs {
 		keys = append(keys, k)

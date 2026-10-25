@@ -125,8 +125,13 @@ type MountsConfig struct {
 
 // WorkflowsConfig tunes the workflow engine.
 type WorkflowsConfig struct {
-	Concurrency int    `koanf:"concurrency" yaml:"concurrency"`
-	Profile     string `koanf:"profile" yaml:"profile"`
+	// Concurrency caps step containers running at once across all runs.
+	Concurrency int `koanf:"concurrency" yaml:"concurrency"`
+	// MaxRuns caps runs executing at once (0 = Concurrency); RunParallelism
+	// caps parallel steps within one run (0 = only the global cap).
+	MaxRuns        int    `koanf:"max_runs" yaml:"max_runs"`
+	RunParallelism int    `koanf:"run_parallelism" yaml:"run_parallelism"`
+	Profile        string `koanf:"profile" yaml:"profile"`
 	// AllowHost permits image steps to run on the host (MVP cut 4: off).
 	AllowHost bool `koanf:"allow_host" yaml:"allow_host"`
 }
@@ -314,6 +319,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Workflows.Concurrency < 1 {
 		errs = append(errs, errors.New("workflows.concurrency must be >= 1"))
+	}
+	if c.Workflows.MaxRuns < 0 {
+		errs = append(errs, errors.New("workflows.max_runs must be >= 0 (0 = workflows.concurrency)"))
+	}
+	if c.Workflows.RunParallelism < 0 {
+		errs = append(errs, errors.New("workflows.run_parallelism must be >= 0 (0 = no per-run cap)"))
 	}
 	if c.Limits.Timeout <= 0 {
 		errs = append(errs, errors.New("limits.timeout must be > 0"))

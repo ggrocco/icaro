@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"icaro/internal/crypto"
@@ -31,6 +32,15 @@ func (s fakeSecrets) Names(context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+func (s fakeSecrets) Hosts(context.Context, string) ([]string, error) { return nil, nil }
+
+// boundSecrets adds host bindings (integration credentials).
+type boundSecrets struct {
+	fakeSecrets
+	hosts map[string][]string
+}
+
+func (s boundSecrets) Hosts(_ context.Context, n string) ([]string, error) { return s.hosts[n], nil }
 
 func newService(t *testing.T) (*Service, *fakeRunner) {
 	t.Helper()
@@ -66,6 +76,19 @@ steps:
 env:
   TOKEN: ${{ secrets.api }}
 `
+
+// A host-bound secret is an integration credential: workflows cannot
+// interpolate it, whatever its name.
+func TestIntegrationCredentialIsRefused(t *testing.T) {
+	svc, _ := newService(t)
+	ctx := context.Background()
+	svc.SetSecrets(boundSecrets{fakeSecrets: fakeSecrets{"api": "x"}, hosts: map[string][]string{"api": {"api.example.com"}}})
+	_, err := svc.ApplyWorkflow(ctx, hello, "alice")
+	var ve *ValidationError
+	if !errors.As(err, &ve) || ve.Issues[0].Path != "/env/TOKEN" || !strings.Contains(ve.Issues[0].Message, "integration credential") || !strings.Contains(ve.Issues[0].Hint, "uses:") {
+		t.Fatalf("expected an integration credential issue, got %v", err)
+	}
+}
 
 func TestWorkflowLifecycle(t *testing.T) {
 	svc, _ := newService(t)
@@ -279,6 +302,76 @@ func TestConcurrencyPoliciesAndIdempotency(t *testing.T) {
 	}
 	if _, err := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "missing"}); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
+	}
+}
+
+// Deleting a workflow stops its runs and keeps their history readable.
+func TestDeleteWorkflowCancelsRunsAndKeepsHistory(t *testing.T) {
+	svc, fr := newService(t)
+	ctx := context.Background()
+	mustApply(t, svc, "version: 1\nname: del-me\nsteps:\n  - { id: s1, image: x }\n  - { id: s2, image: x, needs: [s1] }\n")
+	running, err := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "del-me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.store.ClaimRun(ctx, "daemon"); err != nil {
+		t.Fatal(err)
+	}
+	queued, _ := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "del-me"})
+	if err := svc.DeleteWorkflow(ctx, "del-me"); err != nil {
+		t.Fatal(err)
+	}
+	if fr.cancelled != 1 {
+		t.Fatalf("running run not stopped: %d cancels", fr.cancelled)
+	}
+	q, err := svc.GetRun(ctx, queued.RunID)
+	if err != nil || q.Status != store.RunCancelled {
+		t.Fatalf("queued run: %v %+v", err, q)
+	}
+	r, _ := svc.GetRun(ctx, running.RunID)
+	if len(r.Steps) != 2 || len(r.Steps[1].Needs) != 1 || r.Steps[1].Needs[0] != "s1" {
+		t.Fatalf("the run's version must survive the delete: %+v", r.Steps)
+	}
+	if _, err := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "del-me"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("enqueue after delete: %v", err)
+	}
+}
+
+// forbid and replace decide and insert atomically: concurrent enqueues
+// (a webhook burst, a cron tick racing a manual run) never leave two
+// active runs of a forbid or replace workflow.
+func TestConcurrentEnqueuesHonorPolicy(t *testing.T) {
+	for _, policy := range []string{"forbid", "replace"} {
+		t.Run(policy, func(t *testing.T) {
+			svc, _ := newService(t)
+			ctx := context.Background()
+			mustApply(t, svc, policyWorkflow(policy))
+			const n = 24
+			var wg sync.WaitGroup
+			errs := make(chan error, n)
+			for range n {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if _, err := svc.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: "pol-" + policy}); err != nil {
+						errs <- err
+					}
+				}()
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				t.Fatal(err)
+			}
+			w, _ := svc.store.GetWorkflow(ctx, "pol-"+policy)
+			active, err := svc.store.ActiveRuns(ctx, w.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(active) != 1 {
+				t.Fatalf("%d active runs, want 1", len(active))
+			}
+		})
 	}
 }
 

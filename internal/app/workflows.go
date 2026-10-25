@@ -48,14 +48,16 @@ func wireWorkflows(_ context.Context, a *App) error {
 	w.Events = bus
 	deps := engine.Deps{
 		Store: a.Store, Docker: a.Docker, Sessions: w.Sessions, Egress: w.Egress,
-		Actions: w.Actions, Events: bus, Log: a.Log,
+		Actions: w.Actions, Catalog: w.Catalog, Events: bus, Log: a.Log,
 	}
 	if a.Secrets != nil {
 		deps.Secrets = a.Secrets
 	}
 	w.Engine = engine.New(engine.Config{
-		Concurrency: cfg.Workflows.Concurrency,
-		StepTimeout: cfg.Limits.Timeout,
+		Concurrency:    cfg.Workflows.Concurrency,
+		MaxRuns:        cfg.Workflows.MaxRuns,
+		RunParallelism: cfg.Workflows.RunParallelism,
+		StepTimeout:    cfg.Limits.Timeout,
 		Limits: sandbox.Limits{
 			MemoryBytes: cfg.Limits.MemoryMB << 20,
 			NanoCPUs:    int64(cfg.Limits.CPUs * 1e9),

@@ -79,6 +79,7 @@ func TestStoreErrors(t *testing.T) {
 		"List":       func() error { _, err := s.List(ctx); return err }(),
 		"Names":      func() error { _, err := s.Names(ctx); return err }(),
 		"Values":     func() error { _, err := s.Values(ctx); return err }(),
+		"Hosts":      func() error { _, err := s.Hosts(ctx, "x"); return err }(),
 	} {
 		if err == nil || errors.Is(err, ErrNotFound) {
 			t.Errorf("%s on a closed database: %v", name, err)

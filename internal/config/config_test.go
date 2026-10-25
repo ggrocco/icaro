@@ -123,11 +123,13 @@ func TestValidateRanges(t *testing.T) {
 	cfg.Database.DSN = ""
 	cfg.Daemon.UIListen = "0.0.0.0:8787"
 	cfg.Workflows.Concurrency = 0
+	cfg.Workflows.MaxRuns = -1
+	cfg.Workflows.RunParallelism = -2
 	cfg.Limits.Timeout = 0
 	cfg.Sessions.MaxActive = -1
 	cfg.Workflows.Profile = "ghost"
 	err = cfg.Validate()
-	for _, want := range []string{"version 0", "home is required", "database.dsn is required", "daemon.ui_listen", "workflows.concurrency", "limits.timeout", "sessions.max_active", `workflows.profile "ghost"`} {
+	for _, want := range []string{"version 0", "home is required", "database.dsn is required", "daemon.ui_listen", "workflows.concurrency", "workflows.max_runs", "workflows.run_parallelism", "limits.timeout", "sessions.max_active", `workflows.profile "ghost"`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}
@@ -169,12 +171,12 @@ func TestPathsAndConfigFile(t *testing.T) {
 
 	// ICARO_CONFIG names the file; a missing one is an error.
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	if err := os.WriteFile(p, []byte("workflows:\n  concurrency: 3\n"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("workflows:\n  concurrency: 3\n  max_runs: 2\n  run_parallelism: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("ICARO_CONFIG", p)
 	cfg, err = Load("")
-	if err != nil || cfg.Workflows.Concurrency != 3 {
+	if err != nil || cfg.Workflows.Concurrency != 3 || cfg.Workflows.MaxRuns != 2 || cfg.Workflows.RunParallelism != 1 {
 		t.Fatalf("ICARO_CONFIG: %v %+v", err, cfg)
 	}
 	t.Setenv("ICARO_CONFIG", p+".missing")
