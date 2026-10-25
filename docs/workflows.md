@@ -59,7 +59,7 @@ Both forms take the same scheduling fields:
 
 | Field | Meaning |
 |---|---|
-| `needs` | Step ids that must finish first. Independent steps run in parallel, up to `workflows.concurrency` per daemon. |
+| `needs` | Step ids that must finish first. Independent steps run in parallel, within the [parallelism limits](#parallelism). |
 | `when` | A boolean expression; false records the step as `skipped`. It is evaluated once, after every need is final. |
 | `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. |
 | `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). |
@@ -160,6 +160,23 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 | `replace` | Cancel the active runs; the new run starts once they have stopped |
 
 The policy is checked and the run created in one transaction, so concurrent triggers cannot both slip past `forbid`. Webhook and cron runs carry an idempotency key, so a retried delivery or a repeated cron tick never starts a second run.
+
+## Parallelism
+
+Three config keys bound how much runs at once. A workflow cannot change them.
+
+| Key | Default | Caps |
+|---|---|---|
+| `workflows.concurrency` | `4` | Step containers and actions running at once, across all runs |
+| `workflows.max_runs` | `0` (= `workflows.concurrency`) | Runs executing at once; further runs wait in the queue |
+| `workflows.run_parallelism` | `0` (no extra cap) | Parallel steps within one run, so one wide DAG cannot take every slot |
+
+```yaml
+workflows:
+  concurrency: 8
+  max_runs: 4
+  run_parallelism: 2
+```
 
 ## Scheduling
 
