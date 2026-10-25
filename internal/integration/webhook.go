@@ -117,12 +117,9 @@ func (h *Hub) verify(ctx context.Context, m *Manifest, in *inbound, env expr.Env
 			return &verifyError{"shared secret does not match"}
 		}
 	case VerifyHMACSHA256, VerifyHMACSHA1:
-		msg := string(in.body)
-		if v.Message != "" {
-			msg, err = expr.RenderString(v.Message, env)
-			if err != nil {
-				return &verifyError{"render signed message: " + err.Error()}
-			}
+		msg, err := signedMessage(v, in, env)
+		if err != nil {
+			return &verifyError{"render signed message: " + err.Error()}
 		}
 		newHash := sha256.New
 		if v.Kind == VerifyHMACSHA1 {
@@ -155,6 +152,37 @@ func (h *Hub) verify(ctx context.Context, m *Manifest, in *inbound, env expr.Env
 	}
 	return nil
 }
+
+// signedMessage is the material an HMAC signature covers: the raw body,
+// or the manifest's message template.
+func signedMessage(v Verify, in *inbound, env expr.Env) (string, error) {
+	if v.Message == "" {
+		return string(in.body), nil
+	}
+	return expr.RenderString(v.Message, env)
+}
+
+// signedHash is the SHA-256 of a verified request's signed material, or
+// "" when nothing is signed (shared secret, URL token). A replay must
+// reuse a valid signature, so it carries the same signed material even
+// when it changes an unsigned header such as the delivery id.
+func signedHash(m *Manifest, in *inbound, env expr.Env) string {
+	v := m.Triggers.Verify
+	if v.Kind != VerifyHMACSHA256 && v.Kind != VerifyHMACSHA1 {
+		return ""
+	}
+	msg, err := signedMessage(v, in, env)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(msg))
+	return hex.EncodeToString(sum[:])
+}
+
+// rejectedBodyPrefix is how much of a rejected request's body is kept:
+// enough to debug a misconfigured provider, never megabytes per
+// unauthenticated request (architecture §4).
+const rejectedBodyPrefix = 4 << 10
 
 func (h *Hub) checkTimestamp(ts *Timestamp, raw string) error {
 	if raw == "" {
@@ -365,16 +393,21 @@ func (h *Hub) dispatch(ctx context.Context, in *inbound, deliveryID, key, kind s
 func (h *Hub) process(ctx context.Context, m *Manifest, in *inbound) (*Outcome, int) {
 	env := in.env()
 	vErr := h.verify(ctx, m, in, env)
+	sum := sha256.Sum256(in.body)
 	d := &store.Delivery{
 		Integration: in.integration, Workflow: in.workflow, Method: in.method,
 		HeadersJSON: headersJSON(in.headers, m), Query: in.query.Encode(), Body: in.body,
+		BodySize: int64(len(in.body)), BodySHA256: hex.EncodeToString(sum[:]),
 		Verified: vErr == nil, Status: store.DeliveryError,
 	}
 	if vErr == nil {
-		d.DeliveryKey = deliveryKey(m, in, env)
+		d.DeliveryKey, d.SignedSHA256 = deliveryKey(m, in, env), signedHash(m, in, env)
 	} else {
 		d.DeliveryKey = "unverified:" + store.NewID()
 		d.VerifyError, d.Status = vErr.Error(), store.DeliveryRejected
+		if len(d.Body) > rejectedBodyPrefix {
+			d.Body = d.Body[:rejectedBodyPrefix]
+		}
 	}
 	if err := h.store.CreateDelivery(ctx, d); err != nil {
 		h.log.Error("persist delivery", "integration", in.integration, "err", err)
@@ -386,7 +419,7 @@ func (h *Hub) process(ctx context.Context, m *Manifest, in *inbound) (*Outcome, 
 		h.log.Warn("webhook rejected", "integration", in.integration, "delivery", d.ID, "reason", vErr)
 		return out, http.StatusUnauthorized
 	}
-	if prev, err := h.store.FindProcessedDelivery(ctx, in.integration, d.DeliveryKey, in.workflow, d.ID); err == nil {
+	if prev, err := h.store.FindProcessedDelivery(ctx, in.integration, d.DeliveryKey, d.SignedSHA256, in.workflow, d.ID); err == nil {
 		out.Status, out.Duplicate = store.DeliveryDuplicate, prev.ID
 		h.finish(ctx, d.ID, out)
 		return out, http.StatusOK
@@ -491,8 +524,8 @@ func (h *Hub) Redeliver(ctx context.Context, id string) (*Outcome, error) {
 	in.query, _ = url.ParseQuery(orig.Query)
 	d := &store.Delivery{
 		Integration: orig.Integration, DeliveryKey: orig.DeliveryKey, Workflow: orig.Workflow, Method: orig.Method,
-		HeadersJSON: orig.HeadersJSON, Query: orig.Query, Body: orig.Body, Verified: true, Status: store.DeliveryError,
-		RedeliveryOf: orig.ID,
+		HeadersJSON: orig.HeadersJSON, Query: orig.Query, Body: orig.Body, BodySize: orig.BodySize, BodySHA256: orig.BodySHA256,
+		SignedSHA256: orig.SignedSHA256, Verified: true, Status: store.DeliveryError, RedeliveryOf: orig.ID,
 	}
 	if err := h.store.CreateDelivery(ctx, d); err != nil {
 		return nil, err

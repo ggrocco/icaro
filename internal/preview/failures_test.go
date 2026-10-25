@@ -97,14 +97,14 @@ func (c *failCompose) setConfigErr(err error) {
 	c.configErr = err
 }
 
-func (c *failCompose) Config(ctx context.Context, dir string, files []string) ([]byte, error) {
+func (c *failCompose) Config(ctx context.Context, project, dir string, files []string) ([]byte, error) {
 	c.mu.Lock()
 	err := c.configErr
 	c.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return c.fakeCompose.Config(ctx, dir, files)
+	return c.fakeCompose.Config(ctx, project, dir, files)
 }
 
 // failEngine is fakeEngine with an error injected per method name.

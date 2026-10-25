@@ -85,7 +85,10 @@ type Verify struct {
 	Credential string `json:"credential,omitempty" yaml:"credential,omitempty"`
 }
 
-// Timestamp enables replay protection on a signed timestamp header.
+// Timestamp rejects a request whose timestamp header is further than the
+// skew from now. It only protects against replays when verify.message
+// signs that header (Slack); a replay with a fresh unsigned header is
+// caught by deduplicating the signed material instead.
 type Timestamp struct {
 	Header string `json:"header" yaml:"header"`
 	// Format is unix (seconds, default), unix_ms or rfc3339.

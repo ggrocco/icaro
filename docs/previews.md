@@ -47,12 +47,14 @@ Preview stacks run your own containers, so instead of the container baseline the
 
 - `privileged`;
 - `pid`, `ipc`, `network_mode` or `userns_mode` set to `host`;
+- `volumes_from`, `pid`, `ipc`, `network_mode` or `uts` pointing at a container outside the compose project (`container:<name>`, or a `service:` that is not in the project), which could read an agent container's home or enter its namespaces; sharing between services of the same project is fine;
 - devices;
 - dangerous `cap_add` values (`SYS_ADMIN`, `NET_ADMIN`, `SYS_PTRACE`, `ALL`, …);
 - `security_opt` entries that set seccomp, AppArmor or SELinux to `unconfined`;
 - the Docker socket;
 - mounts of `/var/run`, `/run`, `/proc`, `/sys`, `/etc`, `/dev`, `/boot` or `/var/lib/docker`;
-- bind mounts outside the worktree and `mounts.allow`.
+- bind mounts outside the worktree and `mounts.allow`. Symlinks in a bind source are resolved first, as Docker follows them, so `./sock -> /var/run/docker.sock` is the Docker socket; a source that does not exist yet is checked by where its existing parent leads, and one that cannot be resolved (a symlink loop) is blocked;
+- names Ícaro reserves for routing: joining the `icaro-preview` network or any other `icaro-*` network, and an `icaro-*` service name, `container_name` or network alias. Ícaro's own override, which joins the routed service to `icaro-preview`, is generated after the lint and is not part of it.
 
 Each finding names the field and explains the risk. Doing this weakens the preview's isolation from your machine; to proceed anyway, allow that one finding for that one worktree:
 
@@ -60,7 +62,7 @@ Each finding names the field and explains the risk. Doing this weakens the previ
 icaro preview allow ./my-worktree --finding web/privileged --yes
 ```
 
-The override is recorded per finding. A new dangerous field is still blocked, and removing the preview clears its overrides. `icaro doctor` lists blocked compose files and checks the proxy network.
+The override is recorded per finding. A new dangerous field is still blocked, and removing the preview clears its overrides. A finding's ID names what it allows, so an override never covers something else later: a mount's ID is its target plus a hash of the resolved source, the target and the read-only flag (for example `web/volumes/_data-1a2b3c4d`), and a namespace or `volumes_from` finding carries its value (`web/pid/container_agent`). Changing the mount, or the symlink behind it, produces a new ID that must be allowed again. Mount IDs used to be positional (`web/volumes/0`); overrides recorded under that form no longer match and need to be allowed again. `icaro doctor` lists blocked compose files and checks the proxy network.
 
 ## Requirements
 

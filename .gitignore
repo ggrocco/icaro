@@ -19,3 +19,5 @@ web/test-results/
 web/playwright-report/
 .claude/worktrees/
 /build/
+# Compiled test binaries (go test -c).
+*.test

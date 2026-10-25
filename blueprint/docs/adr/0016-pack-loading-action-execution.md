@@ -25,7 +25,7 @@
 **Execution.**
 
 - The action executor ignores proxy environment variables, so the SSRF guard sees, and dials, the real destination.
-- It resolves DNS itself and checks every address at dial time: loopback, RFC 1918, link-local/metadata, CGNAT, ULA, multicast, reserved and NAT64 ranges are refused unless the user sets `integrations.<name>.allow_private`. Plain `http` is allowed only under that same opt-in.
+- It resolves DNS itself and checks every address at dial time: loopback, RFC 1918, link-local/metadata, CGNAT, ULA, multicast, reserved, documentation, Teredo and NAT64 ranges are refused, an IPv4-mapped or 6to4 address is judged by the IPv4 address it embeds, and the deprecated IPv4-compatible and IPv4-translated forms are refused outright, unless the user sets `integrations.<name>.allow_private`. Plain `http` is allowed only under that same opt-in.
 - Redirects are refused, so a response cannot steer a credential to another host. Responses are capped at 1 MiB.
 - Secret values and well-known token patterns are redacted from outputs and errors.
 

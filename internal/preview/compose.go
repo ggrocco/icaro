@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +60,8 @@ type Project struct {
 	Services map[string]*Service
 	// Volumes are the top-level named volumes (driver_opts can bind host paths).
 	Volumes map[string]TopVolume
+	// Networks are the top-level networks, by their key in the file.
+	Networks map[string]TopNetwork
 }
 
 // Service is one compose service.
@@ -78,14 +81,19 @@ type Service struct {
 	Labels      map[string]string
 	Ports       []int // container ports from ports and expose
 	HasNetworks bool  // the service lists networks explicitly
+	// Networks maps each network key the service joins to its aliases.
+	Networks      map[string][]string
+	VolumesFrom   []string
+	ContainerName string
 }
 
 // Mount is a normalized service volume.
 type Mount struct {
-	Type   string // bind | volume | tmpfs | npipe
-	Source string // absolute host path for binds
-	Target string
-	Index  int
+	Type     string // bind | volume | tmpfs | npipe
+	Source   string // absolute host path for binds
+	Target   string
+	ReadOnly bool
+	Index    int
 }
 
 // TopVolume is a top-level named volume.
@@ -93,6 +101,12 @@ type TopVolume struct {
 	Driver string
 	Device string // driver_opts.device when o includes bind
 	Bind   bool
+}
+
+// TopNetwork is a top-level network.
+type TopNetwork struct {
+	Name     string // the explicit (or, from compose config, computed) engine name
+	External bool
 }
 
 // ParseCompose parses a compose document (raw YAML, or the JSON produced
@@ -103,7 +117,7 @@ func ParseCompose(data []byte, dir string) (*Project, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse compose: %w", err)
 	}
-	p := &Project{Dir: dir, Services: map[string]*Service{}, Volumes: map[string]TopVolume{}}
+	p := &Project{Dir: dir, Services: map[string]*Service{}, Volumes: map[string]TopVolume{}, Networks: map[string]TopNetwork{}}
 	services, _ := asMap(doc["services"])
 	if len(services) == 0 {
 		return nil, fmt.Errorf("compose file has no services")
@@ -128,6 +142,9 @@ func ParseCompose(data []byte, dir string) (*Project, error) {
 		}
 		s.Labels = asLabels(m["labels"])
 		_, s.HasNetworks = m["networks"]
+		s.Networks = parseServiceNetworks(m["networks"])
+		s.VolumesFrom = asStrings(m["volumes_from"])
+		s.ContainerName = asString(m["container_name"])
 		for i, v := range asList(m["volumes"]) {
 			mt, err := parseMount(v, dir)
 			if err != nil {
@@ -153,7 +170,39 @@ func ParseCompose(data []byte, dir string) (*Project, error) {
 		}
 		p.Volumes[name] = tv
 	}
+	nets, _ := asMap(doc["networks"])
+	for name, raw := range nets {
+		nm, _ := asMap(raw)
+		tn := TopNetwork{Name: asString(nm["name"])}
+		// external is a bool, or the legacy {name: ...} form.
+		if em, ok := asMap(nm["external"]); ok {
+			tn.External = true
+			if n := asString(em["name"]); n != "" {
+				tn.Name = n
+			}
+		} else {
+			tn.External = asBool(nm["external"])
+		}
+		p.Networks[name] = tn
+	}
 	return p, nil
+}
+
+// parseServiceNetworks reads a service's networks in the list or the
+// mapping form.
+func parseServiceNetworks(v any) map[string][]string {
+	out := map[string][]string{}
+	if m, ok := asMap(v); ok {
+		for k, val := range m {
+			nm, _ := asMap(val)
+			out[k] = asStrings(nm["aliases"])
+		}
+		return out
+	}
+	for _, x := range asList(v) {
+		out[asString(x)] = nil
+	}
+	return out
 }
 
 // MergeProjects overlays override on base for the raw-file fallback, used
@@ -183,6 +232,16 @@ func MergeProjects(base, override *Project) *Project {
 		s.CapAdd = append(s.CapAdd, o.CapAdd...)
 		s.SecurityOpt = append(s.SecurityOpt, o.SecurityOpt...)
 		s.Devices = append(s.Devices, o.Devices...)
+		s.VolumesFrom = append(s.VolumesFrom, o.VolumesFrom...)
+		if o.ContainerName != "" {
+			s.ContainerName = o.ContainerName
+		}
+		if s.Networks == nil {
+			s.Networks = map[string][]string{}
+		}
+		for k, aliases := range o.Networks {
+			s.Networks[k] = append(s.Networks[k], aliases...)
+		}
 		for _, mt := range o.Mounts {
 			mt.Index = len(s.Mounts)
 			s.Mounts = append(s.Mounts, mt)
@@ -195,6 +254,16 @@ func MergeProjects(base, override *Project) *Project {
 	}
 	for name, v := range override.Volumes {
 		base.Volumes[name] = v
+	}
+	for name, n := range override.Networks {
+		if b, ok := base.Networks[name]; ok {
+			// Superset: keep what either file says about the engine name.
+			n.External = n.External || b.External
+			if n.Name == "" {
+				n.Name = b.Name
+			}
+		}
+		base.Networks[name] = n
 	}
 	return base
 }
@@ -211,7 +280,7 @@ func (p *Project) ServiceNames() []string {
 
 func parseMount(v any, dir string) (Mount, error) {
 	if m, ok := asMap(v); ok {
-		mt := Mount{Type: asString(m["type"]), Source: asString(m["source"]), Target: asString(m["target"])}
+		mt := Mount{Type: asString(m["type"]), Source: asString(m["source"]), Target: asString(m["target"]), ReadOnly: asBool(m["read_only"])}
 		if mt.Type == "" {
 			mt.Type = "volume"
 		}
@@ -230,10 +299,11 @@ func parseMount(v any, dir string) (Mount, error) {
 		return Mount{Type: "volume", Target: parts[0]}, nil
 	default:
 		src, dst := parts[0], parts[1]
+		ro := len(parts) == 3 && slices.Contains(strings.Split(parts[2], ","), "ro")
 		if isPathLike(src) {
-			return Mount{Type: "bind", Source: resolveHostPath(src, dir), Target: dst}, nil
+			return Mount{Type: "bind", Source: resolveHostPath(src, dir), Target: dst, ReadOnly: ro}, nil
 		}
-		return Mount{Type: "volume", Source: src, Target: dst}, nil
+		return Mount{Type: "volume", Source: src, Target: dst, ReadOnly: ro}, nil
 	}
 }
 

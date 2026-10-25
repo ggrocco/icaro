@@ -80,6 +80,11 @@ All commands take `--project <dir>` (default `.`) or `--project-id`.
 
 Ids are derived from the content's identity, so re-ingesting unchanged files is a no-op, changed files are re-indexed, and files that disappeared are removed (only under the ingested subtree).
 
+Everything ingest stores is served to agents over MCP, so it keeps secrets out:
+
+- it skips dotfiles (`.env`, `.npmrc`, …; a few tool configs such as `.gitignore` and `.editorconfig` are kept), files git ignores (it asks `git ls-files --cached --others --exclude-standard`; outside a git repository only the other rules apply), and files named like key material or credentials (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_*` keys, `credentials.json`, `secrets.yaml`, …). The report counts them as `excluded`;
+- it redacts what it stores of the rest: well-known token formats (the same patterns as the log redactor, including Stripe keys and PEM private keys), the value of any `NAME=value` whose name says it is a secret (`STRIPE_SECRET_KEY=…`, `export GH_TOKEN=…`), and, outside code, config entries such as `password:` or `api_key =`.
+
 ## Importers (prototype)
 
 Adapters, not forks: Ícaro reads exports of other tools without depending on them.

@@ -378,7 +378,7 @@ func (m *Manager) overridePath(project string) string {
 // `docker compose config` (which applies .env interpolation) and falling
 // back to the raw file only when the docker CLI is missing.
 func (m *Manager) loadProject(ctx context.Context, dir string, files []string) (*Project, error) {
-	data, err := m.compose.Config(ctx, dir, files)
+	data, err := m.compose.Config(ctx, NameFor(dir).Project, dir, files)
 	if err == nil {
 		p, err := ParseCompose(data, dir)
 		if err != nil {

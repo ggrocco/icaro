@@ -72,7 +72,9 @@ func TestFindingStringAndEmptyAllowRoots(t *testing.T) {
 	}
 	// Empty or "." roots never allow anything (they would match relative
 	// junk, not the worktree).
-	if bindProblem("/wt/a", []string{"", ".", "/wt"}) != "" || bindProblem("/x", []string{"", "."}) == "" {
+	_, inWT := bindProblem("/wt/a", resolveRoots([]string{"", ".", "/wt"}))
+	_, outside := bindProblem("/x", resolveRoots([]string{"", "."}))
+	if inWT != "" || outside == "" {
 		t.Fatal("bindProblem roots")
 	}
 }

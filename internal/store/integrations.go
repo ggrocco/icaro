@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,14 +23,21 @@ const (
 
 // Delivery is one inbound webhook request and what became of it.
 type Delivery struct {
-	ID           string
-	Integration  string
-	DeliveryKey  string
-	Workflow     string // set for url-token deliveries
-	Method       string
-	HeadersJSON  string
-	Query        string
-	Body         []byte
+	ID          string
+	Integration string
+	DeliveryKey string
+	Workflow    string // set for url-token deliveries
+	Method      string
+	HeadersJSON string
+	Query       string
+	Body        []byte
+	// BodySize and BodySHA256 describe the request body as received; Body
+	// may be only a prefix of it (rejected deliveries).
+	BodySize   int64
+	BodySHA256 string
+	// SignedSHA256 is the SHA-256 of the HMAC-signed material, empty when
+	// nothing was signed (shared secret, URL token, rejected).
+	SignedSHA256 string
 	Verified     bool
 	VerifyError  string
 	Status       string
@@ -39,14 +48,15 @@ type Delivery struct {
 	ReceivedAt   time.Time
 }
 
-const deliveryCols = `id, integration, delivery_key, workflow, method, headers_json, query, body, verified, verify_error, status, error, events_json, results_json, redelivery_of, received_at`
+const deliveryCols = `id, integration, delivery_key, workflow, method, headers_json, query, body, body_size, body_sha256, signed_sha256, verified, verify_error, status, error, events_json, results_json, redelivery_of, received_at`
 
 func scanDelivery(sc interface{ Scan(...any) error }) (*Delivery, error) {
 	var d Delivery
 	var verified int
 	var redelivery sql.NullString
 	var received string
-	err := sc.Scan(&d.ID, &d.Integration, &d.DeliveryKey, &d.Workflow, &d.Method, &d.HeadersJSON, &d.Query, &d.Body, &verified,
+	err := sc.Scan(&d.ID, &d.Integration, &d.DeliveryKey, &d.Workflow, &d.Method, &d.HeadersJSON, &d.Query, &d.Body,
+		&d.BodySize, &d.BodySHA256, &d.SignedSHA256, &verified,
 		&d.VerifyError, &d.Status, &d.Error, &d.EventsJSON, &d.ResultsJSON, &redelivery, &received)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -58,8 +68,8 @@ func scanDelivery(sc interface{ Scan(...any) error }) (*Delivery, error) {
 	return &d, nil
 }
 
-// CreateDelivery inserts a delivery record; ID and ReceivedAt are filled
-// in when empty.
+// CreateDelivery inserts a delivery record; ID, ReceivedAt and the body
+// size and hash (of Body) are filled in when empty.
 func (s *Store) CreateDelivery(ctx context.Context, d *Delivery) error {
 	if d.ID == "" {
 		d.ID = NewID()
@@ -76,12 +86,16 @@ func (s *Store) CreateDelivery(ctx context.Context, d *Delivery) error {
 	if d.Body == nil {
 		d.Body = []byte{}
 	}
+	if d.BodySHA256 == "" {
+		sum := sha256.Sum256(d.Body)
+		d.BodySize, d.BodySHA256 = int64(len(d.Body)), hex.EncodeToString(sum[:])
+	}
 	verified := 0
 	if d.Verified {
 		verified = 1
 	}
-	_, err := s.exec(ctx, `INSERT INTO webhook_deliveries (`+deliveryCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		d.ID, d.Integration, d.DeliveryKey, d.Workflow, d.Method, d.HeadersJSON, d.Query, d.Body, verified, d.VerifyError,
+	_, err := s.exec(ctx, `INSERT INTO webhook_deliveries (`+deliveryCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		d.ID, d.Integration, d.DeliveryKey, d.Workflow, d.Method, d.HeadersJSON, d.Query, d.Body, d.BodySize, d.BodySHA256, d.SignedSHA256, verified, d.VerifyError,
 		d.Status, d.Error, d.EventsJSON, d.ResultsJSON, nullStr(d.RedeliveryOf), ts(d.ReceivedAt))
 	return err
 }
@@ -101,12 +115,44 @@ func (s *Store) GetDelivery(ctx context.Context, id string) (*Delivery, error) {
 	return scanDelivery(s.queryRow(ctx, `SELECT `+deliveryCols+` FROM webhook_deliveries WHERE id = ?`, id))
 }
 
-// FindProcessedDelivery returns an earlier verified delivery with the
-// same key that was processed (the provider-retry dedup point).
-func (s *Store) FindProcessedDelivery(ctx context.Context, integration, key, workflow, exceptID string) (*Delivery, error) {
+// FindProcessedDelivery returns an earlier verified delivery that was
+// processed and has the same key or, when signed is set, the same signed
+// material (the provider-retry and replay dedup point).
+func (s *Store) FindProcessedDelivery(ctx context.Context, integration, key, signed, workflow, exceptID string) (*Delivery, error) {
 	return scanDelivery(s.queryRow(ctx, `SELECT `+deliveryCols+` FROM webhook_deliveries
-		WHERE integration = ? AND delivery_key = ? AND workflow = ? AND verified = 1 AND id <> ? AND redelivery_of IS NULL
-		AND status IN (?, ?) ORDER BY received_at LIMIT 1`, integration, key, workflow, exceptID, DeliveryProcessed, DeliveryNoMatch))
+		WHERE integration = ? AND (delivery_key = ? OR (? <> '' AND signed_sha256 = ?)) AND workflow = ? AND verified = 1
+		AND id <> ? AND redelivery_of IS NULL AND status IN (?, ?) ORDER BY received_at LIMIT 1`,
+		integration, key, signed, signed, workflow, exceptID, DeliveryProcessed, DeliveryNoMatch))
+}
+
+// PruneDeliveries deletes deliveries received before olderThan and all
+// but the newest maxRejected rejected (unverified) ones; maxRejected <= 0
+// keeps them all. Verified deliveries are only aged out, so a flood of
+// rejected requests cannot evict the records that dedupe replays.
+func (s *Store) PruneDeliveries(ctx context.Context, olderThan time.Time, maxRejected int) (int64, error) {
+	res, err := s.exec(ctx, `DELETE FROM webhook_deliveries WHERE received_at < ?`, ts(olderThan))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if maxRejected <= 0 {
+		return n, nil
+	}
+	var cutoff string
+	err = s.queryRow(ctx, `SELECT received_at FROM webhook_deliveries WHERE verified = 0
+		ORDER BY received_at DESC LIMIT 1 OFFSET ?`, maxRejected-1).Scan(&cutoff)
+	if errors.Is(err, sql.ErrNoRows) {
+		return n, nil
+	}
+	if err != nil {
+		return n, err
+	}
+	res, err = s.exec(ctx, `DELETE FROM webhook_deliveries WHERE verified = 0 AND received_at < ?`, cutoff)
+	if err != nil {
+		return n, err
+	}
+	m, _ := res.RowsAffected()
+	return n + m, nil
 }
 
 // DeliveryFilter narrows ListDeliveries.
