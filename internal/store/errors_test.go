@@ -315,7 +315,10 @@ func TestClosedDatabase(t *testing.T) {
 		},
 		"SetWorkflowStatus": func() error { return s.SetWorkflowStatus(ctx, "w", WorkflowDisabled) },
 		"SetWebhook":        func() error { return s.SetWebhook(ctx, "w", "t", nil) },
-		"DeleteWorkflow":    func() error { return s.DeleteWorkflow(ctx, "w") },
+		"DeleteWorkflow": func() error {
+			_, err := s.DeleteWorkflow(ctx, "w")
+			return err
+		},
 		"ListWorkflowVersions": func() error {
 			_, err := s.ListWorkflowVersions(ctx, "w")
 			return err

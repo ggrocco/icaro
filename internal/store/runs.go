@@ -67,16 +67,21 @@ type PolicyOutcome struct {
 // a run is queued or running; replace cancels queued runs and flags
 // running ones, and the new run then waits in ClaimRun until they stop.
 // The transaction first takes the workflow row's write lock (a no-op
-// UPDATE, portable to SQLite's single writer and Postgres row locks).
+// UPDATE, portable to SQLite's single writer and Postgres row locks); a
+// workflow deleted meanwhile returns ErrNotFound.
 func (s *Store) EnqueueRun(ctx context.Context, r *Run, steps []StepInit) (PolicyOutcome, error) {
 	s.fillRun(r)
 	var out PolicyOutcome
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		out = PolicyOutcome{}
+		res, err := tx.ExecContext(ctx, s.rebind(`UPDATE workflows SET version = version WHERE id = ?`), r.WorkflowID)
+		if err != nil {
+			return err
+		}
+		if err := affected(res); err != nil {
+			return err
+		}
 		if r.Concurrency == "forbid" || r.Concurrency == "replace" {
-			if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE workflows SET version = version WHERE id = ?`), r.WorkflowID); err != nil {
-				return err
-			}
 			active, err := s.activeRunsTx(ctx, tx, r.WorkflowID)
 			if err != nil {
 				return err

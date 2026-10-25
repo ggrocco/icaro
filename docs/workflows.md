@@ -148,6 +148,7 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 - **Streaming API.** `GET /api/v1/runs/{id}/events?logs=1` is a Server-Sent Events stream with one stream per run. It sends a `snapshot` (with the log backlog), then `step` and `log` events, and finally `end`. The web UI uses it, so it never polls.
 - **Restarts.** A step's container id is recorded before the container starts. After a daemon restart, a running step re-attaches to its container. If the container is gone, the attempt fails and `retry` decides. `uses` steps are therefore at-least-once across restarts.
 - **Versions.** Every apply stores a version (`icaro workflow versions NAME [N]`), and a run always executes the version it was started with.
+- **Deleting.** `icaro workflow delete NAME` cancels the workflow's queued and running runs. Its runs are kept, and so are the versions they executed, so their history stays readable.
 
 ## Concurrency
 

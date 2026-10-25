@@ -99,17 +99,62 @@ func TestWorkflows(t *testing.T) {
 		if got.Status != WorkflowDisabled || got.WebhookToken != "tok" || len(got.WebhookSecretCT) != 2 {
 			t.Fatalf("update: %+v", got)
 		}
-		if err := s.DeleteWorkflow(ctx, w.ID); err != nil {
-			t.Fatal(err)
+		if active, err := s.DeleteWorkflow(ctx, w.ID); err != nil || len(active) != 0 {
+			t.Fatal(active, err)
 		}
 		if _, err := s.GetWorkflow(ctx, "hello"); err != ErrNotFound {
 			t.Fatalf("expected not found, got %v", err)
 		}
 		if vs, _ := s.ListWorkflowVersions(ctx, w.ID); len(vs) != 0 {
-			t.Fatal("versions should cascade")
+			t.Fatal("versions no run uses are removed with the workflow")
 		}
-		if err := s.DeleteWorkflow(ctx, w.ID); err != ErrNotFound {
+		if _, err := s.DeleteWorkflow(ctx, w.ID); err != ErrNotFound {
 			t.Fatal(err)
+		}
+	})
+}
+
+// Deleting a workflow cancels its active runs and keeps the versions its
+// runs execute, so a run's spec stays loadable.
+func TestDeleteWorkflowKeepsRunVersions(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, s *Store) {
+		ctx := context.Background()
+		w, _ := s.ApplyWorkflow(ctx, "del", "v1", "{}", "a")
+		_, _ = s.ApplyWorkflow(ctx, "del", "v2", "{}", "a")
+		_, _ = s.ApplyWorkflow(ctx, "del", "v3", "{}", "a")
+		steps := []StepInit{{StepID: "one", Idx: 0, Kind: "image"}}
+		mk := func(version int) *Run {
+			r := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: version, TriggerKind: "manual"}
+			if _, err := s.EnqueueRun(ctx, r, steps); err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}
+		running, queued, done := mk(1), mk(3), mk(3)
+		if c, err := s.ClaimRun(ctx, "daemon"); err != nil || c.ID != running.ID {
+			t.Fatalf("claim: %v %+v", err, c)
+		}
+		_ = s.FinishRun(ctx, done.ID, RunSucceeded, "")
+		active, err := s.DeleteWorkflow(ctx, w.ID)
+		if err != nil || len(active) != 2 || active[0].ID != running.ID || active[0].Status != RunRunning || active[1].ID != queued.ID {
+			t.Fatalf("delete: %v %+v", err, active)
+		}
+		if got, _ := s.GetRun(ctx, queued.ID); got.Status != RunCancelled {
+			t.Fatalf("queued run: %s", got.Status)
+		}
+		if got, _ := s.GetRun(ctx, running.ID); got.CancelRequestedAt == nil {
+			t.Fatal("running run not flagged for cancel")
+		}
+		for v, want := range map[int]bool{1: true, 2: false, 3: true} {
+			_, err := s.GetWorkflowVersion(ctx, w.ID, v)
+			if (err == nil) != want {
+				t.Fatalf("version %d kept=%v, want %v", v, err == nil, want)
+			}
+		}
+		// No run can be created for the deleted workflow.
+		late := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 3, TriggerKind: "manual"}
+		if _, err := s.EnqueueRun(ctx, late, steps); err != ErrNotFound {
+			t.Fatalf("enqueue after delete: %v", err)
 		}
 	})
 }
