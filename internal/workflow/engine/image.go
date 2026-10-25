@@ -19,6 +19,7 @@ import (
 	"icaro/internal/container/docker"
 	"icaro/internal/container/sandbox"
 	"icaro/internal/expr"
+	"icaro/internal/logs"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 	"icaro/internal/workflow/events"
@@ -324,7 +325,7 @@ func (rx *runExec) captureOutputs(ctx context.Context, st *workflow.StepSpec, co
 			if err != nil {
 				return nil, fmt.Errorf("output %s: %w", key, err)
 			}
-			outputs[key] = v
+			outputs[key] = redactValue(rx.redact, v)
 		case workflow.CaptureStdout, workflow.CaptureStdoutLast:
 			if lc.stdoutOver {
 				return nil, fmt.Errorf("output %s: stdout exceeds %d bytes", key, rx.e.cfg.OutputLimit)
@@ -404,6 +405,29 @@ func (rx *runExec) readWorkspaceFile(dir, rel string) (string, error) {
 		return "", err
 	}
 	return rx.redact.RedactString(strings.TrimSpace(string(b))), nil
+}
+
+// redactValue applies the run's redactor to every string inside a
+// JSON value, object keys included: captured values pass through the same
+// redactor as logs (ADR 0013), however deep the secret is nested.
+func redactValue(r *logs.Redactor, v any) any {
+	switch x := v.(type) {
+	case string:
+		return r.RedactString(x)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[r.RedactString(k)] = redactValue(r, val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = redactValue(r, val)
+		}
+		return out
+	}
+	return v
 }
 
 func mapKeys[V any](m map[string]V) []string {

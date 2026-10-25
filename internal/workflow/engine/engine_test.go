@@ -642,11 +642,20 @@ func (s fakeSecrets) Names(context.Context) ([]string, error) {
 	return out, nil
 }
 
+// echoActions returns its text input in nested outputs, the way an
+// integration response may echo a credential back.
+type echoActions struct{}
+
+func (echoActions) Execute(_ context.Context, _ string, input map[string]any) (map[string]any, error) {
+	return map[string]any{"echo": input["text"], "nested": map[string]any{"list": []any{input["text"], 1.0}}}, nil
+}
+
 func TestSecretsAreInjectedAndRedacted(t *testing.T) {
 	f := newFixture(t)
 	f.deps.Secrets = fakeSecrets{"api_token": "s3cr3t-value", "other": "another-secret"}
+	f.deps.Actions = echoActions{}
 	f.docker.OnStart = func(c *docker.FakeContainer) docker.Behavior {
-		return docker.Behavior{Stdout: "token=s3cr3t-value other=another-secret\n", Output: []byte(`{"leak":"s3cr3t-value"}`)}
+		return docker.Behavior{Stdout: "token=s3cr3t-value other=another-secret\n", Output: []byte(`{"leak":"s3cr3t-value","deep":{"items":[{"v":"x another-secret y"}],"another-secret":true,"n":2}}`)}
 	}
 	run := f.enqueue(`
 version: 1
@@ -656,7 +665,10 @@ env:
 steps:
   - id: use
     image: img
-    outputs: { out: stdout }
+    outputs: { out: stdout, leak: json:leak, deep: json:deep, item: json:deep.items.0.v, doc: json:$ }
+  - id: call
+    uses: slack.post-message
+    input: { text: "${{ secrets.api_token }}" }
 `, nil)
 	_, stop := f.start()
 	defer stop()
@@ -669,8 +681,21 @@ steps:
 	if strings.Contains(string(b), "s3cr3t") || strings.Contains(string(b), "another-secret") || !strings.Contains(string(b), "token=***") {
 		t.Fatalf("log not redacted: %q", b)
 	}
-	if out := f.outputs(run.ID, "use")["out"]; out != "token=*** other=***" {
+	outs := f.outputs(run.ID, "use")
+	if out := outs["out"]; out != "token=*** other=***" {
 		t.Fatalf("stdout capture not redacted: %v", out)
+	}
+	if outs["leak"] != "***" || outs["item"] != "x *** y" {
+		t.Fatalf("json capture not redacted: %v", outs)
+	}
+	for _, step := range []string{"use", "call"} {
+		raw := f.step(run.ID, step).OutputsJSON
+		if strings.Contains(raw, "s3cr3t") || strings.Contains(raw, "another-secret") {
+			t.Fatalf("%s outputs leak a secret: %s", step, raw)
+		}
+	}
+	if call := f.outputs(run.ID, "call"); call["echo"] != "***" {
+		t.Fatalf("uses outputs not redacted: %v", call)
 	}
 }
 
