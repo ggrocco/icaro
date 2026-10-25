@@ -19,6 +19,7 @@ import (
 	"icaro/internal/config"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
+	"icaro/internal/secrets"
 	"icaro/internal/session"
 	"icaro/internal/store"
 )
@@ -419,6 +420,21 @@ func TestSessionChecks(t *testing.T) {
 	key := findCheck(t, SessionChecks(a.Cfg, nil, nil), "master key")
 	if r := run(t, key); r.Severity != doctor.OK || !strings.Contains(r.Detail, "stored in") {
 		t.Errorf("master key: %+v", r)
+	}
+	// A Phase 0 plaintext key left on disk is an error that names the
+	// migration, even while ICARO_MASTER_KEY is what the daemon uses.
+	legacy := secrets.LegacyKeyPath(a.Cfg.Layout().Secrets())
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(base64.StdEncoding.EncodeToString(make([]byte, 32))+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, key); r.Severity != doctor.Error || !strings.Contains(r.Detail, legacy) || !strings.Contains(r.Detail, "icaro init") {
+		t.Errorf("plaintext key on disk: %+v", r)
+	}
+	if err := os.Remove(legacy); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv(crypto.MasterKeyEnv, "short")
 	if r := run(t, key); r.Severity != doctor.Error {

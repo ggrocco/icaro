@@ -44,6 +44,15 @@ const (
 	legacyFile     = "master.key"
 )
 
+// LegacyKeyPath is where the Phase 0 plaintext master key lives under the
+// secrets directory. LoadMasterKey still reads it, so an upgrade never
+// locks a user out, and moves it into a backend whenever one is
+// available; doctor reports one that lingers.
+func LegacyKeyPath(dir string) string { return filepath.Join(dir, legacyFile) }
+
+// LegacyKeyMigration tells the user how to move a plaintext key away.
+const LegacyKeyMigration = "run `icaro init` to move it into the OS key store or a password-protected file (it asks for the password on a terminal, or reads " + PasswordEnv + ")"
+
 // ErrNoBackend reports that no OS secret store is reachable and no
 // password was provided for the file fallback.
 var ErrNoBackend = errors.New("no OS secret store is available: set " + PasswordEnv + " (encrypted-file fallback) or " + crypto.MasterKeyEnv)
@@ -223,7 +232,7 @@ func LoadMasterKey(ctx context.Context, o KeyOptions) (*crypto.Key, KeyInfo, err
 
 	// Legacy plaintext key from Phase 0, or a brand-new key.
 	var key *crypto.Key
-	legacyPath := filepath.Join(o.Dir, legacyFile)
+	legacyPath := LegacyKeyPath(o.Dir)
 	if raw, err := os.ReadFile(legacyPath); err == nil {
 		k, err := decodeKey(strings.TrimSpace(string(raw)))
 		if err != nil {
@@ -258,7 +267,7 @@ func LoadMasterKey(ctx context.Context, o KeyOptions) (*crypto.Key, KeyInfo, err
 		if !ok {
 			if _, err := os.Stat(legacyPath); err == nil {
 				// Keep working, loudly, rather than lock the user out.
-				return key, KeyInfo{Backend: BackendLegacy, Warning: "master key is stored unencrypted at " + legacyPath + "; set " + PasswordEnv + " once to encrypt it"}, nil
+				return key, KeyInfo{Backend: BackendLegacy, Warning: "master key is stored unencrypted at " + legacyPath + "; " + LegacyKeyMigration}, nil
 			}
 			return nil, KeyInfo{}, ErrNoBackend
 		}

@@ -41,7 +41,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 - permissions on `~/.icaro`;
 - that Docker is reachable;
 - pending migrations;
-- the master-key backend;
+- the master-key backend, and that no plaintext `master.key` from an early release is left in `~/.icaro/secrets` (an error; `icaro init` moves it into the OS key store or a password-protected file);
 - orphaned sessions;
 - pinned image digests;
 - the preview network, blocked compose files and `.test` DNS;
