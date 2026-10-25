@@ -17,6 +17,8 @@ icaro session rm ID --yes         # remove the session and its worktree (the bra
 
 The agent gets a real TTY, and its exit code becomes `icaro`'s exit code.
 
+`session stop` and `session rm` also work on a session that is still `queued` or starting: the stop wins, and a start already under way removes the container it created instead of running it. If Docker cannot stop the container, the session is marked `error` with the reason (not `stopped`), and running `session stop` again retries.
+
 ## Worktrees
 
 Ícaro is the only component that creates worktrees. `icaro session create [NAME]` runs `git worktree add -b icaro/NAME` under `~/.icaro/worktrees/<project>/<NAME>`, starting from `HEAD` (or `--base`). Without a name you get a short random one. Creating a session needs Docker to be reachable: otherwise `session create` (and the implicit create of `icaro sh`, `claude` and `codex`) fails at once with Docker's error, and nothing is created. Every worktree of a repository belongs to one **project**, whose id is derived from the main repository's path, so sessions on different branches of the same repository share project memory. The worktree is bind-mounted at `/workspace`, not copied, so your editor, the agent and the preview all see the same files. On Linux the container runs as your uid:gid (as `1000:1000` when the daemon runs as root), so files the agent writes are owned by you.

@@ -29,6 +29,9 @@ type fakeEngine struct {
 	n       int
 	failOn  string
 	errs    map[string]error // per-operation failures, see fail
+	// afterCreate, when set before the first session starts, runs after
+	// each successful create outside the engine loop (a test pause point).
+	afterCreate func()
 }
 
 func newFakeEngine() *fakeEngine {
@@ -74,6 +77,9 @@ func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, _ do
 		id = fmt.Sprintf("c%d", f.n)
 		f.specs[id] = spec
 	})
+	if err == nil && f.afterCreate != nil {
+		f.afterCreate()
+	}
 	return id, err
 }
 
