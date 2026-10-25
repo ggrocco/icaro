@@ -150,11 +150,18 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 		},
 	}
 
+	var delYes bool
 	del := &cobra.Command{
 		Use:   "delete NAME",
 		Short: "Delete a workflow (runs are kept)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !delYes {
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(), "Delete workflow "+args[0]+" and its triggers?")
+				if err != nil || !ok {
+					return err
+				}
+			}
 			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
@@ -162,6 +169,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			return c.DeleteWorkflow(cmd.Context(), args[0])
 		},
 	}
+	del.Flags().BoolVar(&delYes, "yes", false, "do not ask for confirmation")
 
 	toggle := func(use string, enabled bool) *cobra.Command {
 		return &cobra.Command{

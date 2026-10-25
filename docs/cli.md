@@ -857,10 +857,14 @@ icaro token list
 
 ## `icaro token revoke`
 
-Revoke a token
+Revoke a token and end the browser sessions signed in with it
 
 ```text
-icaro token revoke NAME
+icaro token revoke NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro ui`
@@ -948,7 +952,11 @@ icaro workflow apply FILE
 Delete a workflow (runs are kept)
 
 ```text
-icaro workflow delete NAME
+icaro workflow delete NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro workflow disable`

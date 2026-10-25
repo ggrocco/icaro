@@ -32,12 +32,19 @@ func TestTokenInitMigrateAndConfig(t *testing.T) {
 	failCLI(t, "scope must be read, write or admin", "token", "create", "--name", "x", "--scope", "root")
 	failCLI(t, `required flag(s) "name"`, "token", "create")
 	wantCLI(t, []string{"token", "list"}, "NAME", "ci", "read", "-")
-	mustCLI(t, "token", "revoke", "ci")
+	// Revoking asks first; declining keeps the token.
+	if out, err := runCLI(t, "n\n", "token", "revoke", "ci"); err != nil || !strings.Contains(out, "Revoke token ci?") {
+		t.Fatalf("declined revoke: %v\n%s", err, out)
+	}
+	if out := mustCLI(t, "token", "list"); !strings.HasSuffix(strings.TrimSpace(strings.Split(out, "\n")[1]), " -") {
+		t.Fatalf("a declined revoke revoked:\n%s", out)
+	}
+	mustCLI(t, "token", "revoke", "ci", "--yes")
 	out := mustCLI(t, "token", "list")
 	if strings.Count(strings.Split(out, "\n")[1], "-") == 0 || strings.HasSuffix(strings.TrimSpace(strings.Split(out, "\n")[1]), " -") {
 		t.Errorf("revoked token shows no revocation time:\n%s", out)
 	}
-	failCLI(t, `no active token named "ci"`, "token", "revoke", "ci")
+	failCLI(t, `no active token named "ci"`, "token", "revoke", "ci", "--yes")
 
 	// config show redacts the API token.
 	t.Setenv("ICARO_DAEMON__TOKEN", "super-secret")

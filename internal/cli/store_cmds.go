@@ -165,14 +165,21 @@ func newTokenCmd(opts *rootOpts) *cobra.Command {
 		},
 	}
 
+	var revokeYes bool
 	revoke := &cobra.Command{
 		Use:   "revoke NAME",
-		Short: "Revoke a token",
+		Short: "Revoke a token and end the browser sessions signed in with it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := opts.loadConfig()
 			if err != nil {
 				return err
+			}
+			if !revokeYes {
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(), "Revoke token "+args[0]+"? Clients using it stop working.")
+				if err != nil || !ok {
+					return err
+				}
 			}
 			s, err := openStore(cmd.Context(), cfg)
 			if err != nil {
@@ -188,6 +195,7 @@ func newTokenCmd(opts *rootOpts) *cobra.Command {
 			return nil
 		},
 	}
+	revoke.Flags().BoolVar(&revokeYes, "yes", false, "do not ask for confirmation")
 	cmd.AddCommand(create, list, revoke)
 	return cmd
 }
