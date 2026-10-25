@@ -191,3 +191,27 @@ func TestExecRunner(t *testing.T) {
 		t.Fatal("non-zero exit must be an error")
 	}
 }
+
+func TestRestart(t *testing.T) {
+	ctx := context.Background()
+	for goos, want := range map[string]string{
+		"darwin": "launchctl kickstart -k gui/501/dev.icaro.daemon",
+		"linux":  "systemctl --user restart icaro.service",
+	} {
+		m, f := newManager(t, goos)
+		if err := m.Restart(ctx); err != nil {
+			t.Fatalf("%s: %v", goos, err)
+		}
+		if len(f.calls) != 1 || f.calls[0] != want {
+			t.Fatalf("%s: calls %v", goos, f.calls)
+		}
+		f.fail[want] = true
+		if err := m.Restart(ctx); err == nil || !strings.Contains(err.Error(), "nope") {
+			t.Fatalf("%s: failure not reported: %v", goos, err)
+		}
+	}
+	m, _ := newManager(t, "plan9")
+	if err := m.Restart(ctx); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("plan9: %v", err)
+	}
+}
