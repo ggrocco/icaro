@@ -55,7 +55,8 @@ func MemorySocketCheck(cfg *config.Config) doctor.Check {
 }
 
 // SessionChecks are the Phase 1 doctor checks: the master key backend,
-// the memory socket path, orphaned sessions and pinned images.
+// the memory socket path, credential injection (ADR 0028), orphaned
+// sessions and pinned images.
 func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []doctor.Check {
 	checks := []doctor.Check{doctor.Func("master key", func(ctx context.Context) doctor.Result {
 		_, info, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: cfg.Layout().Secrets(), Keyring: secrets.DefaultKeyring(nil)})
@@ -70,6 +71,7 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 	if st == nil {
 		return checks
 	}
+	checks = append(checks, InjectCheck(cfg, st))
 	checks = append(checks, doctor.Func("orphaned sessions", func(ctx context.Context) doctor.Result {
 		rows, err := st.ListSessions(ctx, store.SessionFilter{Statuses: []string{session.StatusOrphaned}})
 		if err != nil {
