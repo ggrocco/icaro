@@ -34,7 +34,7 @@
 | Chromium (Playwright) | bundled with the runner image | E2E only |
 | SQLite | `modernc.org/sqlite` 1.60 (pure Go) | Default store |
 | PostgreSQL | 16 | Store tests run against both dialects |
-| Wails / tray app | not built | Phase 7 is deferred on Linux |
+| Wails (tray app) | v3.0.0-beta.34 | [ADR 0027](../adr/0027-desktop-app.md); CI builds and tests the app on macOS and Linux; not yet run on a Mac |
 
 ## Measured budget
 

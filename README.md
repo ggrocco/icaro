@@ -48,6 +48,7 @@ The [quickstart](docs/quickstart.md) walks through each step, and CI runs it aga
 - **Shared memory** ([docs](docs/memory.md)): decisions, findings, tasks and handoffs per project, plus indexed files, symbols, ADRs and commits, served to agents over MCP.
 - **Agents as users** ([docs](docs/agents.md)): MCP authoring tools and the `icaro-workflows` skill (`icaro skill install`).
 - **Web UI** ([docs](docs/ui.md)): form and YAML editors, run graphs with live status, deliveries, and a manifest editor that commits to your local pack.
+- **Desktop app** ([docs](docs/desktop.md)): a menu bar app with runs, previews, usage and quick actions, notifications on failures and outages, and launch at login. It has not yet been run on a clean Mac.
 - **Operations:** one daemon per user on a Unix socket, `icaro doctor --fix`, signed releases with `icaro update --rollback`, `icaro service install`, and `icaro usage`.
 
 Read [Security](docs/security.md) for what the isolation does and does not cover.
@@ -66,6 +67,7 @@ make web build                 # embed the UI, build bin/icaro
 make test                      # unit tests (-race, SQLite)
 make test-integration          # needs Docker; set ICARO_TEST_POSTGRES_DSN to add Postgres
 make lint                      # golangci-lint
+make app-test app              # the desktop app (cgo; see CONTRIBUTING.md)
 go generate ./...              # regenerate schema/workflow.schema.json
 go run ./hack/gendocs          # regenerate docs/cli.md
 go test -tags e2e ./hack/quickstart   # run the quickstart against real Docker

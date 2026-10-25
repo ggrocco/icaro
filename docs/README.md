@@ -16,6 +16,7 @@ These pages describe how to use what is built. The design (architecture, decisio
 - [Shared memory](memory.md): what agents remember and how they reach it
 - [Agents and MCP](agents.md): `icaro mcp`, the authoring tools, `icaro skill install`
 - [Web UI](ui.md): `icaro ui`, sign-in, what the UI shows
+- [Desktop app](desktop.md): the menu bar app, notifications, launch at login
 - [Usage tracking](#usage-tracking)
 - [CLI reference](cli.md) (generated)
 

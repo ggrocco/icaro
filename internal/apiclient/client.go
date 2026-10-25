@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"icaro/internal/service"
+	"icaro/internal/usage"
 	"icaro/internal/workflow"
 )
 
@@ -338,4 +339,12 @@ func (c *Client) WaitRun(ctx context.Context, id string, interval time.Duration)
 		case <-time.After(interval):
 		}
 	}
+}
+
+// Usage returns the usage report for a window ("Nd" or YYYY-MM-DD; empty
+// is the server's default), as `icaro usage --json` prints it.
+func (c *Client) Usage(ctx context.Context, since string) (*usage.Report, error) {
+	var out usage.Report
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/usage?since="+url.QueryEscape(since), nil, &out)
+	return &out, err
 }

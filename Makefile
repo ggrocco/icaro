@@ -65,10 +65,27 @@ upgrade:
 	cd web && npm update --save
 	go run ./hack/licenses
 	go run ./hack/licenses -npm web -out web/THIRD_PARTY_LICENSES.md
+	cd desktop && go mod tidy
+	go run ./hack/licenses -dir desktop -goos darwin -pkg . -out THIRD_PARTY_LICENSES.md
 
 clean:
 	rm -rf bin dist coverage.out coverage
 	find web/dist -mindepth 1 ! -name README.txt -delete 2>/dev/null || true
+
+# The desktop app (ADR 0027) is its own module under desktop/ and needs cgo:
+# Xcode command line tools on macOS, GTK 4 and WebKitGTK 6 headers on Linux
+# (libgtk-4-dev libwebkitgtk-6.0-dev). app-macos builds bin/Icaro.app.
+APP_BIN ?= bin/icaro-app
+
+.PHONY: app app-test app-macos
+app:
+	cd desktop && go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o ../$(APP_BIN) .
+
+app-test:
+	cd desktop && go vet ./... && go test -race -count=1 ./...
+
+app-macos:
+	desktop/build/bundle.sh bin $(VERSION)
 
 AGENT_IMAGE ?= ghcr.io/icaro-dev/agent-base:$(VERSION)
 AGENT_ARCH  ?= $(shell go env GOARCH)

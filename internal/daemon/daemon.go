@@ -183,6 +183,12 @@ func StartBackground(ctx context.Context, l paths.Layout, extraArgs []string, wa
 	if err != nil {
 		return err
 	}
+	return StartProgram(ctx, l, exe, extraArgs, wait)
+}
+
+// StartProgram is StartBackground with an explicit icaro binary, for
+// callers that are not icaro themselves (the desktop app).
+func StartProgram(ctx context.Context, l paths.Layout, exe string, extraArgs []string, wait time.Duration) error {
 	if err := l.Ensure(); err != nil {
 		return err
 	}
@@ -192,7 +198,7 @@ func StartBackground(ctx context.Context, l paths.Layout, extraArgs []string, wa
 	}
 	defer func() { _ = logf.Close() }()
 	args := append(append([]string{}, extraArgs...), "serve")
-	cmd := exec.Command(exe, args...) //nolint:gosec // re-executes ourselves
+	cmd := exec.Command(exe, args...) //nolint:gosec // our own binary (re-exec, or the one bundled with the app)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = logf, logf, nil
 	cmd.Env = append(os.Environ(), paths.RootEnv+"="+l.Root)
 	cmd.SysProcAttr = platform.Detach()
