@@ -121,7 +121,11 @@ func TestClosedDatabase(t *testing.T) {
 			return err
 		},
 		"FindProcessedDelivery": func() error {
-			_, err := s.FindProcessedDelivery(ctx, "i", "k", "w", "")
+			_, err := s.FindProcessedDelivery(ctx, "i", "k", "", "w", "")
+			return err
+		},
+		"PruneDeliveries": func() error {
+			_, err := s.PruneDeliveries(ctx, time.Now(), 10)
 			return err
 		},
 		"ListDeliveries": func() error {

@@ -412,3 +412,88 @@ func TestWebhookLimits(t *testing.T) {
 		t.Fatal("bucket must refill")
 	}
 }
+
+// The delivery id is an unsigned header: a replay of a captured request
+// with a fresh one must still be a duplicate, because the signed material
+// is the same. Sentry's timestamp header is not signed either, so a
+// refreshed timestamp does not make a replay new.
+func TestWebhookReplayWithFreshUnsignedHeadersIsDuplicate(t *testing.T) {
+	f := newHookFixture(t, fakeSpecs{reviewSpec}, config.WebhooksConfig{})
+	f.secret("github.webhook_secret", "s3cret-hook")
+	body := fixture(t, "github_pull_request_opened.json")
+	_, out, raw := f.post("/hooks/github", body, ghHeaders("pull_request", "d-1", "s3cret-hook", body))
+	if out["status"] != store.DeliveryProcessed {
+		t.Fatal(raw)
+	}
+	first := out["delivery_id"]
+	code, out, _ := f.post("/hooks/github", body, ghHeaders("pull_request", "d-forged", "s3cret-hook", body))
+	if code != http.StatusOK || out["status"] != store.DeliveryDuplicate || out["duplicate_of"] != first || f.engine.count() != 1 {
+		t.Fatalf("replay with a fresh delivery id: %d %v (runs %d)", code, out, f.engine.count())
+	}
+
+	f.secret("sentry.webhook_secret", "sentry-secret")
+	ev := fixture(t, "sentry_issue_created.json")
+	sentryHdr := func(id string, at time.Time) map[string]string {
+		return map[string]string{"Sentry-Hook-Resource": "issue", "Request-ID": id, "Sentry-Hook-Timestamp": strconv.FormatInt(at.Unix(), 10), "Sentry-Hook-Signature": sign("sentry-secret", string(ev))}
+	}
+	_, out, raw = f.post("/hooks/sentry", ev, sentryHdr("r-1", f.now))
+	if out["status"] != store.DeliveryNoMatch {
+		t.Fatal(raw)
+	}
+	f.now = f.now.Add(time.Hour) // past the skew of the original timestamp
+	_, out, raw = f.post("/hooks/sentry", ev, sentryHdr("r-2", f.now))
+	if out["status"] != store.DeliveryDuplicate {
+		t.Fatalf("replay with a refreshed unsigned timestamp: %s", raw)
+	}
+}
+
+// A rejected request is unauthenticated: only a prefix of its body is
+// stored, with the full size and hash.
+func TestRejectedDeliveryKeepsOnlyABodyPrefix(t *testing.T) {
+	f := newHookFixture(t, fakeSpecs{reviewSpec}, config.WebhooksConfig{})
+	f.secret("github.webhook_secret", "s3cret-hook")
+	big := bytes.Repeat([]byte("A"), 10<<10)
+	code, out, _ := f.post("/hooks/github", big, ghHeaders("pull_request", "d-x", "wrong", big))
+	if code != http.StatusUnauthorized {
+		t.Fatal(code)
+	}
+	d, err := f.store.GetDelivery(context.Background(), out["delivery_id"].(string))
+	sum := sha256.Sum256(big)
+	if err != nil || len(d.Body) != rejectedBodyPrefix || d.BodySize != int64(len(big)) || d.BodySHA256 != hex.EncodeToString(sum[:]) || d.SignedSHA256 != "" {
+		t.Fatalf("%d bytes stored, size %d, %v", len(d.Body), d.BodySize, err)
+	}
+	info, err := f.hub.Delivery(context.Background(), d.ID)
+	if err != nil || !info.BodyTruncated || info.BodySize != int64(len(big)) {
+		t.Fatalf("%+v %v", info, err)
+	}
+	// A verified delivery keeps its whole body.
+	body := fixture(t, "github_pull_request_opened.json")
+	_, out, _ = f.post("/hooks/github", body, ghHeaders("pull_request", "d-y", "s3cret-hook", body))
+	info, _ = f.hub.Delivery(context.Background(), out["delivery_id"].(string))
+	if info.BodyTruncated || info.Body != string(body) {
+		t.Fatalf("%+v", info)
+	}
+}
+
+// webhooks.retention ages out delivery records and webhooks.max_rejected
+// caps the rejected ones.
+func TestHubPrunesDeliveries(t *testing.T) {
+	f := newHookFixture(t, fakeSpecs{reviewSpec}, config.WebhooksConfig{Retention: 24 * time.Hour, MaxRejected: 1})
+	ctx := context.Background()
+	f.secret("github.webhook_secret", "s3cret-hook")
+	body := fixture(t, "github_pull_request_opened.json")
+	for range 3 {
+		f.post("/hooks/github", body, ghHeaders("pull_request", "d-z", "wrong", body))
+	}
+	if n, err := f.hub.PruneDeliveries(ctx); err != nil || n != 2 {
+		t.Fatalf("pruned %d, %v", n, err)
+	}
+	f.now = time.Now().Add(48 * time.Hour) // store timestamps use the wall clock
+	if n, err := f.hub.PruneDeliveries(ctx); err != nil || n != 1 {
+		t.Fatalf("pruned %d, %v", n, err)
+	}
+	if def := NewHub(HubOptions{Store: f.store}); def.retention != 30*24*time.Hour || def.maxRejected != 1000 {
+		t.Fatalf("defaults: %v %d", def.retention, def.maxRejected)
+	}
+}
+

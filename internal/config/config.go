@@ -153,6 +153,11 @@ type WebhooksConfig struct {
 	MaxBodyBytes int64         `koanf:"max_body_bytes" yaml:"max_body_bytes"`
 	MaxSkew      time.Duration `koanf:"max_skew" yaml:"max_skew"`
 	RatePerMin   int           `koanf:"rate_per_min" yaml:"rate_per_min"`
+	// Retention is how long delivery records are kept; it is also the
+	// window in which a replayed delivery is recognized as a duplicate.
+	Retention time.Duration `koanf:"retention" yaml:"retention"`
+	// MaxRejected caps how many rejected (unverified) deliveries are kept.
+	MaxRejected int `koanf:"max_rejected" yaml:"max_rejected"`
 }
 
 // IntegrationConfig holds user opt-ins for one integration.
@@ -214,6 +219,8 @@ func Defaults() map[string]any {
 		"webhooks.max_body_bytes":  1 << 20,
 		"webhooks.max_skew":        "5m",
 		"webhooks.rate_per_min":    120,
+		"webhooks.retention":       "720h",
+		"webhooks.max_rejected":    1000,
 		"usage.timezone":           "Local",
 	}
 }
