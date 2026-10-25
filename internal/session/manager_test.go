@@ -389,7 +389,7 @@ func TestReconcileAfterRestart(t *testing.T) {
 		}
 	}
 	// Doctor's cleanup leaves the worktree and marks the session stopped.
-	if err := CleanupOrphan(ctx, e.st, e.eng, dead.ID); err != nil {
+	if ok, err := CleanupOrphan(ctx, e.st, e.eng, dead.ID); err != nil || !ok {
 		t.Fatal(err)
 	}
 	got, _ := m2.Get(ctx, dead.ID)

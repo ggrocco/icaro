@@ -876,20 +876,35 @@ func (m *Manager) probe(ctx context.Context) {
 }
 
 // Cleanup removes what is left of an orphaned session's container and
-// marks it stopped; its worktree (the user's work) is kept.
+// marks it stopped; its worktree (the user's work) is kept. A session
+// that is no longer orphaned is left alone.
 func (m *Manager) Cleanup(ctx context.Context, id string) error {
-	return CleanupOrphan(ctx, m.o.Store, m.o.Engine, id)
+	_, err := CleanupOrphan(ctx, m.o.Store, m.o.Engine, id)
+	return err
 }
 
-// CleanupOrphan is Cleanup without a running Manager (used by doctor).
-func CleanupOrphan(ctx context.Context, st *store.Store, eng Engine, id string) error {
+// CleanupOrphan is Cleanup without a running Manager: `icaro doctor --fix`
+// runs it in the CLI process against the store, which may be shared with
+// a running daemon. So it claims the session (orphaned -> stopped) before
+// it touches the container and skips a session that is not orphaned any
+// more, such as one the daemon re-attached or restarted since doctor
+// listed it. It reports whether it cleaned the session up.
+func CleanupOrphan(ctx context.Context, st *store.Store, eng Engine, id string) (bool, error) {
 	row, err := st.GetSession(ctx, id)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if row.Status != StatusOrphaned {
+		return false, nil
+	}
+	if ok, err := st.TransitionSession(ctx, id, StatusStopped, StatusOrphaned); err != nil || !ok {
+		return false, err
 	}
 	if row.ContainerID != "" {
 		if err := eng.RemoveContainer(ctx, row.ContainerID); err != nil {
-			return err
+			// Give it back to doctor so a retry finds it.
+			_, _ = st.TransitionSession(ctx, id, StatusOrphaned, StatusStopped)
+			return false, err
 		}
 	}
 	if proj, err := st.GetProject(ctx, row.ProjectID); err == nil {
@@ -897,7 +912,7 @@ func CleanupOrphan(ctx context.Context, st *store.Store, eng Engine, id string) 
 	}
 	row.ContainerID, row.Status = "", StatusStopped
 	row.Error = "cleaned up after: " + row.Error
-	return st.UpdateSession(ctx, row)
+	return st.UpdateSessionIf(ctx, row, StatusStopped)
 }
 
 func short(id string) string {

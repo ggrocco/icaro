@@ -68,12 +68,21 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 		res := doctor.Result{Severity: doctor.Warning, Detail: fmt.Sprintf("%d orphaned: %s; `icaro session start <id>` re-attaches, --fix cleans up", len(rows), strings.Join(ids, ", "))}
 		if eng != nil {
 			res.Fix = func(ctx context.Context) (string, error) {
+				cleaned := 0
 				for _, r := range rows {
-					if err := session.CleanupOrphan(ctx, st, eng, r.ID); err != nil {
+					ok, err := session.CleanupOrphan(ctx, st, eng, r.ID)
+					if err != nil {
 						return "", err
 					}
+					if ok {
+						cleaned++
+					}
 				}
-				return fmt.Sprintf("cleaned up %d session(s); worktrees kept", len(rows)), nil
+				msg := fmt.Sprintf("cleaned up %d session(s); worktrees kept", cleaned)
+				if skipped := len(rows) - cleaned; skipped > 0 {
+					msg += fmt.Sprintf("; skipped %d no longer orphaned", skipped)
+				}
+				return msg, nil
 			}
 		}
 		return res

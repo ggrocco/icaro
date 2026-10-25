@@ -86,7 +86,7 @@ At most `sessions.max_active` agent sessions run at once. The default, `0`, mean
 
 ## Restarts and recovery
 
-Sessions are stored in the database. When the daemon starts, it probes every session that was not finished: one whose container still runs is re-attached, and one whose container or worktree is gone is marked `orphaned` ([ADR 0006](../blueprint/docs/adr/0006-session-persistence-recovery.md)). `icaro doctor` lists orphaned sessions. `icaro session start ID` restarts one, and `icaro doctor --fix` cleans them up while keeping their worktrees.
+Sessions are stored in the database. When the daemon starts, it probes every session that was not finished: one whose container still runs is re-attached, and one whose container or worktree is gone is marked `orphaned` ([ADR 0006](../blueprint/docs/adr/0006-session-persistence-recovery.md)). `icaro doctor` lists orphaned sessions. `icaro session start ID` restarts one, and `icaro doctor --fix` cleans them up while keeping their worktrees. `doctor --fix` works on the database and Docker directly instead of going through the daemon (a known divergence from [ADR 0001](../blueprint/docs/adr/0001-single-daemon.md)), so it claims each session as it goes and skips one that is no longer orphaned, such as one the daemon re-attached or restarted after doctor listed it.
 
 ## Run sessions
 

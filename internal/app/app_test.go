@@ -435,7 +435,16 @@ func TestSessionChecks(t *testing.T) {
 	if err := a.Store.CreateSession(ctx, row); err != nil {
 		t.Fatal(err)
 	}
+	// Doctor lists a second orphan that the daemon restarts before --fix
+	// runs: the fix must leave its container alone.
+	revived := &store.SessionRow{Kind: "agent", ProjectID: proj.ID, Profile: "shell", Branch: "r", WorktreePath: "/r", ContainerID: "c2", Status: session.StatusOrphaned, Error: "daemon stopped"}
+	if err := a.Store.CreateSession(ctx, revived); err != nil {
+		t.Fatal(err)
+	}
 	r := run(t, orphans)
+	if ok, err := a.Store.TransitionSession(ctx, revived.ID, session.StatusRunning, session.StatusOrphaned); err != nil || !ok {
+		t.Fatal(err)
+	}
 	f.removeFail.Store(true)
 	if _, err := r.Fix(ctx); err == nil || !strings.Contains(err.Error(), "engine busy") {
 		t.Fatalf("fix with a failing engine = %v", err)
@@ -444,11 +453,14 @@ func TestSessionChecks(t *testing.T) {
 	if r.Severity != doctor.Warning || !strings.Contains(r.Detail, row.ID+" (container gone)") || r.Fix == nil {
 		t.Fatalf("orphan: %+v", r)
 	}
-	if msg, err := r.Fix(ctx); err != nil || !strings.Contains(msg, "cleaned up 1") {
+	if msg, err := r.Fix(ctx); err != nil || !strings.Contains(msg, "cleaned up 1") || !strings.Contains(msg, "skipped 1 no longer orphaned") {
 		t.Fatalf("fix = %q, %v", msg, err)
 	}
 	if f.removed.Load() != 1 {
-		t.Errorf("container not removed (%d)", f.removed.Load())
+		t.Errorf("only the orphan's container is removed (%d)", f.removed.Load())
+	}
+	if got, _ := a.Store.GetSession(ctx, revived.ID); got.Status != session.StatusRunning || got.ContainerID != "c2" {
+		t.Errorf("the restarted session was touched: %+v", got)
 	}
 	if r := run(t, orphans); r.Severity != doctor.OK {
 		t.Errorf("after fix: %+v", r)
