@@ -55,8 +55,14 @@ type Config struct {
 
 // DaemonConfig controls `icaro serve` and how clients reach it.
 type DaemonConfig struct {
-	// Listen adds a TCP listener (token required). Empty means Unix socket only.
+	// Listen adds a TCP listener (token required). Empty means Unix socket
+	// only. It must be a loopback address unless AllowRemote is set: the
+	// daemon speaks plain HTTP, so remote access belongs behind a
+	// TLS-terminating reverse proxy on the same host.
 	Listen string `koanf:"listen" yaml:"listen"`
+	// AllowRemote lets Listen bind a non-loopback address (plain HTTP,
+	// tokens in clear on the wire). Off by default (MVP cut 2).
+	AllowRemote bool `koanf:"allow_remote" yaml:"allow_remote"`
 	// URL makes CLI clients use TCP instead of the local socket.
 	URL string `koanf:"url" yaml:"url"`
 	// Token is the API token clients send over TCP.
@@ -302,6 +308,9 @@ func (c *Config) Validate() error {
 	if c.Database.Driver == "postgres" && c.Database.DSN == "" {
 		errs = append(errs, errors.New("database.dsn is required for postgres"))
 	}
+	if c.Daemon.RemoteListen() && !c.Daemon.AllowRemote {
+		errs = append(errs, fmt.Errorf("daemon.listen %q is not a loopback address; the daemon speaks plain HTTP, so listen on 127.0.0.1 behind a TLS-terminating reverse proxy, or set daemon.allow_remote: true (--allow-remote) to accept the risk", c.Daemon.Listen))
+	}
 	if c.Daemon.UIListen != "" && !isLoopback(c.Daemon.UIListen) {
 		errs = append(errs, fmt.Errorf("daemon.ui_listen %q must be a loopback address (use --listen for anything else)", c.Daemon.UIListen))
 	}
@@ -383,6 +392,12 @@ func expandHome(p string) string {
 		}
 	}
 	return p
+}
+
+// RemoteListen reports whether Listen binds something other than a
+// loopback address (":8787" binds every interface).
+func (d DaemonConfig) RemoteListen() bool {
+	return d.Listen != "" && !isLoopback(d.Listen)
 }
 
 func isLoopback(addr string) bool {

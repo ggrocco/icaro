@@ -635,6 +635,7 @@ icaro serve [flags]
 ```
 
 ```text
+      --allow-remote       let --listen bind a non-loopback address (plain HTTP; prefer a TLS reverse proxy to 127.0.0.1)
       --background         start the daemon detached and return once it answers
       --listen string      also listen on TCP (e.g. 127.0.0.1:8787); every TCP request needs an API token
       --log-level string   debug | info | warn | error (default "info")
