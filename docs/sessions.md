@@ -76,7 +76,7 @@ profiles:
     mounts: ["~/datasets/fixtures:/data:ro"]
 ```
 
-Mount sources are resolved through symlinks before they are checked. The host root, the Docker socket, `/var/run`, `/proc`, `/sys`, `/dev`, `/etc`, any ancestor of `$HOME`, and any credential directory are refused even if allowed ([ADR 0011](../blueprint/docs/adr/0011-mount-policy.md)). A refused mount fails the session and gives the reason.
+Mount sources are resolved through symlinks before they are checked. These are refused even if allowed ([ADR 0011](../blueprint/docs/adr/0011-mount-policy.md)): the host root, `/var/run`, `/proc`, `/sys`, `/dev`, `/etc`, any ancestor of `$HOME`, any credential directory (`~/.ssh`, `~/.aws`, `~/.config/gh`, …), any directory that contains one (so `~/.config`, `~/.local` and `~/Library` are refused, while `~/.config/nvim` is fine), container engine state directories (`~/.colima`, `~/.orbstack`, `~/.rd`, `~/.lima`, …), and a container engine socket or a directory holding one near its top. A refused mount fails the session and gives the reason.
 
 ## Concurrency cap
 

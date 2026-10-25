@@ -16,7 +16,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 
 **Network.** An agent's credential lives inside its container, so the **egress allowlist** is the main protection: each profile's containers sit on a network with no route out, and reach only the profile's allowlisted hosts through a proxy. See [Sessions: Egress allowlist](sessions.md#egress-allowlist).
 
-**Mounts.** Only the session worktree, the managed profile home and an explicit allowlist (`mounts.allow`) are mounted. The Docker socket, system paths, `$HOME` as a whole and credential directories (`~/.claude`, `~/.ssh`, `~/.aws`, …) are always refused. See [Sessions: Mounts](sessions.md#mounts).
+**Mounts.** Only the session worktree, the managed profile home and an explicit allowlist (`mounts.allow`) are mounted. Container engine sockets and state directories, system paths, `$HOME` as a whole, credential directories (`~/.claude`, `~/.ssh`, `~/.aws`, …) and any directory that contains one (such as `~/.config`) are always refused. See [Sessions: Mounts](sessions.md#mounts).
 
 **Secrets.** The master key is kept in the macOS Keychain or the Linux Secret Service, or in an encrypted file that needs a password. Secrets are sealed in the database, never shown by any API, CLI or MCP tool after they are written, and redacted from logs and captured outputs. Integration credentials are **host-bound**: the action executor refuses to send one to a host outside its binding. See [Integrations: Credentials](integrations.md#credentials).
 

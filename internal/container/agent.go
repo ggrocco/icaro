@@ -94,7 +94,12 @@ func (a AgentSpec) Build() (docker.Spec, docker.NetSpec) {
 	for _, m := range a.Extra {
 		bind(m.Source, m.Target, m.ReadOnly)
 		for _, mask := range m.Masks {
-			mounts = append(mounts, mount.Mount{Type: mount.TypeTmpfs, Target: mask, TmpfsOptions: &mount.TmpfsOptions{SizeBytes: 1 << 20}})
+			if mask.File {
+				// A tmpfs cannot cover a file; an empty device file can.
+				bind(os.DevNull, mask.Target, true)
+				continue
+			}
+			mounts = append(mounts, mount.Mount{Type: mount.TypeTmpfs, Target: mask.Target, TmpfsOptions: &mount.TmpfsOptions{SizeBytes: 1 << 20}})
 		}
 	}
 	hc := sandbox.Baseline(sandbox.BaselineOptions{

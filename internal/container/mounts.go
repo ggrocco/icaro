@@ -3,6 +3,7 @@ package container
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,13 +13,42 @@ import (
 var ErrMountDenied = errors.New("mount denied")
 
 // CredentialDirs are host credential locations, relative to $HOME, that
-// are never mounted into a container (ADR 0011, resolves O4). An explicit
-// shared-home mount gets an empty tmpfs over each of them instead.
+// are never mounted into a container, nor is any directory that contains
+// one (ADR 0011, resolves O4). An explicit shared-home mount masks each of
+// them instead.
 var CredentialDirs = []string{
 	".claude", ".claude.json", ".codex", ".config/gh", ".config/gcloud", ".config/op", ".aws", ".azure", ".ssh",
 	".gnupg", ".docker", ".kube", ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".config/git/credentials",
 	".icaro", ".local/share/keyrings", "Library/Keychains",
 }
+
+// EngineDirs are container engine state directories, relative to $HOME:
+// they hold an engine API socket or VM disk (Colima, OrbStack, Rancher
+// Desktop, Lima, Podman machine, Docker Desktop). Like credential
+// directories they are never mounted (~/.docker is already one).
+var EngineDirs = []string{
+	".colima", ".orbstack", ".rd", ".lima", ".local/share/containers",
+	"Library/Containers/com.docker.docker", "Library/Group Containers/group.com.docker",
+}
+
+// credentialFiles are the CredentialDirs entries that are files: a shared
+// home masks them with an empty read-only file, not a tmpfs.
+var credentialFiles = map[string]bool{
+	".claude.json": true, ".netrc": true, ".npmrc": true, ".pypirc": true, ".git-credentials": true, ".config/git/credentials": true,
+}
+
+// engineSockets name container engine API sockets; docker*.sock also counts.
+var engineSockets = map[string]bool{
+	"podman.sock": true, "containerd.sock": true, "buildkitd.sock": true, "crio.sock": true, "dockershim.sock": true, "cri-dockerd.sock": true,
+}
+
+// socketScanDepth and socketScanLimit bound the search for an engine
+// socket inside a source directory, so a large allowed tree costs little.
+// The known engines' deeper sockets live in EngineDirs, refused by path.
+const (
+	socketScanDepth = 3
+	socketScanLimit = 10000
+)
 
 // forbiddenRoots are never mountable, nor is anything below them.
 var forbiddenRoots = []string{"/var/run", "/run", "/proc", "/sys", "/dev", "/etc", "/boot", "/private/var/run", "/private/etc"}
@@ -42,9 +72,17 @@ type Mount struct {
 	Source   string
 	Target   string
 	ReadOnly bool
-	// Masks are container paths covered by an empty tmpfs (credential dirs
-	// inside a shared home).
-	Masks []string
+	// Masks hide credential and engine paths inside a shared home.
+	Masks []Mask
+}
+
+// Mask hides one path inside a mounted directory.
+type Mask struct {
+	// Target is the container path.
+	Target string
+	// File masks a file with an empty read-only file (/dev/null); a
+	// directory is covered by an empty tmpfs instead.
+	File bool
 }
 
 // ParseMount parses "host:container[:ro]".
@@ -83,8 +121,10 @@ func (p MountPolicy) Check(m Mount) (Mount, error) {
 	if src == "/" {
 		return m, fmt.Errorf("%w: the host root cannot be mounted", ErrMountDenied)
 	}
-	if strings.HasSuffix(src, "docker.sock") || strings.Contains(src, "/docker.sock") {
-		return m, fmt.Errorf("%w: the Docker socket is never mounted", ErrMountDenied)
+	for _, el := range strings.Split(src, "/") {
+		if isEngineSocket(el) {
+			return m, fmt.Errorf("%w: the container engine socket is never mounted", ErrMountDenied)
+		}
 	}
 	for _, f := range forbiddenRoots {
 		if within(src, f) {
@@ -93,10 +133,10 @@ func (p MountPolicy) Check(m Mount) (Mount, error) {
 	}
 	home := resolve(p.Home)
 	if home != "" {
-		for _, c := range CredentialDirs {
-			cred := filepath.Join(home, c)
-			if within(src, cred) {
-				return m, fmt.Errorf("%w: %s holds credentials (~/%s) and is never mounted; agents use their profile home", ErrMountDenied, src, c)
+		protected := protectedPaths(home)
+		for _, pp := range protected {
+			if within(src, pp.path) {
+				return m, fmt.Errorf("%w: %s holds credentials (~/%s) and is never mounted; agents use their profile home", ErrMountDenied, src, pp.rel)
 			}
 		}
 		switch {
@@ -104,20 +144,95 @@ func (p MountPolicy) Check(m Mount) (Mount, error) {
 			if !p.SharedHome {
 				return m, fmt.Errorf("%w: mounting all of $HOME needs an explicit shared-home profile", ErrMountDenied)
 			}
-			for _, c := range CredentialDirs {
-				m.Masks = append(m.Masks, filepath.Join(m.Target, c))
+			for _, c := range append(append([]string{}, CredentialDirs...), EngineDirs...) {
+				m.Masks = append(m.Masks, Mask{Target: filepath.Join(m.Target, c), File: isFileEntry(home, c)})
 			}
 			return m, nil
 		case within(home, src):
 			return m, fmt.Errorf("%w: %s contains $HOME", ErrMountDenied, src)
 		}
-	}
-	for _, root := range append(append([]string{}, p.Internal...), p.Allow...) {
-		if r := resolve(root); r != "" && within(src, r) {
-			return m, nil
+		// An ancestor of a credential directory (~/.config, ~/.local,
+		// ~/Library) would expose it as a subdirectory.
+		for _, pp := range protected {
+			if within(pp.path, src) {
+				return m, fmt.Errorf("%w: %s contains ~/%s, which holds credentials and is never mounted", ErrMountDenied, src, pp.rel)
+			}
 		}
 	}
-	return m, fmt.Errorf("%w: %s is not under an allowed directory (config mounts.allow)", ErrMountDenied, src)
+	allowed := false
+	for _, root := range append(append([]string{}, p.Internal...), p.Allow...) {
+		if r := resolve(root); r != "" && within(src, r) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return m, fmt.Errorf("%w: %s is not under an allowed directory (config mounts.allow)", ErrMountDenied, src)
+	}
+	if sock := engineSocketIn(src); sock != "" {
+		return m, fmt.Errorf("%w: %s holds a container engine socket (%s), which is never mounted", ErrMountDenied, src, sock)
+	}
+	return m, nil
+}
+
+// protectedPath is a credential or engine path under $HOME: as listed
+// (rel) and as an absolute host path.
+type protectedPath struct{ rel, path string }
+
+// protectedPaths returns every credential and engine path under home,
+// both lexically and with symlinks resolved, so ~/.ssh -> ~/dotfiles/ssh
+// protects ~/dotfiles/ssh too.
+func protectedPaths(home string) []protectedPath {
+	var out []protectedPath
+	for _, c := range append(append([]string{}, CredentialDirs...), EngineDirs...) {
+		lex := filepath.Join(home, c)
+		out = append(out, protectedPath{c, lex})
+		if r := resolve(lex); r != lex {
+			out = append(out, protectedPath{c, r})
+		}
+	}
+	return out
+}
+
+// isFileEntry reports whether the protected entry rel under home is a
+// file (masked with an empty file) rather than a directory (tmpfs). A
+// missing entry is classified by its well-known kind.
+func isFileEntry(home, rel string) bool {
+	fi, err := os.Stat(filepath.Join(home, rel))
+	if err != nil {
+		return credentialFiles[rel]
+	}
+	return !fi.IsDir()
+}
+
+// isEngineSocket reports whether name is a container engine socket name.
+func isEngineSocket(name string) bool {
+	return engineSockets[name] || (strings.HasPrefix(name, "docker") && strings.HasSuffix(name, ".sock"))
+}
+
+// engineSocketIn returns the first engine socket at most socketScanDepth
+// levels below root, or "" when there is none within socketScanLimit
+// entries. Symlinks are not followed: inside the container they resolve
+// against the container's filesystem, not the host's.
+func engineSocketIn(root string) string {
+	found, n := "", 0
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable here, so unreadable to the container too
+		}
+		if n++; n > socketScanLimit {
+			return filepath.SkipAll
+		}
+		if d.Type()&fs.ModeSocket != 0 && isEngineSocket(d.Name()) {
+			found = p
+			return filepath.SkipAll
+		}
+		if d.IsDir() && strings.Count(strings.TrimPrefix(p, root), "/") >= socketScanDepth {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return found
 }
 
 // within reports whether p is root or below it.
@@ -128,6 +243,9 @@ func within(p, root string) bool {
 	return p == root || strings.HasPrefix(p, strings.TrimSuffix(root, "/")+"/")
 }
 
+// resolve expands "~/", cleans p and resolves symlinks in its longest
+// existing prefix, so a path that does not exist (yet) still resolves
+// through a symlinked parent.
 func resolve(p string) string {
 	if p == "" {
 		return ""
@@ -137,8 +255,15 @@ func resolve(p string) string {
 			p = filepath.Join(h, p[2:])
 		}
 	}
-	if r, err := filepath.EvalSymlinks(filepath.Clean(p)); err == nil {
-		return r
+	p = filepath.Clean(p)
+	rest := ""
+	for dir := p; ; dir = filepath.Dir(dir) {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if dir == filepath.Dir(dir) {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
 	}
-	return filepath.Clean(p)
 }
