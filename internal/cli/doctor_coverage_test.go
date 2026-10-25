@@ -12,7 +12,7 @@ import (
 // doctorTableChecks maps each row of the doctor table in
 // blueprint/docs/03-security.md to the check that covers it. A new row
 // without an entry here fails TestDoctorCoversSecurityTable.
-var doctorTableChecks = map[string]string{
+var doctorTableChecks = map[string]string{ //nolint:gosec // doctor check names, not credentials
 	"Docker missing/inactive":             "docker",
 	"Orphaned lock/socket/PID":            "daemon lock/socket/pid",
 	"Orphaned sessions":                   "orphaned sessions",

@@ -84,7 +84,10 @@ func GitBranch(path string) string {
 }
 
 // git runs the git binary in dir. Arguments are passed as argv (no shell),
-// and dir is only ever a directory the caller asked to index.
+// and dir is only ever a directory the caller asked to index. That may be
+// a session worktree an agent wrote to, so the repository's config cannot
+// make git run a program: no fsmonitor, no hooks.
 func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output() //nolint:gosec // fixed binary, argv without a shell
+	argv := append([]string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
+	return exec.CommandContext(ctx, "git", argv...).Output() //nolint:gosec // fixed binary, argv without a shell
 }
