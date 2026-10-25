@@ -413,6 +413,10 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 	if err != nil {
 		return err
 	}
+	providerEnv, err := m.injectEnv(ctx, row, prof.Inject, att)
+	if err != nil {
+		return err
+	}
 	var extra []container.Mount
 	for _, spec := range prof.Mounts {
 		mt, err := container.ParseMount(spec)
@@ -443,7 +447,7 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		spec, ns := container.AgentSpec{
 			Name:  "icaro-session-" + strings.ToLower(row.ID),
 			Image: image, User: m.User(),
-			Env: []string{"ICARO_SESSION=" + row.ID, "ICARO_PROJECT=" + proj.Name, "ICARO_PROFILE=" + row.Profile, "ICARO_BRANCH=" + row.Branch},
+			Env: append([]string{"ICARO_SESSION=" + row.ID, "ICARO_PROJECT=" + proj.Name, "ICARO_PROFILE=" + row.Profile, "ICARO_BRANCH=" + row.Branch}, providerEnv...),
 			Labels: map[string]string{
 				container.LabelSession: row.ID, container.LabelKind: row.Kind, container.LabelProfile: row.Profile,
 			},
@@ -653,6 +657,8 @@ func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
 	} else if !ok {
 		return nil, ErrNotFound
 	}
+	// The session's credential-injection token dies with the claim.
+	m.revokeInject(ctx, id)
 	if err := m.awaitStart(ctx, id); err != nil {
 		return nil, err
 	}
@@ -668,6 +674,8 @@ func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
 		// start owns the session's container now.
 		return toSession(row), nil
 	}
+	// A start that was in flight may have issued a token after the claim.
+	m.revokeInject(ctx, id)
 	if stop := m.mcp.take(id); stop != nil {
 		stop()
 	}
@@ -877,6 +885,7 @@ func (m *Manager) orphan(ctx context.Context, row *store.SessionRow, reason stri
 		return err
 	}
 	m.o.Log.Warn("session orphaned", "session", row.ID, "reason", reason)
+	m.revokeInject(ctx, row.ID)
 	if stop := m.mcp.take(row.ID); stop != nil {
 		stop()
 	}
