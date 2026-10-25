@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
-	"time"
 )
 
 // InjectPrefixes are the paths the injection relay forwards (ADR 0028):
@@ -34,8 +33,9 @@ func NewForwarder(socket string, log *slog.Logger) http.Handler {
 				var d net.Dialer
 				return d.DialContext(ctx, "unix", socket)
 			},
-			MaxIdleConns:    32,
-			IdleConnTimeout: 60 * time.Second,
+			// A local socket is cheap to dial, and a pooled connection would
+			// outlive a daemon restart (which recreates the socket).
+			DisableKeepAlives: true,
 		},
 		// Flush every write: model responses are server-sent events.
 		FlushInterval: -1,
