@@ -73,7 +73,7 @@ printf %s "$WEBHOOK_SECRET" | icaro credential add github webhook_secret
 icaro credential list                                           # names and hosts, never values
 ```
 
-The binding defaults to the manifest's `hosts` plus the host of a `base_url` you configured. Use `--host` to choose it yourself, and `--yes` to skip the confirmation. `<integration>.webhook_secret` verifies inbound webhooks and is never sent anywhere, so it has no binding. Credentials never enter a container.
+The binding defaults to the manifest's `hosts` plus the host of a `base_url` you configured. Use `--host` to choose it yourself (a hostname, or a wildcard such as `*.example.com`; a top-level wildcard like `*.com` is refused, in a binding and in a manifest's `hosts`), and `--yes` to skip the confirmation. `<integration>.webhook_secret` verifies inbound webhooks and is never sent anywhere, so it has no binding. Credentials never enter a container.
 
 ## Webhooks
 

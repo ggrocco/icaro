@@ -17,6 +17,7 @@ import (
 	"golang.org/x/text/message"
 
 	"icaro/internal/expr"
+	"icaro/internal/secrets"
 )
 
 //go:embed manifest.schema.json
@@ -111,6 +112,11 @@ func Parse(src []byte) (*Manifest, Issues, error) {
 // Validate applies the semantic rules the schema cannot express.
 func (m *Manifest) Validate() Issues {
 	v := &validator{m: m}
+	for i, h := range m.Hosts {
+		if err := secrets.CheckHostPattern(h); err != nil {
+			v.add(fmt.Sprintf("/hosts/%d", i), err.Error())
+		}
+	}
 	if m.Triggers != nil {
 		v.triggers(m.Triggers)
 	}

@@ -67,8 +67,8 @@ func (s *Store) Set(ctx context.Context, name, value string, hosts []string) err
 		if h == "" {
 			continue
 		}
-		if strings.ContainsAny(h, "/: ") {
-			return fmt.Errorf("%w: host %q must be a hostname or *.domain", ErrInvalid, h)
+		if err := CheckHostPattern(h); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		norm = append(norm, h)
 	}
@@ -116,8 +116,27 @@ func (s *Store) ResolveFor(ctx context.Context, name, host string) (string, erro
 	return string(plain), nil
 }
 
+// CheckHostPattern validates a host binding or manifest host: a hostname,
+// or "*." followed by a domain of at least two labels. "*.com" would
+// send a credential to every .com host, so it is refused.
+func CheckHostPattern(h string) error {
+	if h == "" || strings.ContainsAny(h, "/: ") {
+		return fmt.Errorf("host %q must be a hostname or *.domain", h)
+	}
+	rest, wildcard := strings.CutPrefix(h, "*.")
+	if strings.Contains(rest, "*") {
+		return fmt.Errorf("host %q: a wildcard is only allowed as a leading \"*.\"", h)
+	}
+	if wildcard && !strings.Contains(strings.Trim(rest, "."), ".") {
+		return fmt.Errorf("wildcard host %q covers a whole top-level domain; name at least two labels after \"*.\", such as *.example.com", h)
+	}
+	return nil
+}
+
 // HostAllowed matches host against bindings ("api.github.com" exact,
-// "*.slack.com" any subdomain). An empty binding allows nothing.
+// "*.slack.com" any subdomain). An empty binding allows nothing, and a
+// top-level wildcard such as "*.com" (refused since, but possibly stored
+// earlier) matches nothing.
 func HostAllowed(bindings []string, host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	if i := strings.LastIndex(host, ":"); i >= 0 && !strings.Contains(host[i:], "]") {
@@ -127,7 +146,7 @@ func HostAllowed(bindings []string, host string) bool {
 		if b == host {
 			return true
 		}
-		if strings.HasPrefix(b, "*.") && strings.HasSuffix(host, b[1:]) && len(host) > len(b)-1 {
+		if strings.HasPrefix(b, "*.") && strings.HasSuffix(host, b[1:]) && len(host) > len(b)-1 && CheckHostPattern(b) == nil {
 			return true
 		}
 	}

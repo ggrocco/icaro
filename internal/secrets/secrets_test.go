@@ -75,4 +75,17 @@ func TestSecretsLifecycle(t *testing.T) {
 	if HostAllowed(nil, "a") {
 		t.Fatal("empty binding")
 	}
+	// A wildcard must keep at least two labels: *.com would bind a
+	// credential to every .com host.
+	for _, bad := range []string{"*.com", "*.com.", "*", "*.*.example.com", "api.*.example.com"} {
+		if err := s.Set(ctx, "x", "v", []string{bad}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%q accepted: %v", bad, err)
+		}
+	}
+	if err := s.Set(ctx, "x", "v", []string{"*.co.uk", "*.sentry.io"}); err != nil {
+		t.Fatal(err)
+	}
+	if HostAllowed([]string{"*.com"}, "evil.com") || !HostAllowed([]string{"*.sentry.io"}, "us.sentry.io") {
+		t.Fatal("a stored top-level wildcard must match nothing")
+	}
 }
