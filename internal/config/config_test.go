@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,13 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 	}
 	if len(cfg.Profiles["claude"].Egress) == 0 {
 		t.Fatal("claude profile must ship an egress allowlist")
+	}
+	// Shared ingest services anyone can send data to stay off the
+	// default allowlists.
+	for name, p := range DefaultProfiles() {
+		if slices.Contains(p.Egress, "sentry.io") {
+			t.Errorf("profile %s allows sentry.io by default", name)
+		}
 	}
 }
 

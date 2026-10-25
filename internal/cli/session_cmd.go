@@ -195,7 +195,7 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 			if len(run) == 0 {
 				run = info.AgentCmd
 			}
-			return execInSession(cmd.Context(), info, run)
+			return execInSession(cmd.Context(), opts, info, run)
 		},
 	}
 
@@ -225,7 +225,11 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 
 // execInSession runs argv in the session container with TTY passthrough
 // and propagates the exit code.
-func execInSession(ctx context.Context, info *session.ExecInfo, argv []string) error {
+func execInSession(ctx context.Context, opts *rootOpts, info *session.ExecInfo, argv []string) error {
+	cfg, err := opts.loadConfig()
+	if err != nil {
+		return err
+	}
 	if len(argv) == 0 {
 		argv = container.ShellCommand
 	}
@@ -233,12 +237,25 @@ func execInSession(ctx context.Context, info *session.ExecInfo, argv []string) e
 	args := container.ExecArgs(container.ExecOptions{
 		Container: info.ContainerID, User: info.User, Workdir: info.Workdir, TTY: tty, Interactive: true, Cmd: argv,
 	})
-	return runDockerCLI(ctx, args)
+	return runDockerCLI(ctx, cfg.Docker.Host, args)
 }
 
-// runDockerCLI runs the docker CLI attached to our stdio.
-func runDockerCLI(ctx context.Context, args []string) error {
+// dockerEnv is the docker CLI's environment: environ, pointed at host
+// (config docker.host) when set, so the CLI reaches the same engine as
+// the daemon. A later DOCKER_HOST entry wins, and DOCKER_HOST overrides
+// the CLI's current context.
+func dockerEnv(environ []string, host string) []string {
+	if host == "" {
+		return environ
+	}
+	return append(append([]string{}, environ...), "DOCKER_HOST="+host)
+}
+
+// runDockerCLI runs the docker CLI against host ("" keeps the user's
+// environment) attached to our stdio.
+func runDockerCLI(ctx context.Context, host string, args []string) error {
 	c := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // argv built by container.ExecArgs
+	c.Env = dockerEnv(os.Environ(), host)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := c.Run()
 	if err == nil {
@@ -288,7 +305,7 @@ func newShCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return execInSession(cmd.Context(), info, args)
+			return execInSession(cmd.Context(), opts, info, args)
 		},
 	}
 	cmd.Flags().StringVar(&profile, "profile", "", "profile for a new session (default: sessions.default_profile)")
@@ -318,16 +335,20 @@ func newAgentCmd(opts *rootOpts, agent string) *cobra.Command {
 			if len(info.AgentCmd) == 0 {
 				return fmt.Errorf("profile %s has no agent; use `icaro sh`", profile)
 			}
-			return execInSession(cmd.Context(), info, append(append([]string{}, info.AgentCmd...), args...))
+			return execInSession(cmd.Context(), opts, info, append(append([]string{}, info.AgentCmd...), args...))
 		},
 	}
 }
 
 func newLoginCmd(opts *rootOpts) *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "login PROFILE",
 		Short: "Log the profile's agent in once; the login seeds every session of the profile",
-		Args:  cobra.ExactArgs(1),
+		Long: "Log the profile's agent in once; the login seeds every session of the profile.\n\n" +
+			"The login rewrites the profile's home seed, which running sessions may be using, so it is refused " +
+			"while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := opts.loadConfig()
 			if err != nil {
@@ -337,7 +358,7 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			info, err := c.PrepareLogin(cmd.Context(), args[0])
+			info, err := c.PrepareLogin(cmd.Context(), args[0], force)
 			if err != nil {
 				return err
 			}
@@ -347,9 +368,11 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			}
 			dargs := loginArgs(info, seccomp, isTerminal(os.Stdin))
 			fmt.Fprintf(cmd.ErrOrStderr(), "logging in %s; the seed lives in %s (never your host ~/.claude)\n", info.Profile, info.SeedDir)
-			return runDockerCLI(cmd.Context(), dargs)
+			return runDockerCLI(cmd.Context(), cfg.Docker.Host, dargs)
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "log in even while sessions of the profile use its home seed")
+	return cmd
 }
 
 // loginArgs builds `docker run` for a login under the container baseline,

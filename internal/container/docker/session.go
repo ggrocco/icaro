@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -53,19 +54,92 @@ func (e *Engine) CreateContainerOn(ctx context.Context, spec Spec, net NetSpec) 
 	return res.ID, nil
 }
 
+// NetworkInfo is the subset of network inspect data the egress checks use.
+type NetworkInfo struct {
+	Name     string
+	Internal bool
+	Labels   map[string]string
+	// Containers counts the endpoints attached to the network.
+	Containers int
+}
+
+// NetworkMismatch reports why an existing network cannot serve a request
+// for an (internal) network carrying labels, or nil when it can. A
+// non-internal network would give its containers a direct route out, and
+// one without our labels was not created by Ícaro, so other containers
+// may share it (and answer for the egress proxy's alias).
+func NetworkMismatch(n NetworkInfo, internal bool, labels map[string]string) error {
+	if internal && !n.Internal {
+		return fmt.Errorf("network %s exists but is not internal, so containers on it could bypass the egress proxy; remove it (`docker network rm %s`) and retry", n.Name, n.Name)
+	}
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if n.Labels[k] != labels[k] {
+			return fmt.Errorf("network %s exists but was not created by Ícaro (label %s=%q, want %q); remove it (`docker network rm %s`) and retry", n.Name, k, n.Labels[k], labels[k], n.Name)
+		}
+	}
+	return nil
+}
+
 // CreateNetwork creates a network when missing. internal=true creates a
-// network with no route outside the host.
+// network with no route outside the host. An existing network is reused
+// only when it matches (NetworkMismatch): egress confinement must not
+// fail open onto a network someone else created.
 func (e *Engine) CreateNetwork(ctx context.Context, name string, internal bool, labels map[string]string) error {
-	if _, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); err == nil {
-		return nil
-	} else if !cerrdefs.IsNotFound(err) {
+	n, err := e.InspectNetwork(ctx, name)
+	if err == nil {
+		return NetworkMismatch(n, internal, labels)
+	} else if !IsNotFound(err) {
 		return err
 	}
-	_, err := e.cli.NetworkCreate(ctx, name, client.NetworkCreateOptions{Driver: "bridge", Internal: internal, Labels: labels})
+	_, err = e.cli.NetworkCreate(ctx, name, client.NetworkCreateOptions{Driver: "bridge", Internal: internal, Labels: labels})
 	if cerrdefs.IsConflict(err) {
-		return nil
+		// Created concurrently: check what won the race.
+		if n, err = e.InspectNetwork(ctx, name); err != nil {
+			return err
+		}
+		return NetworkMismatch(n, internal, labels)
 	}
 	return err
+}
+
+// InspectNetwork returns a network's settings (ErrNotFound when missing).
+func (e *Engine) InspectNetwork(ctx context.Context, name string) (NetworkInfo, error) {
+	res, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return NetworkInfo{}, ErrNotFound
+	}
+	if err != nil {
+		return NetworkInfo{}, err
+	}
+	return NetworkInfo{Name: res.Network.Name, Internal: res.Network.Internal, Labels: res.Network.Labels, Containers: len(res.Network.Containers)}, nil
+}
+
+// ListNetworks returns the networks whose name starts with prefix.
+func (e *Engine) ListNetworks(ctx context.Context, prefix string) ([]NetworkInfo, error) {
+	res, err := e.cli.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("name", prefix)})
+	if err != nil {
+		return nil, err
+	}
+	var out []NetworkInfo
+	for _, s := range res.Items {
+		if !strings.HasPrefix(s.Name, prefix) {
+			continue // the name filter matches substrings
+		}
+		n, err := e.InspectNetwork(ctx, s.Name)
+		if IsNotFound(err) {
+			continue // removed meanwhile
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // ConnectNetwork attaches a container to an extra network.

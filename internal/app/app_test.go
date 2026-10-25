@@ -423,6 +423,7 @@ func TestSessionChecks(t *testing.T) {
 	}
 
 	cs := SessionChecks(a.Cfg, a.Store, a.Docker)
+	findCheck(t, cs, "egress networks") // behaviour: container.TestEgressNetworkCheck
 	orphans := findCheck(t, cs, "orphaned sessions")
 	if r := run(t, orphans); r.Severity != doctor.OK {
 		t.Errorf("no orphans: %+v", r)

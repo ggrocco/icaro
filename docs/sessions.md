@@ -32,7 +32,7 @@ profiles:
   claude:
     agent: claude
     image: ghcr.io/icaro-dev/agent-base:latest
-    egress: [api.anthropic.com, console.anthropic.com, claude.ai, statsig.anthropic.com, sentry.io]
+    egress: [api.anthropic.com, console.anthropic.com, claude.ai, statsig.anthropic.com]
   codex:
     agent: codex
     image: ghcr.io/icaro-dev/agent-base:latest
@@ -47,6 +47,8 @@ sessions:
   default_profile: claude
 ```
 
+The `claude` allowlist leaves out `sentry.io`, Claude Code's error reporting: Sentry is a shared ingest service anyone can send data to, so allowing it gives a prompt-injected agent a way out. Claude Code works without it. To send its crash reports anyway, add `sentry.io` to the profile's `egress` list. Configs written by an older `icaro setup` may still list it; remove it there to close that path.
+
 `--profile NAME` on `session create`, `sh`, `claude` and `codex` picks another profile. `icaro setup` pulls each image and pins it by digest; `icaro doctor` reports a pinned image that is missing or changed, and `--fix` pulls it again by its digest. The agent base image is built from [`images/agent-base/Dockerfile`](../images/agent-base/Dockerfile) (`make image-agent`).
 
 ## Profile homes and `icaro login`
@@ -55,20 +57,20 @@ Agent CLIs authenticate from their own home directory, so each profile has a per
 
 - `icaro login <profile>` runs the agent's login once, with the profile's **seed** home mounted read-write. It is the only command that writes to the seed.
 - Every session mounts the seed **read-only** and gets its own writable layer on top (a Docker overlay volume on Linux, a per-session copy elsewhere; `sessions.home_mode: auto | overlay | copy`). Concurrent sessions share the login and never corrupt each other's `~/.claude`.
-- A token an agent refreshes lands in that session's layer. Run `icaro login` again to refresh the seed.
+- A token an agent refreshes lands in that session's layer. Run `icaro login` again to refresh the seed. Because the seed is the lower layer of every running overlay session, the daemon refuses a login while sessions of the profile are queued, starting, or running on overlay homes, and names them; stop them first (`icaro session stop ID`), or pass `--force`.
 - Your own `~/.claude`, `~/.codex`, `~/.ssh`, `~/.aws` and similar directories are never mounted.
 
 Ícaro writes two things into each session's layer: the memory MCP server entry (`icaro mcp --socket /icaro/mcp.sock`) and the handoff preamble from `memory.preamble`. See [Shared memory](memory.md).
 
 ## Egress allowlist
 
-Each profile's container joins an internal Docker network (`icaro-egress-<profile>`) with no route off the host. Its only way out is a per-profile proxy that allows the profile's `egress` hosts (exact names or `*.domain`) and denies everything else ([ADR 0012](../blueprint/docs/adr/0012-egress-proxy-and-home-layers.md)). An empty list (`egress: []`) means no network at all. The proxy enforces this by network topology, not by trusting the agent to honor proxy variables. Because the agent's credential lives inside its container, this allowlist is the main protection against a prompt-injected agent sending data elsewhere. Keep it short.
+Each profile's container joins an internal Docker network (`icaro-egress-<profile>`) with no route off the host. Its only way out is a per-profile proxy that allows the profile's `egress` hosts (exact names or `*.domain`) and denies everything else ([ADR 0012](../blueprint/docs/adr/0012-egress-proxy-and-home-layers.md)). An empty list (`egress: []`) means no network at all. The proxy enforces this by network topology, not by trusting the agent to honor proxy variables. If a network with that name already exists but is not internal, or was not created by Ícaro, the session refuses to start rather than reuse it; `icaro doctor` reports such networks and `--fix` removes the unused ones. Because the agent's credential lives inside its container, this allowlist is the main protection against a prompt-injected agent sending data elsewhere. Keep it short.
 
 On macOS, set `docker.helper_image` (for example to the agent base image), because the daemon cannot build the Linux proxy image from a macOS binary.
 
 ## Mounts
 
-The session manager adds its own mounts: the worktree at `/workspace`, the profile home, the session's `/icaro` directory, and the repository's `.git` (with `hooks/` and `config` read-only, so an agent cannot plant a hook that your git would later run). You can add more with `profiles.<name>.mounts` (`host:container[:ro]`), but only under directories listed in `mounts.allow`:
+The session manager adds its own mounts: the worktree at `/workspace`, the profile home, the session's `/icaro` directory, and the repository's `.git`. Inside `.git`, everything your git reads to decide what to run is read-only: `config`, `hooks/` (created empty if missing), submodule config and hooks, other worktrees' admin files, and the session worktree's `.git` link files, so an agent cannot plant a hook or setting that your git would later run. Objects, refs and the session's own index stay writable, so the agent can commit. You can add more with `profiles.<name>.mounts` (`host:container[:ro]`), but only under directories listed in `mounts.allow`:
 
 ```yaml
 mounts:
@@ -78,7 +80,7 @@ profiles:
     mounts: ["~/datasets/fixtures:/data:ro"]
 ```
 
-Mount sources are resolved through symlinks before they are checked. The host root, the Docker socket, `/var/run`, `/proc`, `/sys`, `/dev`, `/etc`, any ancestor of `$HOME`, and any credential directory are refused even if allowed ([ADR 0011](../blueprint/docs/adr/0011-mount-policy.md)). A refused mount fails the session and gives the reason.
+Mount sources are resolved through symlinks before they are checked. These are refused even if allowed ([ADR 0011](../blueprint/docs/adr/0011-mount-policy.md)): the host root, `/var/run`, `/proc`, `/sys`, `/dev`, `/etc`, any ancestor of `$HOME`, any credential directory (`~/.ssh`, `~/.aws`, `~/.config/gh`, …), any directory that contains one (so `~/.config`, `~/.local` and `~/Library` are refused, while `~/.config/nvim` is fine), container engine state directories (`~/.colima`, `~/.orbstack`, `~/.rd`, `~/.lima`, …), and a container engine socket or a directory holding one near its top. A refused mount fails the session and gives the reason.
 
 ## Concurrency cap
 

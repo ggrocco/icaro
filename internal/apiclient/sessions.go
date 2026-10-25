@@ -115,10 +115,15 @@ type LoginInfo struct {
 	Egress  container.Attachment `json:"egress"`
 }
 
-// PrepareLogin provisions what `icaro login` needs for a profile.
-func (c *Client) PrepareLogin(ctx context.Context, profile string) (*LoginInfo, error) {
+// PrepareLogin provisions what `icaro login` needs for a profile. The
+// daemon refuses while sessions of the profile use its seed, unless force.
+func (c *Client) PrepareLogin(ctx context.Context, profile string, force bool) (*LoginInfo, error) {
 	var out LoginInfo
-	return &out, c.doJSON(ctx, http.MethodPost, "/api/v1/profiles/"+url.PathEscape(profile)+"/login", nil, &out)
+	path := "/api/v1/profiles/" + url.PathEscape(profile) + "/login"
+	if force {
+		path += "?force=true"
+	}
+	return &out, c.doJSON(ctx, http.MethodPost, path, nil, &out)
 }
 
 // ListSecrets lists secret names and bindings (never values).
