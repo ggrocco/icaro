@@ -25,7 +25,7 @@ Allowed only at the edges: clock, filesystem, process runner, and external HTTP 
 
 ## Concurrency
 
-Each goroutine owns its state and communicates over channels; no mutex in domain code. The store is a single writer goroutine fed by a command channel ([architecture §4](01-architecture.md#4-persistence)).
+Each goroutine owns its state and communicates over channels; no mutex in domain code. The store is the exception to goroutine ownership: it is a `database/sql` repository (one connection on SQLite, a pool on Postgres), and state shared through it is protected by compare-and-set updates and transactions ([architecture §4](01-architecture.md#4-persistence)).
 
 ## Dependency policy
 

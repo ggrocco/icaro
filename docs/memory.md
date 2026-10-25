@@ -27,7 +27,7 @@ The daemon serves three tools — `memory_write`, `memory_query`, `memory_proven
   {"mcpServers": {"icaro": {"command": "icaro", "args": ["mcp", "--socket", "/icaro/mcp.sock"]}}}
   ```
 
-  The socket is created by the daemon per session (`0600`); its scope is the session's identity.
+  The socket is created by the daemon per session (`0600`) at `~/.icaro/run/sessions/<id>/mcp.sock`; its scope is the session's identity. If `ICARO_HOME` is so long that this path exceeds the 103-byte Unix socket limit, sessions start without memory and `icaro doctor` warns about it.
 - **On the host** run `icaro mcp` (optionally `--project <dir>`, `--agent <name>`) as a stdio MCP server; it bridges to the daemon's `/mcp` endpoint with the project of the current repository:
 
   ```sh

@@ -29,6 +29,9 @@ type fakeEngine struct {
 	n       int
 	failOn  string
 	errs    map[string]error // per-operation failures, see fail
+	// afterCreate, when set before the first session starts, runs after
+	// each successful create outside the engine loop (a test pause point).
+	afterCreate func()
 }
 
 func newFakeEngine() *fakeEngine {
@@ -74,6 +77,9 @@ func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, _ do
 		id = fmt.Sprintf("c%d", f.n)
 		f.specs[id] = spec
 	})
+	if err == nil && f.afterCreate != nil {
+		f.afterCreate()
+	}
 	return id, err
 }
 
@@ -383,7 +389,7 @@ func TestReconcileAfterRestart(t *testing.T) {
 		}
 	}
 	// Doctor's cleanup leaves the worktree and marks the session stopped.
-	if err := CleanupOrphan(ctx, e.st, e.eng, dead.ID); err != nil {
+	if ok, err := CleanupOrphan(ctx, e.st, e.eng, dead.ID); err != nil || !ok {
 		t.Fatal(err)
 	}
 	got, _ := m2.Get(ctx, dead.ID)

@@ -149,17 +149,44 @@ func (s *Store) CreateSession(ctx context.Context, r *SessionRow) error {
 	return err
 }
 
+const sessionSet = `UPDATE sessions SET profile = ?, branch = ?, worktree_path = ?, container_id = ?, image_digest = ?,
+		preview_instance_id = ?, run_id = ?, status = ?, error = ?, updated_at = ?, last_heartbeat = ? WHERE id = ?`
+
+func sessionArgs(r *SessionRow) []any {
+	return []any{r.Profile, r.Branch, r.WorktreePath, r.ContainerID, r.ImageDigest, r.PreviewInstanceID, r.RunID, r.Status, r.Error,
+		ts(r.UpdatedAt), tsPtr(r.LastHeartbeat), r.ID}
+}
+
 // UpdateSession writes every mutable column.
 func (s *Store) UpdateSession(ctx context.Context, r *SessionRow) error {
 	r.UpdatedAt = Now()
-	res, err := s.exec(ctx, `UPDATE sessions SET profile = ?, branch = ?, worktree_path = ?, container_id = ?, image_digest = ?,
-		preview_instance_id = ?, run_id = ?, status = ?, error = ?, updated_at = ?, last_heartbeat = ? WHERE id = ?`,
-		r.Profile, r.Branch, r.WorktreePath, r.ContainerID, r.ImageDigest, r.PreviewInstanceID, r.RunID, r.Status, r.Error,
-		ts(r.UpdatedAt), tsPtr(r.LastHeartbeat), r.ID)
+	res, err := s.exec(ctx, sessionSet, sessionArgs(r)...)
 	if err != nil {
 		return err
 	}
 	return affected(res)
+}
+
+// UpdateSessionIf writes every mutable column only while the stored
+// status is one of from, and reports whether it did. A false result
+// means another writer moved the session on (or deleted it) since r was
+// read: the compare-and-set that keeps a stop from being overwritten by
+// a start still in flight.
+func (s *Store) UpdateSessionIf(ctx context.Context, r *SessionRow, from ...string) (bool, error) {
+	if len(from) == 0 {
+		return false, errors.New("update session: no expected status")
+	}
+	r.UpdatedAt = Now()
+	args := sessionArgs(r)
+	for _, f := range from {
+		args = append(args, f)
+	}
+	res, err := s.exec(ctx, sessionSet+` AND status IN (`+strings.TrimSuffix(strings.Repeat("?,", len(from)), ",")+`)`, args...)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // GetSession fetches a session by id.

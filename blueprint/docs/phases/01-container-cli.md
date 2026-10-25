@@ -21,7 +21,7 @@
 Verified by tests on Linux; the macOS halves need a Docker Desktop host (CI's macOS job runs the unit tests only).
 
 - [x] Running `icaro setup` twice changes nothing without consent (`internal/cli/setup_test.go`).
-- [x] A file outside the allowlist is not mounted (`internal/container/mounts_test.go`, `TestDisallowedMountFailsStart`).
+- [x] A file outside the allowlist is not mounted (`internal/session/manager_test.go`, `TestDisallowedMountFailsStart`).
 - [x] `icaro sh` preserves the UID and the expected workspace on Linux (`TestAgentContainerBaseline`, `TestSessionSpineDocker`, `TestCLISessionTTY`). macOS: pending a Docker Desktop run.
 - [x] The CLI agent receives a TTY and the correct exit code (`TestCLISessionTTY` drives the binary under a pseudo-terminal).
 - [x] The egress allowlist confines every credential present in the agent container: a request to a non-allowlisted host fails (`TestEgressConfinement`). The host's real `~/.claude` is never mounted (mount policy + profile homes).

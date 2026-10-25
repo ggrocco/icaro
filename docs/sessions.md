@@ -17,6 +17,8 @@ icaro session rm ID --yes         # remove the session and its worktree (the bra
 
 The agent gets a real TTY, and its exit code becomes `icaro`'s exit code.
 
+`session stop` and `session rm` also work on a session that is still `queued` or starting: the stop wins, and a start already under way removes the container it created instead of running it (a `session start` issued after the stop wins in turn, and `session rm` then refuses). If Docker cannot stop the container, the session is marked `error` with the reason (not `stopped`), and running `session stop` again retries.
+
 ## Worktrees
 
 Ícaro is the only component that creates worktrees. `icaro session create [NAME]` runs `git worktree add -b icaro/NAME` under `~/.icaro/worktrees/<project>/<NAME>`, starting from `HEAD` (or `--base`). Without a name you get a short random one. Creating a session needs Docker to be reachable: otherwise `session create` (and the implicit create of `icaro sh`, `claude` and `codex`) fails at once with Docker's error, and nothing is created. Every worktree of a repository belongs to one **project**, whose id is derived from the main repository's path, so sessions on different branches of the same repository share project memory. The worktree is bind-mounted at `/workspace`, not copied, so your editor, the agent and the preview all see the same files. On Linux the container runs as your uid:gid (as `1000:1000` when the daemon runs as root), so files the agent writes are owned by you.
@@ -84,7 +86,7 @@ At most `sessions.max_active` agent sessions run at once. The default, `0`, mean
 
 ## Restarts and recovery
 
-Sessions are stored in the database. When the daemon starts, it probes every session that was not finished: one whose container still runs is re-attached, and one whose container or worktree is gone is marked `orphaned` ([ADR 0006](../blueprint/docs/adr/0006-session-persistence-recovery.md)). `icaro doctor` lists orphaned sessions. `icaro session start ID` restarts one, and `icaro doctor --fix` cleans them up while keeping their worktrees.
+Sessions are stored in the database. When the daemon starts, it probes every session that was not finished: one whose container still runs is re-attached, and one whose container or worktree is gone is marked `orphaned` ([ADR 0006](../blueprint/docs/adr/0006-session-persistence-recovery.md)). The daemon keeps probing running sessions while it runs and does the same. When a session is marked `orphaned` and its container is still up, the container is stopped (not removed), so no agent with your credentials keeps running unsupervised. A session's preview is optional and is re-synced by the preview manager itself: a missing preview never orphans a session, and the stale link to it is dropped. `icaro doctor` lists orphaned sessions. `icaro session start ID` restarts one, and `icaro doctor --fix` cleans them up while keeping their worktrees. `doctor --fix` works on the database and Docker directly instead of going through the daemon (a known divergence from [ADR 0001](../blueprint/docs/adr/0001-single-daemon.md)), so it claims each session as it goes and skips one that is no longer orphaned, such as one the daemon re-attached or restarted after doctor listed it.
 
 ## Run sessions
 

@@ -7,7 +7,7 @@
 ## Deliverables
 
 - [x] Set up a Go + web monorepo and a Makefile.
-- [x] Define small interfaces and ownership per goroutine/channel.
+- [x] Define small interfaces and ownership per goroutine/channel. *(The store is the exception: a `database/sql` repository whose shared state is guarded by compare-and-set updates and transactions; see [architecture §4](../01-architecture.md#4-persistence).)*
 - [x] Implement versioned config and migrations.
 - [x] Implement lock/socket/PID and clean shutdown.
 - [x] Add CI: fmt, vet, staticcheck, tests, coverage, and cross-platform build.
