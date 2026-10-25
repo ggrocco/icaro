@@ -43,6 +43,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 - pending migrations;
 - the master-key backend;
 - orphaned sessions;
+- that every egress network (`icaro-egress-*`) is internal;
 - pinned image digests;
 - the preview network, blocked compose files and `.test` DNS;
 - pack load errors and missing webhook secrets;

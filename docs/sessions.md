@@ -60,7 +60,7 @@ Agent CLIs authenticate from their own home directory, so each profile has a per
 
 ## Egress allowlist
 
-Each profile's container joins an internal Docker network (`icaro-egress-<profile>`) with no route off the host. Its only way out is a per-profile proxy that allows the profile's `egress` hosts (exact names or `*.domain`) and denies everything else ([ADR 0012](../blueprint/docs/adr/0012-egress-proxy-and-home-layers.md)). An empty list (`egress: []`) means no network at all. The proxy enforces this by network topology, not by trusting the agent to honor proxy variables. Because the agent's credential lives inside its container, this allowlist is the main protection against a prompt-injected agent sending data elsewhere. Keep it short.
+Each profile's container joins an internal Docker network (`icaro-egress-<profile>`) with no route off the host. Its only way out is a per-profile proxy that allows the profile's `egress` hosts (exact names or `*.domain`) and denies everything else ([ADR 0012](../blueprint/docs/adr/0012-egress-proxy-and-home-layers.md)). An empty list (`egress: []`) means no network at all. The proxy enforces this by network topology, not by trusting the agent to honor proxy variables. If a network with that name already exists but is not internal, or was not created by Ícaro, the session refuses to start rather than reuse it; `icaro doctor` reports such networks and `--fix` removes the unused ones. Because the agent's credential lives inside its container, this allowlist is the main protection against a prompt-injected agent sending data elsewhere. Keep it short.
 
 On macOS, set `docker.helper_image` (for example to the agent base image), because the daemon cannot build the Linux proxy image from a macOS binary.
 

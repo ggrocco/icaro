@@ -79,6 +79,7 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 		return res
 	}))
 	if eng != nil {
+		checks = append(checks, container.EgressNetworkCheck(eng))
 		imgs := &container.Images{Engine: eng, Pins: st}
 		checks = append(checks, doctor.Func("pinned images", func(ctx context.Context) doctor.Result {
 			if err := eng.Ping(ctx); err != nil {
