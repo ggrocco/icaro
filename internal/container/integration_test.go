@@ -294,11 +294,12 @@ func TestAgentGitProtection(t *testing.T) {
 		"mv " + g + "/worktrees " + g + "/w2", "mv " + a + " " + a + "2", "mkdir " + g + "/worktrees/evil",
 		"echo x >> /workspace/.git", "rm /workspace/.git",
 		"touch " + sub + "/hooks/post-checkout", "echo x >> " + sub + "/config", "mv " + g + "/modules/lib " + g + "/modules/l2",
-		"echo x > /h/.netrc", "grep -q secret /h/.netrc", "grep -q secret /h/.ssh/id",
+		"grep -q secret /h/.netrc", "grep -q secret /h/.ssh/id",
 	}
 	allowed := []string{
 		"touch " + g + "/objects/probe", "touch " + a + "/index.probe", "mkdir -p " + g + "/refs/heads/probe", "touch " + sub + "/objects/probe",
-		"touch /h/.ssh/new", // lands in the mask's tmpfs, not on the host
+		"touch /h/.ssh/new",  // lands in the mask's tmpfs, not on the host
+		"echo x > /h/.netrc", // goes to /dev/null, not to the host file
 	}
 	var script strings.Builder
 	for _, c := range append(append([]string{}, denied...), allowed...) {
@@ -320,5 +321,8 @@ func TestAgentGitProtection(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(hh, ".ssh", "new")); err == nil {
 		t.Error("a write under a masked directory reached the host")
+	}
+	if b, _ := os.ReadFile(filepath.Join(hh, ".netrc")); string(b) != "secret" {
+		t.Errorf("a write to a masked file reached the host: %q", b)
 	}
 }

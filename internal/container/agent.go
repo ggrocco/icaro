@@ -89,11 +89,16 @@ func (a AgentSpec) Build() (docker.Spec, docker.NetSpec) {
 		bind(m.Source, m.Target, m.ReadOnly)
 		for _, mask := range m.Masks {
 			if mask.File {
-				// A tmpfs cannot cover a file; an empty device file can.
+				// A tmpfs cannot cover a file; /dev/null can. Reads are
+				// empty and writes are discarded: a device file stays
+				// writable on a read-only mount, but nothing reaches the
+				// host file underneath.
 				bind(os.DevNull, mask.Target, true)
 				continue
 			}
-			mounts = append(mounts, mount.Mount{Type: mount.TypeTmpfs, Target: mask.Target, TmpfsOptions: &mount.TmpfsOptions{SizeBytes: 1 << 20}})
+			// The container's own scratch space: its user (never root)
+			// may write there, and nothing reaches the host.
+			mounts = append(mounts, mount.Mount{Type: mount.TypeTmpfs, Target: mask.Target, TmpfsOptions: &mount.TmpfsOptions{SizeBytes: 1 << 20, Mode: 0o777}})
 		}
 	}
 	hc := sandbox.Baseline(sandbox.BaselineOptions{

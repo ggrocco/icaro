@@ -35,6 +35,13 @@ func TestAgentSpecBuild(t *testing.T) {
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("mounts:\n%v\nwant\n%v", got, want)
 	}
+	for _, m := range spec.HostConfig.Mounts {
+		// The container user (never root) must be able to write in a
+		// masked directory; Docker's default tmpfs mode does not allow it.
+		if m.Target == "/home/host/.ssh" && (m.TmpfsOptions == nil || m.TmpfsOptions.Mode != 0o777) {
+			t.Fatalf("directory mask mode: %+v", m.TmpfsOptions)
+		}
+	}
 	if _, ok := spec.HostConfig.Tmpfs["/home"]; ok {
 		t.Fatal("profile home replaces tmpfs /home")
 	}
