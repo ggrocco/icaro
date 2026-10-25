@@ -1,6 +1,6 @@
 # ADR 0005 — Credentials: persistent home + mandatory egress
 
-**Status:** Accepted — supersedes the default in [ADR 0003](0003-credential-broker.md)
+**Status:** Accepted — supersedes the default in [ADR 0003](0003-credential-broker.md). Amended by [ADR 0028](0028-credential-injection.md): a profile with `inject` keeps its provider API key on the host (the credential-injecting proxy below), and its container holds only a per-session placeholder.
 
 ## Context
 
@@ -34,7 +34,8 @@ egress allowlist**.
 - A **credential-injecting proxy** (`ANTHROPIC_BASE_URL` → daemon, real
   credential added host-side, container holds nothing usable) remains the
   desired end-state for **untrusted profiles** and is tracked as future
-  hardening — not MVP-default.
+  hardening — not MVP-default. It is built for API keys by
+  [ADR 0028](0028-credential-injection.md), opt-in per profile.
 
 ## Consequences
 

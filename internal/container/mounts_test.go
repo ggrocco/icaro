@@ -179,6 +179,41 @@ func TestParseMount(t *testing.T) {
 	}
 }
 
+// TestParseMountExpandsHome: the docs/sessions.md example
+// "~/datasets/fixtures:/data:ro" expands against $HOME and passes the
+// policy when ~/datasets is allowed.
+func TestParseMountExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	fixtures := filepath.Join(home, "datasets", "fixtures")
+	if err := os.MkdirAll(fixtures, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ParseMount("~/datasets/fixtures:/data:ro")
+	if err != nil || m.Source != fixtures || m.Target != "/data" || !m.ReadOnly {
+		t.Fatalf("%+v %v", m, err)
+	}
+	p := MountPolicy{Allow: []string{"~/datasets"}, Home: home}
+	if _, err := p.Check(m); err != nil {
+		t.Fatalf("docs example refused: %v", err)
+	}
+	if m, err := ParseMount("~:/h"); err != nil || m.Source != home {
+		t.Fatalf("~ alone: %+v %v", m, err)
+	}
+	// "~user/..." is not expanded: it stays relative and the policy refuses it.
+	m, err = ParseMount("~other/x:/x")
+	if err != nil || m.Source != "~other/x" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if _, err := p.Check(m); !errors.Is(err, ErrMountDenied) {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", "")
+	if _, err := ParseMount("~/x:/x"); err == nil {
+		t.Fatal("an unknown home must fail the mount")
+	}
+}
+
 func TestMountPolicyResolution(t *testing.T) {
 	root := t.TempDir()
 	allowed := filepath.Join(root, "src")

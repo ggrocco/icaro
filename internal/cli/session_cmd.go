@@ -47,6 +47,20 @@ func printSessions(w io.Writer, ss []*session.Session) error {
 	return tw.Flush()
 }
 
+func remoteOrOrigin(r string) string {
+	if r == "" {
+		return "origin"
+	}
+	return r
+}
+
+func short12(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
 func dash(s string) string {
 	if s == "" {
 		return "-"
@@ -178,6 +192,47 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 	rm.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	rm.Flags().BoolVar(&keep, "keep-worktree", false, "keep the worktree directory")
 
+	var pushReq session.PushRequest
+	var pushYes bool
+	push := &cobra.Command{
+		Use:   "push ID",
+		Short: "Push the session's branch from the host with your git credentials",
+		Long: "Push the session's own branch (icaro/NAME) to a remote configured in the repository, from the host, " +
+			"with your git credentials, so agent containers never hold any. Only that branch is pushed (no tags, no " +
+			"submodules); host git runs with hooks and fsmonitor disabled and the file transport refused, because the " +
+			"agent controlled the worktree. --force-with-lease overwrites the remote branch only while it still points " +
+			"where your remote-tracking ref says (fetch first); a plain force push is never done.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if pushReq.ForceWithLease && !pushYes {
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(), fmt.Sprintf("Overwrite the remote branch of session %s on %s if it moved?", args[0], remoteOrOrigin(pushReq.Remote)))
+				if err != nil || !ok {
+					return err
+				}
+			}
+			c, err := opts.client(cmd.Context())
+			if err != nil {
+				return err
+			}
+			res, err := c.PushSession(cmd.Context(), args[0], pushReq)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), res)
+			}
+			verb := "pushed"
+			if res.Forced {
+				verb = "force-pushed (with lease)"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s) to %s\n", verb, res.Branch, short12(res.Commit), res.Remote)
+			return nil
+		},
+	}
+	push.Flags().StringVar(&pushReq.Remote, "remote", "origin", "name of a remote configured in the repository")
+	push.Flags().BoolVar(&pushReq.ForceWithLease, "force-with-lease", false, "overwrite the remote branch if it still matches your remote-tracking ref")
+	push.Flags().BoolVar(&pushYes, "yes", false, "do not ask before --force-with-lease")
+
 	attach := &cobra.Command{
 		Use:   "attach ID [-- CMD...]",
 		Short: "Open the session's agent (or a shell) with a TTY",
@@ -219,7 +274,7 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 			return tw.Flush()
 		},
 	}
-	cmd.AddCommand(create, list, get, stop, start, rm, attach, projects)
+	cmd.AddCommand(create, list, get, stop, start, rm, push, attach, projects)
 	return cmd
 }
 

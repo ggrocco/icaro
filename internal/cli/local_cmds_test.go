@@ -350,6 +350,16 @@ func TestEgressProxyCommandServesUntilCanceled(t *testing.T) {
 	if _, err := runCLICtx(context.Background(), "egress-proxy", "--listen", "256.0.0.1:99999"); err == nil {
 		t.Fatal("bad listen address accepted")
 	}
+	// With an injection socket the relay listens too; a bad relay address
+	// stops the proxy.
+	ictx, icancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer icancel()
+	if _, err := runCLICtx(ictx, "egress-proxy", "--listen", "127.0.0.1:0", "--inject-listen", "127.0.0.1:0", "--inject-socket", "/icaro-inject/inject.sock"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLICtx(context.Background(), "egress-proxy", "--listen", "127.0.0.1:0", "--inject-listen", "256.0.0.1:1", "--inject-socket", "/x.sock"); err == nil {
+		t.Fatal("bad relay address accepted")
+	}
 }
 
 func TestMainExitCodes(t *testing.T) {

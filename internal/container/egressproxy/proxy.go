@@ -161,10 +161,15 @@ func removeHopHeaders(h http.Header) {
 
 // ListenAndServe runs the proxy on addr until ctx ends.
 func ListenAndServe(ctx context.Context, addr string, p *Proxy) error {
-	srv := &http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 15 * time.Second}
+	p.Log.Info("egress proxy listening", "addr", addr, "allow", strings.Join(p.Allow, ","))
+	return Serve(ctx, addr, p)
+}
+
+// Serve runs h on addr until ctx ends.
+func Serve(ctx context.Context, addr string, h http.Handler) error {
+	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 15 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	p.Log.Info("egress proxy listening", "addr", addr, "allow", strings.Join(p.Allow, ","))
 	select {
 	case <-ctx.Done():
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -85,13 +85,22 @@ type Mask struct {
 	File bool
 }
 
-// ParseMount parses "host:container[:ro]".
+// ParseMount parses "host:container[:ro]". A host path of "~" or one
+// starting with "~/" is expanded against the user's home directory, as in
+// mounts.allow; the policy check still decides whether it may be mounted.
 func ParseMount(spec string) (Mount, error) {
 	parts := strings.Split(spec, ":")
 	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {
 		return Mount{}, fmt.Errorf("mount %q must be host:container[:ro]", spec)
 	}
 	m := Mount{Source: parts[0], Target: parts[1]}
+	if m.Source == "~" || strings.HasPrefix(m.Source, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Mount{}, fmt.Errorf("mount %q: %w", spec, err)
+		}
+		m.Source = filepath.Join(home, strings.TrimPrefix(m.Source[1:], "/"))
+	}
 	if len(parts) == 3 {
 		switch parts[2] {
 		case "ro":
