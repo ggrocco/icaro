@@ -9,15 +9,17 @@ import (
 // TokenPatterns match well-known credential formats so they are redacted
 // even when the value was never registered as a secret.
 var TokenPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),                 // GitHub tokens
-	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`),               // GitHub fine-grained PAT
-	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`),                   // GitLab PAT
-	regexp.MustCompile(`\bxox[abposr]-[A-Za-z0-9-]{10,}\b`),              // Slack tokens
-	regexp.MustCompile(`\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b`),             // OpenAI / Anthropic keys
-	regexp.MustCompile(`\blin_(?:api|oauth)_[A-Za-z0-9]{20,}\b`),         // Linear keys
-	regexp.MustCompile(`\bsntrys_[A-Za-z0-9+/=_-]{20,}\b`),               // Sentry org tokens
-	regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{16,}`), // Authorization values
-	regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),                           // AWS access key ids
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),                                             // GitHub tokens
+	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`),                                           // GitHub fine-grained PAT
+	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`),                                               // GitLab PAT
+	regexp.MustCompile(`\bxox[abposr]-[A-Za-z0-9-]{10,}\b`),                                          // Slack tokens
+	regexp.MustCompile(`\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b`),                                         // OpenAI / Anthropic keys
+	regexp.MustCompile(`\blin_(?:api|oauth)_[A-Za-z0-9]{20,}\b`),                                     // Linear keys
+	regexp.MustCompile(`\bsntrys_[A-Za-z0-9+/=_-]{20,}\b`),                                           // Sentry org tokens
+	regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{16,}`),                             // Authorization values
+	regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),                                                       // AWS access key ids
+	regexp.MustCompile(`\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b`),                                   // Stripe secret and restricted keys
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----(?s:.*?)-----END [A-Z ]*PRIVATE KEY-----`), // PEM private keys
 }
 
 // RedactString replaces every known secret value (6+ characters) and every
