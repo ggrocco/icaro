@@ -31,7 +31,9 @@ The fallback in the spike table, "Wails v2 behind `internal/platform`", does not
   - the actions.
 - `desktop/` is its own Go module (`icaro/desktop`) and needs cgo. It holds the Wails shell, which renders the menu model and passes clicks back.
 
-The separate module keeps cgo, GTK/WebKit and Wails' dependencies out of the CLI's build, `go test ./...`, its license list and govulncheck. The app has its own `desktop/THIRD_PARTY_LICENSES.md`, generated for the macOS build.
+The separate module keeps cgo, GTK/WebKit and Wails' dependencies out of the CLI's build, `go test ./...`, its license list and govulncheck.
+
+`internal/desktop` is UI glue rather than domain code. Its controller state (the last poll, the settings, the cached usage) is read by menu clicks on the shell's threads and written by the poll loop, so a single mutex guards it. That is the one exception to the engineering rule of channels over mutexes, recorded here as that rule requires. The app has its own `desktop/THIRD_PARTY_LICENSES.md`, generated for the macOS build.
 
 **One daemon.** The app resolves the configuration as the CLI does: the same `--config`/`--home` flags, `ICARO_HOME` and `daemon.url`.
 - It checks the socket's health and starts `icaro serve` (`daemon.StartProgram`) only when nothing answers. The daemon's lock settles a race with the CLI or with launchd.
