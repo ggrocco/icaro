@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,7 +117,18 @@ type ProfileConfig struct {
 	Runtime string   `koanf:"runtime" yaml:"runtime"`
 	// Tools are asdf plugin@version pairs materialized during setup.
 	Tools []string `koanf:"tools" yaml:"tools"`
+	// Inject maps a provider (InjectProviders) to the name of the secret
+	// holding its API key. The key never enters the container: the agent
+	// gets a base URL on the profile's egress proxy and a per-session
+	// placeholder, and the daemon adds the key host-side (ADR 0028).
+	Inject map[string]string `koanf:"inject" yaml:"inject,omitempty"`
 }
+
+// InjectProviders are the providers profiles.<name>.inject accepts.
+var InjectProviders = []string{"anthropic", "openai"}
+
+// secretNameRe mirrors secrets.ValidName (config cannot import secrets).
+var secretNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$`)
 
 // MountsConfig is the allowlist of host directories that may be mounted.
 type MountsConfig struct {
@@ -331,6 +343,14 @@ func (c *Config) Validate() error {
 		for _, h := range p.Egress {
 			if strings.ContainsAny(h, "/: ") {
 				errs = append(errs, fmt.Errorf("profiles.%s.egress: %q must be a hostname or *.domain", name, h))
+			}
+		}
+		for prov, secret := range p.Inject {
+			if !slices.Contains(InjectProviders, prov) {
+				errs = append(errs, fmt.Errorf("profiles.%s.inject: unknown provider %q (known: %s)", name, prov, strings.Join(InjectProviders, ", ")))
+			}
+			if !secretNameRe.MatchString(secret) {
+				errs = append(errs, fmt.Errorf("profiles.%s.inject.%s: %q is not a secret name (set one with icaro secret set)", name, prov, secret))
 			}
 		}
 	}

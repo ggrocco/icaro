@@ -91,13 +91,45 @@ func TestValidate(t *testing.T) {
 	cfg.Profiles["bad name"] = ProfileConfig{}
 	cfg.Profiles["noegress"] = ProfileConfig{}
 	cfg.Profiles["url"] = ProfileConfig{Egress: []string{"https://x"}}
+	cfg.Profiles["inj"] = ProfileConfig{Egress: []string{}, Inject: map[string]string{"gemini": "k", "openai": "bad name", "anthropic": "ok-key"}}
 	cfg.Sessions.DefaultProfile = "nope"
 	cfg.Database.Driver = "mysql"
 	err = cfg.Validate()
-	for _, want := range []string{"version 99", "bad name", "noegress.egress is mandatory", "hostname", "default_profile", "mysql"} {
+	for _, want := range []string{"version 99", "bad name", "noegress.egress is mandatory", "hostname", "default_profile", "mysql",
+		"inj.inject: unknown provider \"gemini\"", "inj.inject.openai: \"bad name\" is not a secret name"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}
+	}
+}
+
+// TestLoadInject: profiles.<name>.inject loads from the file and from the
+// environment, and a valid block passes validation.
+func TestLoadInject(t *testing.T) {
+	home := isolate(t)
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "version: 1\nprofiles:\n  claude:\n    inject:\n      anthropic: anthropic-key\n"
+	if err := os.WriteFile(filepath.Join(home, "config", "icaro.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ICARO_PROFILES__CODEX__INJECT__OPENAI", "openai-key")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Profiles["claude"]; got.Inject["anthropic"] != "anthropic-key" || got.Agent != "claude" || len(got.Egress) == 0 {
+		t.Fatalf("%+v", got)
+	}
+	if got := cfg.Profiles["codex"].Inject["openai"]; got != "openai-key" {
+		t.Fatalf("env inject: %q", got)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Profiles["shell"].Inject != nil {
+		t.Fatal("profiles without inject keep ADR 0005 behaviour")
 	}
 }
 
