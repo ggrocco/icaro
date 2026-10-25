@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # release.yml runs the whole workflow on the tagged commit before it
+  # builds anything.
+  workflow_call:
 
 permissions:
   contents: read

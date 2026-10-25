@@ -7,6 +7,11 @@ name: release
 # set, and signed ad hoc otherwise: MACOS_CERTIFICATE (base64 .p12 of a
 # "Developer ID Application" identity), MACOS_CERTIFICATE_PASSWORD,
 # APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password).
+#
+# Gates (CONTRIBUTING.md#releases): the tag must point at a commit on main,
+# the full CI workflow must pass on it, and every job that publishes runs
+# in the `release` environment, whose required reviewers approve it and
+# which alone holds the secrets above.
 on:
   push:
     tags: ["v*"]
@@ -17,8 +22,36 @@ on:
 permissions: {}
 
 jobs:
-  release:
+  tag-on-main:
+    # A v* tag on a branch, a fork's commit or an unmerged PR is refused.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: the tagged commit is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main; tag a merged commit"
+            exit 1
+          fi
+
+  ci:
+    # The same gates as every merge: lint, race tests on Linux and macOS,
+    # the coverage gate, fuzzing, integration, e2e, the desktop app and
+    # the agent image build.
+    needs: tag-on-main
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: [tag-on-main, ci]
+    runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write     # create the release
       id-token: write     # cosign keyless signing + provenance
@@ -38,7 +71,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: make web
-      - run: go test -count=1 ./...
       # Exact tool versions: they run with the signing key in the env.
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
@@ -73,6 +105,7 @@ jobs:
     # an ed25519 signature (go run ./hack/sign verify).
     needs: release
     runs-on: macos-latest
+    environment: release
     permissions:
       contents: write     # upload to the release
       id-token: write     # provenance
@@ -148,7 +181,9 @@ jobs:
     # The agent base image (architecture §5) referenced by the default
     # profiles. Override the name with the AGENT_IMAGE repository variable;
     # the default matches config.DefaultAgentImage.
+    needs: [tag-on-main, ci]
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       packages: write # push the agent base image to GHCR

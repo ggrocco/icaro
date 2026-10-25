@@ -39,4 +39,18 @@ The [engineering standards](blueprint/docs/05-engineering.md) are binding. In sh
 
 ## Releases
 
-Maintainers tag `vX.Y.Z`; [`release.yml`](.github/workflows/release.yml) builds, signs, and publishes. See [ADR 0021](blueprint/docs/adr/0021-release-signing-and-updates.md) and [docs/upgrading.md](docs/upgrading.md).
+Maintainers tag a commit on `main` with `vX.Y.Z`; [`release.yml`](.github/workflows/release.yml) builds, signs, and publishes. See [ADR 0021](blueprint/docs/adr/0021-release-signing-and-updates.md) and [docs/upgrading.md](docs/upgrading.md).
+
+The release is gated:
+
+1. `tag-on-main` refuses a tag whose commit is not on `main`.
+2. `ci` runs the whole [`ci.yml`](.github/workflows/ci.yml) on the tagged commit: lint, race tests, the coverage gate, fuzzing, integration, e2e, the desktop app, and the agent image.
+3. The jobs that publish (`release`, `macos-app`, `agent-image`) run in the `release` environment and wait for a reviewer's approval.
+
+Every third-party action is pinned to a commit SHA with its version in a comment; Dependabot proposes the bumps. goreleaser, syft, and cosign run at exact versions.
+
+These repository settings back the gates and must stay in place:
+
+- **Environment `release`** (Settings → Environments): required reviewers (at least one maintainer other than the tagger when there is one), "Prevent self-review", and deployment tags limited to `v*`. It holds the secrets `ICARO_SIGNING_KEY`, `HOMEBREW_TAP_TOKEN`, `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD`. Delete any repository-level copies of them, so no other workflow can read them.
+- **Tag ruleset** for `v*` (Settings → Rules → Rulesets): only maintainers may create tags, and no one may update or delete them.
+- **Branch protection on `main`**: pull requests with passing CI and code-owner review (see [CODEOWNERS](.github/CODEOWNERS)), no force pushes.
