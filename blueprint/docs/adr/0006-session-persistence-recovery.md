@@ -31,6 +31,10 @@ state on startup.
 - **Startup reconciliation:** on boot, for each non-terminal session, probe
   whether its container / worktree / preview still exist. Re-attach where
   possible; otherwise mark `orphaned` and surface it via `icaro doctor`.
+  *(Implementation note: the container and worktree decide; the preview is
+  optional and re-synced by the preview manager, so a missing one only drops
+  the session's stale reference. A still-running container of an orphaned
+  agent session is stopped, not removed.)*
 - **Queued state:** the `queued` status is the persistence hook for the
   concurrency cap (see `docs/02-decisions-risks.md`, O1); sessions over the cap are
   persisted as `queued` rather than started.

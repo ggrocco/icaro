@@ -800,29 +800,88 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		return err
 	}
 	for _, row := range rows {
+		preview, err := m.previewState(ctx, row)
+		if err != nil {
+			return err
+		}
 		reason := m.liveness(ctx, row)
 		if row.Status == StatusCreating && reason == "" && row.Kind == KindAgent {
 			reason = "daemon stopped while the session was being created"
 		}
 		if reason != "" {
-			m.o.Log.Warn("session orphaned", "session", row.ID, "reason", reason)
-			row.Status, row.Error = StatusOrphaned, reason
-			if err := m.o.Store.UpdateSession(ctx, row); err != nil {
+			if err := m.orphan(ctx, row, reason); err != nil {
 				return err
 			}
 			continue
 		}
-		m.o.Log.Info("session re-attached", "session", row.ID, "container", row.ContainerID)
+		if preview == previewGone {
+			// Drop the stale reference; the session itself is fine.
+			if _, err := m.o.Store.UpdateSessionIf(ctx, row, row.Status); err != nil {
+				return err
+			}
+		}
+		m.o.Log.Info("session re-attached", "session", row.ID, "container", row.ContainerID, "preview", preview)
 		if row.Kind == KindAgent && m.o.Memory != nil {
 			proj, _ := m.o.Store.GetProject(ctx, row.ProjectID)
 			agent, _ := creds.LookupAgent(m.o.Config.Profiles[row.Profile].Agent)
-			sock := filepath.Join(m.icaroDir(row.ID), "mcp.sock")
+			sock := MemorySocketPath(m.layout, row.ID)
 			if stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock); err == nil {
 				m.chownForContainer(sock)
 				m.mcp.put(row.ID, stop)
 			}
 		}
 		_ = m.o.Store.HeartbeatSession(ctx, row.ID)
+	}
+	return nil
+}
+
+// previewGone is the preview state of a session whose preview record no
+// longer exists.
+const previewGone = "gone"
+
+// previewState probes the session's preview facet (ADR 0006). A preview
+// is optional and owned by the preview manager, which re-syncs its own
+// instances on start, so a missing one never orphans the session: its
+// stale reference is cleared on row (the caller persists it) and the
+// state is reported as previewGone. Otherwise it is the preview's status,
+// or "" when the session has none.
+func (m *Manager) previewState(ctx context.Context, row *store.SessionRow) (string, error) {
+	if row.PreviewInstanceID == "" {
+		return "", nil
+	}
+	p, err := m.o.Store.GetPreview(ctx, row.PreviewInstanceID)
+	if errors.Is(err, store.ErrNotFound) {
+		m.o.Log.Warn("session preview is gone; dropping the reference", "session", row.ID, "preview", row.PreviewInstanceID)
+		row.PreviewInstanceID = ""
+		return previewGone, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return p.Status, nil
+}
+
+// orphan marks row orphaned unless another writer moved it on first. No
+// credentialed agent may keep running unsupervised, so a live agent
+// container is stopped; it is not removed, so `icaro session start` and
+// `icaro doctor --fix` still find it.
+func (m *Manager) orphan(ctx context.Context, row *store.SessionRow, reason string) error {
+	from := row.Status
+	row.Status, row.Error = StatusOrphaned, reason
+	ok, err := m.o.Store.UpdateSessionIf(ctx, row, from)
+	if err != nil || !ok {
+		return err
+	}
+	m.o.Log.Warn("session orphaned", "session", row.ID, "reason", reason)
+	if stop := m.mcp.take(row.ID); stop != nil {
+		stop()
+	}
+	// Run sessions' step containers belong to the workflow engine, which
+	// reconciles its runs itself.
+	if row.Kind == KindAgent && row.ContainerID != "" {
+		if err := m.o.Engine.StopContainer(ctx, row.ContainerID, 10); err != nil {
+			m.o.Log.Warn("stop orphaned container", "session", row.ID, "container", short(row.ContainerID), "err", err)
+		}
 	}
 	return nil
 }
@@ -864,11 +923,7 @@ func (m *Manager) probe(ctx context.Context) {
 	}
 	for _, row := range rows {
 		if reason := m.liveness(ctx, row); reason != "" {
-			if stop := m.mcp.take(row.ID); stop != nil {
-				stop()
-			}
-			row.Status, row.Error = StatusOrphaned, reason
-			_ = m.o.Store.UpdateSession(ctx, row)
+			_ = m.orphan(ctx, row, reason)
 			continue
 		}
 		_ = m.o.Store.HeartbeatSession(ctx, row.ID)
