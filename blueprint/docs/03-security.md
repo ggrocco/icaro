@@ -59,7 +59,7 @@
 | Docker missing/inactive | error | OS-specific instructions |
 | Orphaned lock/socket/PID (lock held by a non-existent PID, unreachable socket) | warning/error | `icaro doctor --fix` removes after validation |
 | Orphaned sessions (container/worktree/preview gone after restart) | warning | re-attach or clean up the session ([ADR 0006](adr/0006-session-persistence-recovery.md)) |
-| A profile's `inject` names a missing secret, or one not bound to its provider's API host | warning | `icaro secret set NAME --host <provider host>` ([ADR 0028](adr/0028-credential-injection.md)) |
+| Injected credential unusable (a profile's `inject` names a missing secret, or one not bound to its provider's API host) | warning | `icaro secret set NAME --host <provider host>` ([ADR 0028](adr/0028-credential-injection.md)) |
 | Insecure permissions on `~/.icaro` | error | fixes to 0700/0600 |
 | Pending or failed migrations | error | runs or reports the migration |
 | Unverified image | error | re-pull by known digest |

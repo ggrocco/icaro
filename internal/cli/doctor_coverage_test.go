@@ -23,6 +23,7 @@ var doctorTableChecks = map[string]string{
 	"Local DNS for `.test` misconfigured": "preview DNS",
 	"Missing webhook secret":              "webhook secrets",
 	"Dangerous compose":                   "preview compose lint",
+	"Injected credential unusable":        "credential injection",
 }
 
 func TestDoctorCoversSecurityTable(t *testing.T) {
