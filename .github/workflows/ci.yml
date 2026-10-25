@@ -65,6 +65,32 @@ jobs:
           name: coverage
           path: coverage.out
 
+  fuzz:
+    # Short fuzzing runs of the parsers that take untrusted input
+    # (05-engineering: fuzz parsers and schema). The seed corpora also run
+    # as plain tests in the unit job; this explores beyond them.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { pkg: ./internal/expr, fuzz: FuzzParse }
+          - { pkg: ./internal/workflow, fuzz: FuzzParse }
+          - { pkg: ./internal/integration, fuzz: FuzzParse }
+          - { pkg: ./internal/preview, fuzz: FuzzParseCompose }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: fuzz ${{ matrix.target.pkg }} ${{ matrix.target.fuzz }}
+        run: go test -run '^$' -fuzz '^${{ matrix.target.fuzz }}$' -fuzztime 20s ${{ matrix.target.pkg }}
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-crashers-${{ strategy.job-index }}
+          path: internal/**/testdata/fuzz
+
   web:
     runs-on: ubuntu-latest
     steps:

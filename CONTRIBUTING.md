@@ -18,6 +18,7 @@ Thanks for helping. Ícaro is built against one design: [`blueprint/`](blueprint
 - `make upgrade` moves Go modules and npm packages to their latest minor/patch releases and regenerates the `THIRD_PARTY_LICENSES.md` files; major upgrades are done by hand. Wails, in the desktop app, is pinned to an exact beta and moves only by hand ([ADR 0027](blueprint/docs/adr/0027-desktop-app.md)).
 - The desktop app is its own module under `desktop/` and needs cgo: the Xcode command line tools on macOS, `libgtk-4-dev libwebkitgtk-6.0-dev` on Linux. `make app-test` vets and tests it, `make app` builds `bin/icaro-app`, and `make app-macos` builds `bin/Icaro.app` on a Mac.
 - `go run ./hack/linkcheck .` checks the relative links in every Markdown and HTML file.
+- Parsers of untrusted input have fuzz targets (`FuzzParse` in `internal/expr`, `internal/workflow`, `internal/integration`; `FuzzParseCompose` in `internal/preview`). Their seeds run with the unit tests; CI fuzzes each for 20 seconds. Run one longer with `go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 5m ./internal/workflow`, and commit any crasher it writes under `testdata/fuzz/` with the fix.
 
 ## Rules
 
