@@ -82,7 +82,7 @@ Ids are derived from the content's identity, so re-ingesting unchanged files is 
 
 Everything ingest stores is served to agents over MCP, so it keeps secrets out:
 
-- it skips dotfiles (`.env`, `.npmrc`, …; a few tool configs such as `.gitignore` and `.editorconfig` are kept), files git ignores (it asks `git ls-files --cached --others --exclude-standard`; outside a git repository only the other rules apply), and files named like key material or credentials (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_*` keys, `credentials.json`, `secrets.yaml`, …). The report counts them as `excluded`;
+- it skips dotfiles (`.env`, `.npmrc`, …; a few tool configs such as `.gitignore` and `.editorconfig` are kept), files git ignores (it asks `git ls-files --cached --others --exclude-standard`; outside a git repository only the other rules apply; files tracked in checked-out submodules are included, untracked files inside a submodule are not), and files named like key material or credentials (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_*` keys, `credentials.json`, `secrets.yaml`, …). The report counts them as `excluded`;
 - it redacts what it stores of the rest: well-known token formats (the same patterns as the log redactor, including Stripe keys and PEM private keys), the value of any `NAME=value` whose name says it is a secret (`STRIPE_SECRET_KEY=…`, `export GH_TOKEN=…`), and, outside code, config entries such as `password:` or `api_key =`.
 
 ## Importers (prototype)

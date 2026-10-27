@@ -56,14 +56,21 @@ func sensitiveFile(name string) bool {
 
 // gitListed returns the files git would track under dir (tracked, plus
 // untracked ones that are not ignored), relative to dir, and every
-// directory holding one. ok is false when dir is not in a git work tree;
-// ingest then relies on its name rules and redaction alone.
+// directory holding one. Files tracked in checked-out submodules are
+// included; untracked files inside a submodule are not. ok is false when
+// dir is not in a git work tree; ingest then relies on its name rules and
+// redaction alone.
 func gitListed(ctx context.Context, dir string) (files, dirs map[string]bool, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	out, err := git(ctx, dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, nil, false
+	}
+	// git cannot combine --others with --recurse-submodules, so the
+	// submodules' tracked files come from a second listing.
+	if sub, err := git(ctx, dir, "ls-files", "-z", "--cached", "--recurse-submodules"); err == nil {
+		out = append(out, sub...)
 	}
 	files, dirs = map[string]bool{}, map[string]bool{}
 	for _, f := range strings.Split(string(out), "\x00") {
