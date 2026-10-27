@@ -250,6 +250,7 @@ func TestWorkflowHandlerInputErrors(t *testing.T) {
 		{"GET", "/api/v1/workflows/missing/versions/1", nil, 404},
 		{"GET", "/api/v1/runs/missing", nil, 404},
 		{"POST", "/api/v1/runs/missing/cancel", nil, 404},
+		{"POST", "/api/v1/runs/missing/rerun", nil, 404},
 		{"GET", "/api/v1/runs/missing/steps/x/logs", nil, 404},
 	} {
 		if code, body := f.call(tc.method, tc.path, tc.body); code != tc.status {

@@ -90,7 +90,14 @@ export function RunDetail({ id }: { id: string }) {
         </div>
       </header>
       <p>
-        <a href={href("workflows", run.workflow)}>{run.workflow}</a> v{run.version} · trigger {run.trigger_kind} · started <When ts={run.started_at} />
+        <a href={href("workflows", run.workflow)}>{run.workflow}</a> v{run.version} · trigger {run.trigger_kind}
+        {run.rerun_of && (
+          <>
+            {" "}
+            · re-run of <a href={href("runs", run.rerun_of)}>{run.rerun_of.slice(-10)}</a>
+          </>
+        )}{" "}
+        · started <When ts={run.started_at} />
         {run.finished_at && (
           <>
             {" "}

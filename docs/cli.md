@@ -532,7 +532,7 @@ Inspect runs
       --json   print JSON
 ```
 
-Subcommands: `cancel` `get` `list` `logs`
+Subcommands: `cancel` `get` `list` `logs` `rerun`
 
 ## `icaro runs cancel`
 
@@ -576,6 +576,14 @@ icaro runs logs ID [STEP] [flags]
       --attempt int   attempt number (default: latest)
   -f, --follow        stream until the run ends
       --tail int      only the last N bytes
+```
+
+## `icaro runs rerun`
+
+Run a run again: the same workflow version and trigger payload
+
+```text
+icaro runs rerun ID
 ```
 
 ## `icaro schedules`

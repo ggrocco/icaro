@@ -169,6 +169,16 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+// handleRerun starts a run again on the version it ran with.
+func (s *Server) handleRerun(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.RerunRun(r.Context(), r.PathValue("id"), actor(r))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, run)
+}
+
 func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.CancelRun(r.Context(), r.PathValue("id"))
 	if err != nil {

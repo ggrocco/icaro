@@ -356,7 +356,27 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(list, get, logs, cancel)
+	rerun := &cobra.Command{
+		Use:   "rerun ID",
+		Short: "Run a run again: the same workflow version and trigger payload",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := opts.client(cmd.Context())
+			if err != nil {
+				return err
+			}
+			run, err := c.Rerun(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), run)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "run %s (version %d, re-run of %s) is %s\n", run.ID, run.Version, run.RerunOf, run.Status)
+			return nil
+		},
+	}
+	cmd.AddCommand(list, get, logs, cancel, rerun)
 	return cmd
 }
 
