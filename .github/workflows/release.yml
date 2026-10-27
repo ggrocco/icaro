@@ -140,7 +140,14 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" >/dev/null
-          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          # Add ours in front of the user's keychains, one argument each.
+          # (a read loop: macOS ships bash 3.2, which has no mapfile).
+          keychains=()
+          while IFS= read -r line; do
+            line=${line#*\"}
+            keychains+=("${line%\"}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$kc" "${keychains[@]}"
           id=$(security find-identity -v -p codesigning "$kc" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
           test -n "$id" || { echo "no Developer ID Application identity in MACOS_CERTIFICATE" >&2; exit 1; }
           echo "MACOS_SIGN_IDENTITY=$id" >> "$GITHUB_ENV"
