@@ -7,6 +7,30 @@ updates:
     groups:
       go-minor:
         update-types: [minor, patch]
+  # The desktop app is its own module. Wails is pinned to an exact beta
+  # and moves only by hand (ADR 0027).
+  - package-ecosystem: gomod
+    directory: /desktop
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: github.com/wailsapp/wails/v3
+    groups:
+      desktop-go-minor:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      web-minor:
+        update-types: [minor, patch]
+  # The agent base image's FROM is pinned by digest. Node.js and the agent
+  # CLIs are build args in the same Dockerfile, bumped by hand.
+  - package-ecosystem: docker
+    directory: /images/agent-base
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

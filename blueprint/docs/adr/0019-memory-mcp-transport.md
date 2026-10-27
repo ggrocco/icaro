@@ -12,7 +12,7 @@
 - Inside the container the agent's MCP config launches `icaro mcp --socket /icaro/mcp.sock`, a **stdio bridge** that forwards each JSON-RPC line as an HTTP POST over the socket. It needs no network, no token, and no config file, and works with any MCP client that can launch a command.
 - On the host, `icaro mcp` is the same bridge pointed at the daemon's authenticated `/mcp` endpoint, scoped by the project of the directory it runs in (`--project`). The host user may read every project, so the project header is trusted there; it is never trusted inside containers.
 - `internal/mcp` is a small, dependency-free server (JSON-RPC 2.0; protocol versions 2025-06-18, 2025-03-26 and 2024-11-05; tools and resources; stdio and streamable HTTP). Every request carries an authenticated `Caller`; tools read scope only from it. Agents in containers see only the three memory tools; the host server is the one that later gains the authoring tools (architecture §10).
-- Session socket paths must stay under 104 bytes (macOS `sun_path`); the attacher rejects longer paths, so sessions use short paths such as `~/.icaro/run/s/<short-id>.sock`.
+- Session socket paths must stay under 104 bytes (macOS `sun_path`); the attacher rejects longer paths. A session's socket is `~/.icaro/run/sessions/<session-id>/mcp.sock` (the id is a 26-character ULID): the session's run directory, not the socket file, is what is bind-mounted at `/icaro`, because the socket is created only after the container starts. With the default home that is about 70 bytes; a long `ICARO_HOME` can push it over the limit, in which case sessions start without memory and `icaro doctor` warns ("memory socket path").
 
 ## Consequences
 

@@ -1,5 +1,5 @@
 // Package docker wraps the Docker Engine API behind the small interface the
-// runner needs. The interface doubles as the allowlist for a socket proxy
+// runner needs. The interface doubles as the allowlist for a future socket proxy
 // and makes the executor testable with a fake.
 package docker
 

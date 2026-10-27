@@ -14,8 +14,10 @@ import (
 // because it is the reference implementation of compose semantics
 // (05-engineering: CLI subprocess initially).
 type Compose interface {
-	// Config returns the normalized model (`docker compose config --format json`).
-	Config(ctx context.Context, dir string, files []string) ([]byte, error)
+	// Config returns the normalized model (`docker compose config --format
+	// json`) under the project name Up uses, so names compose derives (the
+	// default network) are the ones the stack will really get.
+	Config(ctx context.Context, project, dir string, files []string) ([]byte, error)
 	Up(ctx context.Context, project, dir string, files []string) error
 	// Down removes the project's containers, networks and volumes; a
 	// project that does not exist is not an error.
@@ -77,8 +79,9 @@ func fileArgs(files []string) []string {
 }
 
 // Config implements Compose.
-func (c CLI) Config(ctx context.Context, dir string, files []string) ([]byte, error) {
-	args := append(fileArgs(files), "--project-directory", dir, "config", "--format", "json")
+func (c CLI) Config(ctx context.Context, project, dir string, files []string) ([]byte, error) {
+	args := append([]string{"-p", project}, fileArgs(files)...)
+	args = append(args, "--project-directory", dir, "config", "--format", "json")
 	return run(c.cmd(ctx, dir, args...))
 }
 

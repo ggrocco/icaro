@@ -52,7 +52,7 @@ func TestComposeSamples(t *testing.T) {
 		t.Run(tc.dir, func(t *testing.T) {
 			dir, _ := filepath.Abs(filepath.Join("testdata", "s6", tc.dir))
 			files := ComposeFiles(dir)
-			data, err := CLI{}.Config(context.Background(), dir, files)
+			data, err := CLI{}.Config(context.Background(), NameFor(dir).Project, dir, files)
 			if err != nil {
 				t.Fatal(err)
 			}

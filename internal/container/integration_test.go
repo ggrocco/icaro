@@ -5,6 +5,7 @@ package container
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -206,5 +207,122 @@ func TestAgentContainerBaseline(t *testing.T) {
 	_, err = run(t, ExecArgs(ExecOptions{Container: id, Cmd: []string{"sh", "-c", "exit 7"}})...)
 	if ExitCode(err) != 7 {
 		t.Fatalf("exit code %d", ExitCode(err))
+	}
+}
+
+// TestCreateNetworkRefusesMismatch: an existing network that is not
+// internal, or not ours, is refused instead of reused, and the doctor
+// check reports it.
+func TestCreateNetworkRefusesMismatch(t *testing.T) {
+	eng := engine(t)
+	ctx := context.Background()
+	name := NetworkName("it" + time.Now().Format("150405"))
+	if err := eng.CreateNetwork(ctx, name, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.RemoveNetwork(ctx, name) })
+	if err := eng.CreateNetwork(ctx, name, true, nil); err == nil || !strings.Contains(err.Error(), "not internal") {
+		t.Fatalf("a non-internal network must be refused: %v", err)
+	}
+	r := EgressNetworkCheck(eng).Run(ctx)
+	if r.Severity != "error" || !strings.Contains(r.Detail, name) || r.Fix == nil {
+		t.Fatalf("doctor: %+v", r)
+	}
+	if _, err := r.Fix(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.CreateNetwork(ctx, name, true, map[string]string{LabelEgress: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.CreateNetwork(ctx, name, true, map[string]string{LabelEgress: "it"}); err == nil || !strings.Contains(err.Error(), "not created by") {
+		t.Fatalf("a foreign network must be refused: %v", err)
+	}
+	n, err := eng.InspectNetwork(ctx, name)
+	if err != nil || !n.Internal {
+		t.Fatalf("%+v %v", n, err)
+	}
+}
+
+// TestAgentGitProtection: from inside the container, nothing the host's
+// git executes can be changed and shared-home masks hide credentials,
+// while a commit's writes still succeed.
+func TestAgentGitProtection(t *testing.T) {
+	eng := engine(t)
+	ctx := context.Background()
+	if err := eng.EnsureImage(ctx, testImage); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	repo, ws := filepath.Join(root, "repo"), filepath.Join(root, "wt", "s1")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-q")
+	gitRun(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "icaro/s1", ws)
+	g := filepath.Join(repo, ".git")
+	_ = os.RemoveAll(filepath.Join(g, "hooks"))
+	sub := filepath.Join(g, "modules", "lib", "x")
+	_ = os.MkdirAll(filepath.Join(sub, "objects"), 0o700)
+	_ = os.WriteFile(filepath.Join(sub, "HEAD"), []byte("x\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(sub, "config"), []byte("x\n"), 0o600)
+	a := filepath.Join(g, "worktrees", "s1")
+	// A shared-home style mount with a file and a directory mask.
+	hh := filepath.Join(root, "hosthome")
+	_ = os.MkdirAll(filepath.Join(hh, ".ssh"), 0o700)
+	_ = os.WriteFile(filepath.Join(hh, ".ssh", "id"), []byte("secret"), 0o600)
+	_ = os.WriteFile(filepath.Join(hh, ".netrc"), []byte("secret"), 0o600)
+
+	user := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	spec, ns := AgentSpec{
+		Name: "icaro-it-git-" + time.Now().Format("150405"), Image: testImage, User: user,
+		Workspace: ws, GitDir: g, Labels: map[string]string{LabelSession: "it"},
+		Extra:  []Mount{{Source: hh, Target: "/h", Masks: []Mask{{Target: "/h/.ssh"}, {Target: "/h/.netrc", File: true}}}},
+		Limits: sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64},
+	}.Build()
+	id, err := eng.CreateContainerOn(ctx, spec, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.RemoveContainer(ctx, id) })
+	if err := eng.StartContainer(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	denied := []string{
+		"echo x >> " + g + "/config", "touch " + g + "/hooks/pre-commit", "mv " + g + "/hooks " + g + "/h2",
+		"echo x >> " + a + "/commondir", "echo x >> " + a + "/gitdir", "echo x >> " + a + "/config.worktree",
+		"mv " + g + "/worktrees " + g + "/w2", "mv " + a + " " + a + "2", "mkdir " + g + "/worktrees/evil",
+		"echo x >> /workspace/.git", "rm /workspace/.git",
+		"touch " + sub + "/hooks/post-checkout", "echo x >> " + sub + "/config", "mv " + g + "/modules/lib " + g + "/modules/l2",
+		"grep -q secret /h/.netrc", "grep -q secret /h/.ssh/id",
+	}
+	allowed := []string{
+		"touch " + g + "/objects/probe", "touch " + a + "/index.probe", "mkdir -p " + g + "/refs/heads/probe", "touch " + sub + "/objects/probe",
+		"touch /h/.ssh/new",  // lands in the mask's tmpfs, not on the host
+		"echo x > /h/.netrc", // goes to /dev/null, not to the host file
+	}
+	var script strings.Builder
+	for _, c := range append(append([]string{}, denied...), allowed...) {
+		fmt.Fprintf(&script, "if (%s) 2>/dev/null; then echo 'ALLOWED: %s'; else echo 'denied: %s'; fi\n", c, c, c)
+	}
+	out, err := run(t, ExecArgs(ExecOptions{Container: id, User: user, Cmd: []string{"sh", "-c", script.String()}})...)
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	for _, c := range denied {
+		if !strings.Contains(out, "denied: "+c+"\n") {
+			t.Errorf("must be denied: %s\n%s", c, out)
+		}
+	}
+	for _, c := range allowed {
+		if !strings.Contains(out, "ALLOWED: "+c+"\n") {
+			t.Errorf("must be allowed: %s\n%s", c, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(hh, ".ssh", "new")); err == nil {
+		t.Error("a write under a masked directory reached the host")
+	}
+	if b, _ := os.ReadFile(filepath.Join(hh, ".netrc")); string(b) != "secret" {
+		t.Errorf("a write to a masked file reached the host: %q", b)
 	}
 }

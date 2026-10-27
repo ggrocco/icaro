@@ -3,7 +3,6 @@ package container
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/moby/moby/api/types/mount"
@@ -50,9 +49,10 @@ type AgentSpec struct {
 	// Workspace is the host worktree mounted at /workspace.
 	Workspace string
 	// GitDir is the repository's common .git directory, mounted at its
-	// host path so the worktree's .git file resolves. Its hooks/ and
-	// config are mounted read-only so an agent cannot plant code that the
-	// host's git would later run (ADR 0011).
+	// host path so the worktree's .git file resolves. What the host's git
+	// reads to decide what to run (config, hooks, worktree admin files,
+	// submodule config and hooks) is mounted read-only, so an agent cannot
+	// plant code that the host's git would later run (ADR 0011, gitMounts).
 	GitDir string
 	Home   HomeMount
 	// IcaroDir is the host directory mounted at /icaro (MCP socket).
@@ -74,13 +74,7 @@ func (a AgentSpec) Build() (docker.Spec, docker.NetSpec) {
 		bind(a.Workspace, WorkspacePath, false)
 	}
 	if a.GitDir != "" {
-		bind(a.GitDir, a.GitDir, false)
-		for _, sub := range []string{"hooks", "config"} {
-			p := filepath.Join(a.GitDir, sub)
-			if _, err := os.Stat(p); err == nil {
-				bind(p, p, true)
-			}
-		}
+		mounts = append(mounts, gitMounts(a.Workspace, a.GitDir)...)
 	}
 	switch {
 	case a.Home.Volume != "":
@@ -94,7 +88,17 @@ func (a AgentSpec) Build() (docker.Spec, docker.NetSpec) {
 	for _, m := range a.Extra {
 		bind(m.Source, m.Target, m.ReadOnly)
 		for _, mask := range m.Masks {
-			mounts = append(mounts, mount.Mount{Type: mount.TypeTmpfs, Target: mask, TmpfsOptions: &mount.TmpfsOptions{SizeBytes: 1 << 20}})
+			if mask.File {
+				// A tmpfs cannot cover a file; /dev/null can. Reads are
+				// empty and writes are discarded: a device file stays
+				// writable on a read-only mount, but nothing reaches the
+				// host file underneath.
+				bind(os.DevNull, mask.Target, true)
+				continue
+			}
+			// The container's own scratch space: its user (never root)
+			// may write there, and nothing reaches the host.
+			mounts = append(mounts, mount.Mount{Type: mount.TypeTmpfs, Target: mask.Target, TmpfsOptions: &mount.TmpfsOptions{SizeBytes: 1 << 20, Mode: 0o777}})
 		}
 	}
 	hc := sandbox.Baseline(sandbox.BaselineOptions{

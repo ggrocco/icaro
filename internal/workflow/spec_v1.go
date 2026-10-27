@@ -1,6 +1,10 @@
 package workflow
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
 // The types below are the blueprint workflow contract
 // (blueprint/docs/schemas/workflow.schema.json). They replace the legacy
@@ -115,10 +119,39 @@ type ActionExecutor interface {
 
 // SecretResolver resolves ${{ secrets.<name> }} for image steps. Values
 // never reach logs: the engine registers them with the log redactor.
+// Hosts returns a secret's host binding: a bound secret is an integration
+// credential, which only uses: actions may attach (03-security).
 type SecretResolver interface {
 	Resolve(ctx context.Context, name string) (string, error)
 	Names(ctx context.Context) ([]string, error)
+	Hosts(ctx context.Context, name string) ([]string, error)
 }
+
+// IntegrationCredential reports whether a secret belongs to an
+// integration: it is bound to hosts, or it is named <integration>.<cred>
+// for an installed integration (webhook verification secrets have no
+// binding). Such a secret never enters a container or a template; the
+// integration's uses: actions attach it through the manifest's auth.
+func IntegrationCredential(name string, bound bool, integrations []string) bool {
+	if bound {
+		return true
+	}
+	integ, _, ok := strings.Cut(name, ".")
+	return ok && contains(integrations, integ)
+}
+
+// IntegrationCredentialHint tells an author what to do instead.
+func IntegrationCredentialHint(name string) string {
+	if integ, _, ok := strings.Cut(name, "."); ok {
+		return fmt.Sprintf("call %s through its uses: actions (icaro integration show %s), which attach the credential to its bound hosts", integ, integ)
+	}
+	return "call the integration through its uses: actions, which attach the credential to its bound hosts; store a container secret without --host"
+}
+
+// CronFields are the trigger.* fields of a cron run (scheduler.fire):
+// the scheduled and actual fire times (RFC 3339) and whether the fire
+// was more than a minute late.
+var CronFields = []string{"fired_at", "late", "scheduled_at"}
 
 // Trigger kinds recorded on runs.
 const (

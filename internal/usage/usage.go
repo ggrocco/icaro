@@ -18,6 +18,10 @@ const (
 	ConfidenceHigh = "high"
 	// ConfidenceUnavailable marks a source that could not be read.
 	ConfidenceUnavailable = "unavailable"
+	// ConfidenceSnapshot marks a row read back from a stored snapshot
+	// because its transcript is gone: the numbers are as of the last
+	// collection, not re-read from the provider.
+	ConfidenceSnapshot = "snapshot"
 )
 
 // Record is usage for one (provider, source, day, model).
@@ -57,6 +61,12 @@ func Collect(ctx context.Context, providers []Provider, since time.Time, loc *ti
 		}
 		out = append(out, recs...)
 	}
+	sortRecords(out)
+	return out
+}
+
+// sortRecords orders records by day, provider, source and model.
+func sortRecords(out []Record) {
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Day != b.Day {
@@ -70,7 +80,6 @@ func Collect(ctx context.Context, providers []Provider, since time.Time, loc *ti
 		}
 		return a.Model < b.Model
 	})
-	return out
 }
 
 func safeCollect(ctx context.Context, p Provider, since time.Time, loc *time.Location) (recs []Record, err error) {

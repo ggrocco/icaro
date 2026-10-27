@@ -175,6 +175,26 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 	return st, nil
 }
 
+// Restart restarts the daemon through the service manager, so it stays
+// supervised: stopping it with a signal exits 0, which neither
+// Restart=on-failure nor KeepAlive/SuccessfulExit=false restarts.
+func (m *Manager) Restart(ctx context.Context) error {
+	var name string
+	var args []string
+	switch m.GOOS {
+	case "darwin":
+		name, args = "launchctl", []string{"kickstart", "-k", m.domain() + "/" + Label}
+	case "linux":
+		name, args = "systemctl", []string{"--user", "restart", SystemdUnit}
+	default:
+		return ErrUnsupported
+	}
+	if out, err := m.Run(ctx, name, args...); err != nil {
+		return fmt.Errorf("%s %s: %v: %s", name, strings.Join(args, " "), err, out)
+	}
+	return nil
+}
+
 func (m *Manager) domain() string { return fmt.Sprintf("gui/%d", m.UID) }
 
 // systemdQuote quotes one ExecStart/Environment word.

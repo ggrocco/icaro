@@ -28,7 +28,9 @@ schema and the validator are the source of truth, not your memory.
 4. **Create and run small.** Call `create_workflow` (or `update_workflow`
    for an existing one), then `run_workflow` with a small `trigger`
    payload. Manual runs must supply every `trigger.*` field the workflow
-   references.
+   references. Read only the fields `get_integration` lists for the
+   event (a cron run provides only `scheduled_at`, `fired_at` and
+   `late`).
 5. **Debug with `get_run`.** It returns status, per-step outputs and a
    size-capped log tail. Fix the workflow and repeat from step 3.
 
@@ -46,12 +48,14 @@ env:
 triggers:
   - integration: github
     event: pull_request.opened
-    filter: trigger.base_branch == 'main'
+    filter: trigger.base_ref == 'main'
   - type: manual
 steps:
   - id: checks
     image: mirror.gcr.io/library/alpine:3.24
-    repository: { ref: "${{ trigger.repo_url }}", revision: "${{ trigger.head_sha }}" }
+    repository:
+      ref: "https://github.com/${{ trigger.repo }}.git"
+      revision: "${{ trigger.head_sha }}"
     command: |
       ./scripts/check.sh > /icaro/out.txt
       printf '{"ok":true}' > /icaro/output.json
@@ -81,7 +85,10 @@ steps:
   lower upper trim length toJSON fromJSON join split format coalesce
   string number has`. A missing key is an error; guard optional fields
   with `has(trigger.x)`.
-- `${{ secrets.NAME }}` is resolved by the daemon and redacted from logs.
+- `${{ secrets.NAME }}` is resolved by the daemon and redacted from logs
+  and outputs. It cannot read an integration credential (a host-bound
+  secret, or `<integration>.<name>`): call the integration through its
+  `uses:` actions instead. A `when` cannot read secrets at all.
 - **Never interpolate `trigger.*` or step outputs straight into `command`.**
   They can carry text an outsider controls (a PR title, an issue body),
   and the command is a shell script. Pass them through `env` and quote the

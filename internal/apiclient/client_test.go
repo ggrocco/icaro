@@ -151,11 +151,19 @@ func TestEndpoints(t *testing.T) {
 		{"SessionExec", func(ctx context.Context, c *Client) error { _, err := c.SessionExec(ctx, "s1"); return err }, "GET", "/api/v1/sessions/s1/exec", ""},
 		{"StopSession", func(ctx context.Context, c *Client) error { _, err := c.StopSession(ctx, "s1"); return err }, "POST", "/api/v1/sessions/s1/stop", ""},
 		{"StartSession", func(ctx context.Context, c *Client) error { _, err := c.StartSession(ctx, "s1"); return err }, "POST", "/api/v1/sessions/s1/start", ""},
+		{"PushSession", func(ctx context.Context, c *Client) error {
+			_, err := c.PushSession(ctx, "s1", session.PushRequest{Remote: "up", ForceWithLease: true})
+			return err
+		}, "POST", "/api/v1/sessions/s1/push", `{"remote":"up","force_with_lease":true}`},
 		{"RemoveSession", func(ctx context.Context, c *Client) error { return c.RemoveSession(ctx, "s1", false) }, "DELETE", "/api/v1/sessions/s1", ""},
 		{"RemoveSession keep", func(ctx context.Context, c *Client) error { return c.RemoveSession(ctx, "s1", true) }, "DELETE", "/api/v1/sessions/s1?keep_worktree=true", ""},
 		{"ListProjects", func(ctx context.Context, c *Client) error { _, err := c.ListProjects(ctx); return err }, "GET", "/api/v1/projects", ""},
 		{"ListProfiles", func(ctx context.Context, c *Client) error { _, err := c.ListProfiles(ctx); return err }, "GET", "/api/v1/profiles", ""},
-		{"PrepareLogin", func(ctx context.Context, c *Client) error { _, err := c.PrepareLogin(ctx, "default"); return err }, "POST", "/api/v1/profiles/default/login", ""},
+		{"PrepareLogin", func(ctx context.Context, c *Client) error {
+			_, err := c.PrepareLogin(ctx, "default", false)
+			return err
+		}, "POST", "/api/v1/profiles/default/login", ""},
+		{"PrepareLogin force", func(ctx context.Context, c *Client) error { _, err := c.PrepareLogin(ctx, "default", true); return err }, "POST", "/api/v1/profiles/default/login?force=true", ""},
 		{"ListSecrets", func(ctx context.Context, c *Client) error { _, err := c.ListSecrets(ctx); return err }, "GET", "/api/v1/secrets", ""},
 		{"SetSecret", func(ctx context.Context, c *Client) error { return c.SetSecret(ctx, "k", "v", []string{"h"}) }, "PUT", "/api/v1/secrets/k", `{"hosts":["h"],"value":"v"}`},
 		{"DeleteSecret", func(ctx context.Context, c *Client) error { return c.DeleteSecret(ctx, "k") }, "DELETE", "/api/v1/secrets/k", ""},

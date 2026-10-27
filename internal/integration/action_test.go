@@ -215,12 +215,17 @@ func TestExecuteSSRFGuard(t *testing.T) {
 	if r := <-f.last; r.URL.Path != "/api/tickets/1/close" {
 		t.Fatal(r.URL.Path)
 	}
-	for _, ip := range []string{"127.0.0.1", "10.2.3.4", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "0.0.0.0", "::ffff:127.0.0.1"} {
+	for _, ip := range []string{"127.0.0.1", "10.2.3.4", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "0.0.0.0", "::ffff:127.0.0.1",
+		// NAT64, IPv4-compatible, IPv4-translated and 6to4 forms of private IPv4.
+		"64:ff9b::a00:1", "64:ff9b:1::a9fe:a9fe", "::7f00:1", "::ffff:0:a00:1", "2002:7f00:1::1", "2002:a9fe:a9fe::", "2002:c0a8:101::1",
+		// Teredo, discard-only, documentation and other reserved ranges.
+		"2001:0:4136:e378:8000:63bf:3fff:fdd2", "100::1", "2001:db8::1", "3fff::1", "2001:2::1", "fec0::1", "5f00::1",
+		"192.0.2.1", "198.51.100.7", "203.0.113.9", "192.88.99.1"} {
 		if !IsBlockedIP(net.ParseIP(ip)) {
 			t.Errorf("%s must be blocked", ip)
 		}
 	}
-	for _, ip := range []string{"93.184.216.34", "2606:4700::1111"} {
+	for _, ip := range []string{"93.184.216.34", "2606:4700::1111", "2002:5db8:d822::1" /* 6to4 of a public IPv4 */} {
 		if IsBlockedIP(net.ParseIP(ip)) {
 			t.Errorf("%s must be allowed", ip)
 		}

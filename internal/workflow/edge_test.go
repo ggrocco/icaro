@@ -223,6 +223,33 @@ func TestTriggerFieldsOptionalAndRequired(t *testing.T) {
 	}
 }
 
+// A field read behind a has() check is optional: manual runs do not
+// require it and the trigger check does not flag it.
+func TestHasGuardIsFlowSensitive(t *testing.T) {
+	src := `
+version: 1
+name: guarded
+triggers:
+  - integration: github
+    event: pull_request.opened
+  - type: manual
+steps:
+  - id: aa
+    image: x
+    when: has(trigger.label) && trigger.label == 'bug'
+    env:
+      B: ${{ !has(trigger.ref) || trigger.ref == 'main' }}
+`
+	s, issues := parseT(t, src, Options{Catalog: fakeCatalog{}})
+	if len(issues) != 0 {
+		t.Fatalf("guarded references flagged: %v", issues)
+	}
+	req, opt := TriggerFields(s)
+	if len(req) != 0 || !reflect.DeepEqual(opt, []string{"label", "ref"}) {
+		t.Fatalf("required %v optional %v", req, opt)
+	}
+}
+
 func TestSpecHelpers(t *testing.T) {
 	s := &Spec{Steps: []StepSpec{{ID: "a"}, {ID: "b"}}}
 	if s.Step("b") != &s.Steps[1] || s.Step("z") != nil {

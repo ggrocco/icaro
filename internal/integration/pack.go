@@ -20,6 +20,8 @@ type GitRunner func(ctx context.Context, dir string, args ...string) (string, er
 
 // ExecGit runs the git CLI.
 func ExecGit(ctx context.Context, dir string, args ...string) (string, error) {
+	// A pack is a third-party repository: its config never runs a program.
+	args = append([]string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"}, args...)
 	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // fixed binary, args from callers
 	if dir != "" {
 		cmd.Dir = dir

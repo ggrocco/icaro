@@ -84,4 +84,10 @@ func TestShutdownClosesSubscriptions(t *testing.T) {
 		s.Cancel() // after shutdown, a no-op that does not block
 	}
 	b.Publish(Event{RunID: "r1"}) // does not block after shutdown
+	// The loop has exited, so a new subscription is closed at once.
+	late := b.Subscribe("r9")
+	if _, ok := <-late.C; ok {
+		t.Fatal("a subscription after shutdown must be closed")
+	}
+	late.Cancel()
 }

@@ -8,6 +8,7 @@ import (
 
 	"icaro/internal/store"
 	"icaro/internal/workflow"
+	"icaro/internal/workflow/events"
 )
 
 // WorkflowInfo is the API view of a workflow.
@@ -53,6 +54,10 @@ func (s *Service) validateOptions(ctx context.Context) workflow.Options {
 				set[n] = true
 			}
 			opts.SecretExists = func(n string) bool { return set[n] }
+			opts.SecretBound = func(n string) bool {
+				hosts, err := s.secrets.Hosts(ctx, n)
+				return err == nil && len(hosts) > 0
+			}
 		}
 	}
 	return opts
@@ -145,9 +150,22 @@ func (s *Service) DeleteWorkflow(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.DeleteWorkflow(ctx, w.ID); err != nil {
+	active, err := s.store.DeleteWorkflow(ctx, w.ID)
+	if err != nil {
 		return err
 	}
+	// Its queued runs are cancelled with it; running ones are stopped. A
+	// run's version survives the delete, so history stays readable.
+	for _, r := range active {
+		if r.Status == store.RunRunning {
+			if s.runner != nil {
+				s.runner.Cancel(r.ID)
+			}
+		} else {
+			s.events.Publish(events.Event{Type: events.TypeRun, RunID: r.ID, Status: store.RunCancelled})
+		}
+	}
+	s.log.Info("workflow deleted", "name", w.Name, "cancelled_runs", len(active))
 	s.changed()
 	return nil
 }

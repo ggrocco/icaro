@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"icaro/internal/integration"
 	"icaro/internal/workflow"
 )
 
@@ -88,11 +89,14 @@ func TestDocumentedWorkflowsValidateAndPinImages(t *testing.T) {
 	}
 	docs := append(examples(t, root), workflowBlocks(t, root)...)
 	blocks := 0
+	// Integration triggers and uses: steps are checked against the
+	// integrations shipped in the binary.
+	opts := workflow.Options{Catalog: integration.Catalog{R: integration.NewRegistry(t.TempDir(), nil)}}
 	for _, d := range docs {
 		if strings.Contains(d.where, ".md:") {
 			blocks++
 		}
-		_, issues, err := workflow.Parse([]byte(d.src), workflow.Options{})
+		_, issues, err := workflow.Parse([]byte(d.src), opts)
 		if err != nil {
 			t.Errorf("%s: %v", d.where, err)
 			continue

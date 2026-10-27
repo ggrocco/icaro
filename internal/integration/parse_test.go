@@ -82,7 +82,7 @@ actions:
 	if len(issues) != 1 || issues[0].Path != "/actions/do/succes" {
 		t.Fatalf("schema pass: %v", issues)
 	}
-	_, issues, _ = Parse([]byte(strings.Replace(src, `    succes: "x"`+"\n", "", 1)))
+	_, issues, _ = Parse([]byte(strings.Replace(strings.Replace(src, `    succes: "x"`+"\n", "", 1), "hosts: [api.demo.dev]", `hosts: [api.demo.dev, "*.dev"]`, 1)))
 	text := issues.Error()
 	for _, want := range []string{
 		"/auth/tok/header: auth kind header needs a header name",
@@ -100,6 +100,7 @@ actions:
 		"body needs exactly one of json, form, raw",
 		"/actions/plain/request/url: action URLs must use https",
 		"/actions/dyn/request/url: the URL must start with https://<host> or ${{ config.<key> }}",
+		`/hosts/1: wildcard host "*.dev" covers a whole top-level domain`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, strings.ReplaceAll(text, "; ", "\n"))

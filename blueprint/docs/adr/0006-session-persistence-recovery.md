@@ -26,11 +26,22 @@ state on startup.
   `last_heartbeat`). `status` ∈
   `creating | running | queued | stopped | orphaned | error`.
   `preview_instances` and the relevant `runs`/`step_runs` reference `sessions`.
+  *(Implementation note: by session id, without foreign keys; see
+  architecture §4 for why.)*
 - Writes go through the **single store goroutine** and command channel
   (consistent with architecture §4); no mutex in domain code.
+  *(Implementation note: the store became a `database/sql` repository with
+  one SQLite connection or a Postgres pool, not a goroutine; session status
+  changes are compare-and-set updates instead, so concurrent writers such
+  as a stop and a start in flight cannot overwrite each other. Still no
+  mutex in domain code.)*
 - **Startup reconciliation:** on boot, for each non-terminal session, probe
   whether its container / worktree / preview still exist. Re-attach where
   possible; otherwise mark `orphaned` and surface it via `icaro doctor`.
+  *(Implementation note: the container and worktree decide; the preview is
+  optional and re-synced by the preview manager, so a missing one only drops
+  the session's stale reference. A still-running container of an orphaned
+  agent session is stopped, not removed.)*
 - **Queued state:** the `queued` status is the persistence hook for the
   concurrency cap (see `docs/02-decisions-risks.md`, O1); sessions over the cap are
   persisted as `queued` rather than started.

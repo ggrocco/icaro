@@ -37,6 +37,13 @@ type ImageResolver interface {
 // ErrNotFound reports an unknown session.
 var ErrNotFound = errors.New("session not found")
 
+// errStartAborted ends a start whose session was stopped or removed while
+// it ran; the start has already removed what it created.
+var errStartAborted = errors.New("the session was stopped while it was starting")
+
+// allStatuses lets Stop claim a session from whatever state it is in.
+var allStatuses = []string{StatusCreating, StatusRunning, StatusQueued, StatusStopped, StatusOrphaned, StatusError}
+
 // ErrInvalid reports a bad request (unknown profile, name in use, ...).
 type ErrInvalid struct{ Msg string }
 
@@ -76,15 +83,21 @@ type Options struct {
 // Manager owns the session lifecycle. One goroutine (Run) owns the
 // decision to start a session, so the concurrency cap holds without locks;
 // API callers send it start requests over a channel.
+//
+// Status changes are compare-and-set in the store: a start in flight
+// writes only while its session is still creating, and Stop claims the
+// session before it tears anything down, so a stop is never undone by the
+// start it raced (the start notices, removes what it created and exits).
 type Manager struct {
 	o      Options
 	layout paths.Layout
 	policy container.MountPolicy
 
-	startCh chan chan struct{}
-	wake    chan struct{}
-	gitLock chan struct{} // serializes repository-cache operations
-	mcp     *registry
+	startCh  chan chan struct{}
+	wake     chan struct{}
+	gitLock  chan struct{} // serializes repository-cache operations
+	mcp      *registry
+	starting *owned[chan struct{}] // session id -> closed when its start goroutine returns
 }
 
 // New builds a Manager; call Run to process starts.
@@ -107,7 +120,7 @@ func New(o Options) *Manager {
 		o: o, layout: l,
 		policy:  container.MountPolicy{Allow: o.Config.Mounts.Allow, Home: home},
 		startCh: make(chan chan struct{}), wake: make(chan struct{}, 1), gitLock: make(chan struct{}, 1),
-		mcp: newRegistry(),
+		mcp: newRegistry(), starting: newOwned[chan struct{}](),
 	}
 }
 
@@ -183,20 +196,72 @@ func (m *Manager) fill(ctx context.Context) {
 		if active >= m.MaxActive() {
 			return
 		}
+		// Register the start before claiming the session, so a Stop that
+		// wins the session after the claim always finds a start to wait for.
+		done, ok := m.beginStart(row.ID)
+		if !ok {
+			continue // a stopped start of this session is still unwinding
+		}
 		ok, err := m.o.Store.TransitionSession(ctx, row.ID, StatusCreating, StatusQueued)
 		if err != nil || !ok {
+			m.endStart(row.ID, done)
 			continue
 		}
 		active++
 		row.Status = StatusCreating
 		go func(row *store.SessionRow) {
-			if err := m.startAgent(context.WithoutCancel(ctx), row); err != nil {
+			bg := context.WithoutCancel(ctx)
+			switch err := m.startAgent(bg, row); {
+			case errors.Is(err, errStartAborted):
+				m.o.Log.Info("session start abandoned", "session", row.ID, "reason", err)
+			case err != nil:
 				m.o.Log.Error("session start failed", "session", row.ID, "err", err)
 				row.Status, row.Error = StatusError, err.Error()
-				_ = m.o.Store.UpdateSession(context.WithoutCancel(ctx), row)
+				_, _ = m.o.Store.UpdateSessionIf(bg, row, StatusCreating)
 			}
+			// Unregister before nudging, so the fill the nudge triggers can
+			// claim this session again if it was re-queued meanwhile.
+			m.endStart(row.ID, done)
 			m.nudge()
 		}(row)
+	}
+}
+
+// beginStart records that a start goroutine for id is about to run. It
+// refuses while an earlier start of id has not returned yet.
+func (m *Manager) beginStart(id string) (chan struct{}, bool) {
+	done := make(chan struct{})
+	ok := false
+	m.starting.do(func(s map[string]chan struct{}) {
+		if s[id] == nil {
+			s[id], ok = done, true
+		}
+	})
+	return done, ok
+}
+
+// endStart marks the start of id finished.
+func (m *Manager) endStart(id string, done chan struct{}) {
+	m.starting.do(func(s map[string]chan struct{}) {
+		if s[id] == done {
+			delete(s, id)
+		}
+	})
+	close(done)
+}
+
+// awaitStart waits until no start goroutine of id is running.
+func (m *Manager) awaitStart(ctx context.Context, id string) error {
+	var done chan struct{}
+	m.starting.do(func(s map[string]chan struct{}) { done = s[id] })
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -286,7 +351,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Session, erro
 	}
 	if err := addWorktree(ctx, info.Root, row.WorktreePath, row.Branch, req.Base); err != nil {
 		row.Status, row.Error = StatusError, err.Error()
-		_ = m.o.Store.UpdateSession(ctx, row)
+		_, _ = m.o.Store.UpdateSessionIf(ctx, row, StatusCreating)
 		return nil, err
 	}
 	m.chownForContainer(row.WorktreePath, filepath.Join(info.GitDir, "worktrees", filepath.Base(row.WorktreePath)))
@@ -298,8 +363,11 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Session, erro
 		row.PreviewInstanceID = pid
 	}
 	row.Status = StatusQueued
-	if err := m.o.Store.UpdateSession(ctx, row); err != nil {
+	if ok, err := m.o.Store.UpdateSessionIf(ctx, row, StatusCreating); err != nil {
 		return nil, err
+	} else if !ok {
+		// Stopped or removed before it was queued: it does not start.
+		return m.Get(ctx, row.ID)
 	}
 	if err := m.requestStart(ctx); err != nil {
 		return nil, err
@@ -345,6 +413,10 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 	if err != nil {
 		return err
 	}
+	providerEnv, err := m.injectEnv(ctx, row, prof.Inject, att)
+	if err != nil {
+		return err
+	}
 	var extra []container.Mount
 	for _, spec := range prof.Mounts {
 		mt, err := container.ParseMount(spec)
@@ -375,7 +447,7 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		spec, ns := container.AgentSpec{
 			Name:  "icaro-session-" + strings.ToLower(row.ID),
 			Image: image, User: m.User(),
-			Env: []string{"ICARO_SESSION=" + row.ID, "ICARO_PROJECT=" + proj.Name, "ICARO_PROFILE=" + row.Profile, "ICARO_BRANCH=" + row.Branch},
+			Env: append([]string{"ICARO_SESSION=" + row.ID, "ICARO_PROJECT=" + proj.Name, "ICARO_PROFILE=" + row.Profile, "ICARO_BRANCH=" + row.Branch}, providerEnv...),
 			Labels: map[string]string{
 				container.LabelSession: row.ID, container.LabelKind: row.Kind, container.LabelProfile: row.Profile,
 			},
@@ -388,10 +460,15 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		if err != nil {
 			return "", fmt.Errorf("create container: %w", err)
 		}
-		// Persist before starting so a crash here can be reconciled (ADR 0006).
+		// Persist before starting so a crash here can be reconciled (ADR 0006),
+		// and only while the session is still creating: a stop that won
+		// the session meanwhile must not get a container back.
 		row.ContainerID, row.ImageDigest = id, image
-		if err := m.o.Store.UpdateSession(ctx, row); err != nil {
+		if ok, err := m.o.Store.UpdateSessionIf(ctx, row, StatusCreating); err != nil || !ok {
 			_ = m.o.Engine.RemoveContainer(ctx, id)
+			if err == nil {
+				err = errStartAborted
+			}
 			return "", err
 		}
 		if err := m.o.Engine.StartContainer(ctx, id); err != nil {
@@ -400,19 +477,20 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		}
 		return id, nil
 	}
-	_, err = build()
+	cid, err := build()
 	if err != nil && m.o.Homes.OverlayEnabled() && strings.Contains(err.Error(), "overlay") && m.o.Homes.Mode != creds.ModeOverlay {
 		// Spike S2 fallback: this engine cannot overlay host paths.
 		m.o.Log.Warn("overlay homes unavailable; falling back to per-session copies", "err", err)
 		_ = m.o.Homes.Release(ctx, row.Profile, row.ID)
 		m.o.Homes.DisableOverlay()
-		_, err = build()
+		cid, err = build()
 	}
 	if err != nil {
 		return err
 	}
+	var mem *memServer
 	if m.o.Memory != nil {
-		sock := filepath.Join(icaroDir, "mcp.sock")
+		sock := MemorySocketPath(m.layout, row.ID)
 		stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock)
 		if err != nil {
 			m.o.Log.Warn("memory MCP unavailable for session", "session", row.ID, "err", err)
@@ -421,13 +499,36 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 			// container user; a root daemon must hand it over too, or the
 			// non-root agent cannot connect (0600).
 			m.chownForContainer(sock)
-			m.mcp.put(row.ID, stop)
+			mem = m.mcp.put(row.ID, stop)
 		}
 	}
 	row.Status, row.Error = StatusRunning, ""
 	now := time.Now()
 	row.LastHeartbeat = &now
-	return m.o.Store.UpdateSession(ctx, row)
+	ok, err := m.o.Store.UpdateSessionIf(ctx, row, StatusCreating)
+	if err == nil && ok {
+		return nil
+	}
+	// Stopped or removed meanwhile (or the row cannot be written): no
+	// container may run without a running session that supervises it.
+	if mem != nil && m.mcp.takeIf(row.ID, mem) {
+		mem.stop()
+	}
+	if rerr := m.o.Engine.RemoveContainer(ctx, cid); rerr != nil {
+		m.o.Log.Warn("remove container of an abandoned start", "session", row.ID, "container", short(cid), "err", rerr)
+	}
+	if err == nil {
+		err = errStartAborted
+	}
+	return err
+}
+
+// MemorySocketPath is the host path of a session's memory MCP socket. It
+// sits in the session's run directory, which is bind-mounted at /icaro
+// (the socket appears only after the container starts, so the directory,
+// not the socket file, is what is mounted; ADR 0019).
+func MemorySocketPath(l paths.Layout, sessionID string) string {
+	return filepath.Join(l.RunDir(), "sessions", sessionID, "mcp.sock")
 }
 
 func (m *Manager) identity(row *store.SessionRow, proj *store.Project, agent string) Identity {
@@ -438,7 +539,7 @@ func (m *Manager) identity(row *store.SessionRow, proj *store.Project, agent str
 	return id
 }
 
-func (m *Manager) icaroDir(id string) string { return filepath.Join(m.layout.RunDir(), "sessions", id) }
+func (m *Manager) icaroDir(id string) string { return filepath.Dir(MemorySocketPath(m.layout, id)) }
 
 // chownForContainer hands session-owned host paths to the container user
 // when the daemon runs as root (a root daemon must not make the agent
@@ -547,6 +648,20 @@ func (m *Manager) Ensure(ctx context.Context, req CreateRequest) (*Session, erro
 
 // Stop stops a session's container; its worktree and home layer stay.
 func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
+	// Claim the session first. A start still in flight writes only while
+	// the session is creating, so from here on it notices the stop,
+	// removes what it created and returns; wait for that before reading
+	// which container is left to stop.
+	if ok, err := m.o.Store.TransitionSession(ctx, id, StatusStopped, allStatuses...); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrNotFound
+	}
+	// The session's credential-injection token dies with the claim.
+	m.revokeInject(ctx, id)
+	if err := m.awaitStart(ctx, id); err != nil {
+		return nil, err
+	}
 	row, err := m.o.Store.GetSession(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotFound
@@ -554,19 +669,30 @@ func (m *Manager) Stop(ctx context.Context, id string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	if row.Status != StatusStopped {
+		// Started again after the claim: the later request wins, and that
+		// start owns the session's container now.
+		return toSession(row), nil
+	}
+	// A start that was in flight may have issued a token after the claim.
+	m.revokeInject(ctx, id)
 	if stop := m.mcp.take(id); stop != nil {
 		stop()
 	}
 	if row.ContainerID != "" {
-		if err := m.o.Engine.StopContainer(ctx, row.ContainerID, 10); err != nil {
-			return nil, err
+		err := m.o.Engine.StopContainer(ctx, row.ContainerID, 10)
+		if err == nil {
+			err = m.o.Engine.RemoveContainer(ctx, row.ContainerID)
 		}
-		if err := m.o.Engine.RemoveContainer(ctx, row.ContainerID); err != nil {
+		if err != nil {
+			// The container may still run: say so rather than "stopped".
+			row.Status, row.Error = StatusError, "stop: "+err.Error()
+			_, _ = m.o.Store.UpdateSessionIf(ctx, row, StatusStopped)
 			return nil, err
 		}
 	}
-	row.ContainerID, row.Status = "", StatusStopped
-	if err := m.o.Store.UpdateSession(ctx, row); err != nil {
+	row.ContainerID = ""
+	if _, err := m.o.Store.UpdateSessionIf(ctx, row, StatusStopped); err != nil {
 		return nil, err
 	}
 	m.nudge()
@@ -595,9 +721,12 @@ func (m *Manager) Start(ctx context.Context, id string) (*Session, error) {
 		_ = m.o.Engine.RemoveContainer(ctx, row.ContainerID)
 		row.ContainerID = ""
 	}
+	from := row.Status
 	row.Status, row.Error = StatusQueued, ""
-	if err := m.o.Store.UpdateSession(ctx, row); err != nil {
+	if ok, err := m.o.Store.UpdateSessionIf(ctx, row, from); err != nil {
 		return nil, err
+	} else if !ok {
+		return m.Get(ctx, id) // moved on (or removed) meanwhile; report where it is
 	}
 	if err := m.requestStart(ctx); err != nil {
 		return nil, err
@@ -622,8 +751,10 @@ func (m *Manager) Remove(ctx context.Context, id string, keepWorktree bool) erro
 	if row.Kind == KindRun {
 		return m.FinishRun(ctx, id, keepWorktree)
 	}
-	if _, err := m.Stop(ctx, id); err != nil {
+	if s, err := m.Stop(ctx, id); err != nil {
 		return err
+	} else if s.Status != StatusStopped {
+		return invalid("session %s was started again while it was being removed", id)
 	}
 	if err := m.o.Homes.Release(ctx, row.Profile, row.ID); err != nil {
 		return err
@@ -681,29 +812,89 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		return err
 	}
 	for _, row := range rows {
+		preview, err := m.previewState(ctx, row)
+		if err != nil {
+			return err
+		}
 		reason := m.liveness(ctx, row)
 		if row.Status == StatusCreating && reason == "" && row.Kind == KindAgent {
 			reason = "daemon stopped while the session was being created"
 		}
 		if reason != "" {
-			m.o.Log.Warn("session orphaned", "session", row.ID, "reason", reason)
-			row.Status, row.Error = StatusOrphaned, reason
-			if err := m.o.Store.UpdateSession(ctx, row); err != nil {
+			if err := m.orphan(ctx, row, reason); err != nil {
 				return err
 			}
 			continue
 		}
-		m.o.Log.Info("session re-attached", "session", row.ID, "container", row.ContainerID)
+		if preview == previewGone {
+			// Drop the stale reference; the session itself is fine.
+			if _, err := m.o.Store.UpdateSessionIf(ctx, row, row.Status); err != nil {
+				return err
+			}
+		}
+		m.o.Log.Info("session re-attached", "session", row.ID, "container", row.ContainerID, "preview", preview)
 		if row.Kind == KindAgent && m.o.Memory != nil {
 			proj, _ := m.o.Store.GetProject(ctx, row.ProjectID)
 			agent, _ := creds.LookupAgent(m.o.Config.Profiles[row.Profile].Agent)
-			sock := filepath.Join(m.icaroDir(row.ID), "mcp.sock")
+			sock := MemorySocketPath(m.layout, row.ID)
 			if stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock); err == nil {
 				m.chownForContainer(sock)
 				m.mcp.put(row.ID, stop)
 			}
 		}
 		_ = m.o.Store.HeartbeatSession(ctx, row.ID)
+	}
+	return nil
+}
+
+// previewGone is the preview state of a session whose preview record no
+// longer exists.
+const previewGone = "gone"
+
+// previewState probes the session's preview facet (ADR 0006). A preview
+// is optional and owned by the preview manager, which re-syncs its own
+// instances on start, so a missing one never orphans the session: its
+// stale reference is cleared on row (the caller persists it) and the
+// state is reported as previewGone. Otherwise it is the preview's status,
+// or "" when the session has none.
+func (m *Manager) previewState(ctx context.Context, row *store.SessionRow) (string, error) {
+	if row.PreviewInstanceID == "" {
+		return "", nil
+	}
+	p, err := m.o.Store.GetPreview(ctx, row.PreviewInstanceID)
+	if errors.Is(err, store.ErrNotFound) {
+		m.o.Log.Warn("session preview is gone; dropping the reference", "session", row.ID, "preview", row.PreviewInstanceID)
+		row.PreviewInstanceID = ""
+		return previewGone, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return p.Status, nil
+}
+
+// orphan marks row orphaned unless another writer moved it on first. No
+// credentialed agent may keep running unsupervised, so a live agent
+// container is stopped; it is not removed, so `icaro session start` and
+// `icaro doctor --fix` still find it.
+func (m *Manager) orphan(ctx context.Context, row *store.SessionRow, reason string) error {
+	from := row.Status
+	row.Status, row.Error = StatusOrphaned, reason
+	ok, err := m.o.Store.UpdateSessionIf(ctx, row, from)
+	if err != nil || !ok {
+		return err
+	}
+	m.o.Log.Warn("session orphaned", "session", row.ID, "reason", reason)
+	m.revokeInject(ctx, row.ID)
+	if stop := m.mcp.take(row.ID); stop != nil {
+		stop()
+	}
+	// Run sessions' step containers belong to the workflow engine, which
+	// reconciles its runs itself.
+	if row.Kind == KindAgent && row.ContainerID != "" {
+		if err := m.o.Engine.StopContainer(ctx, row.ContainerID, 10); err != nil {
+			m.o.Log.Warn("stop orphaned container", "session", row.ID, "container", short(row.ContainerID), "err", err)
+		}
 	}
 	return nil
 }
@@ -745,11 +936,7 @@ func (m *Manager) probe(ctx context.Context) {
 	}
 	for _, row := range rows {
 		if reason := m.liveness(ctx, row); reason != "" {
-			if stop := m.mcp.take(row.ID); stop != nil {
-				stop()
-			}
-			row.Status, row.Error = StatusOrphaned, reason
-			_ = m.o.Store.UpdateSession(ctx, row)
+			_ = m.orphan(ctx, row, reason)
 			continue
 		}
 		_ = m.o.Store.HeartbeatSession(ctx, row.ID)
@@ -757,20 +944,35 @@ func (m *Manager) probe(ctx context.Context) {
 }
 
 // Cleanup removes what is left of an orphaned session's container and
-// marks it stopped; its worktree (the user's work) is kept.
+// marks it stopped; its worktree (the user's work) is kept. A session
+// that is no longer orphaned is left alone.
 func (m *Manager) Cleanup(ctx context.Context, id string) error {
-	return CleanupOrphan(ctx, m.o.Store, m.o.Engine, id)
+	_, err := CleanupOrphan(ctx, m.o.Store, m.o.Engine, id)
+	return err
 }
 
-// CleanupOrphan is Cleanup without a running Manager (used by doctor).
-func CleanupOrphan(ctx context.Context, st *store.Store, eng Engine, id string) error {
+// CleanupOrphan is Cleanup without a running Manager: `icaro doctor --fix`
+// runs it in the CLI process against the store, which may be shared with
+// a running daemon. So it claims the session (orphaned -> stopped) before
+// it touches the container and skips a session that is not orphaned any
+// more, such as one the daemon re-attached or restarted since doctor
+// listed it. It reports whether it cleaned the session up.
+func CleanupOrphan(ctx context.Context, st *store.Store, eng Engine, id string) (bool, error) {
 	row, err := st.GetSession(ctx, id)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if row.Status != StatusOrphaned {
+		return false, nil
+	}
+	if ok, err := st.TransitionSession(ctx, id, StatusStopped, StatusOrphaned); err != nil || !ok {
+		return false, err
 	}
 	if row.ContainerID != "" {
 		if err := eng.RemoveContainer(ctx, row.ContainerID); err != nil {
-			return err
+			// Give it back to doctor so a retry finds it.
+			_, _ = st.TransitionSession(ctx, id, StatusOrphaned, StatusStopped)
+			return false, err
 		}
 	}
 	if proj, err := st.GetProject(ctx, row.ProjectID); err == nil {
@@ -778,7 +980,7 @@ func CleanupOrphan(ctx context.Context, st *store.Store, eng Engine, id string) 
 	}
 	row.ContainerID, row.Status = "", StatusStopped
 	row.Error = "cleaned up after: " + row.Error
-	return st.UpdateSession(ctx, row)
+	return st.UpdateSessionIf(ctx, row, StatusStopped)
 }
 
 func short(id string) string {
@@ -799,32 +1001,68 @@ func toSession(r *store.SessionRow) *Session {
 	}
 }
 
-// registry holds per-session stop functions, owned by one goroutine.
-type registry struct {
-	ops chan func(map[string]func())
+// owned is a map owned by one goroutine; callers send it operations
+// instead of sharing it under a mutex.
+type owned[V any] struct {
+	ops chan func(map[string]V)
 }
 
-func newRegistry() *registry {
-	r := &registry{ops: make(chan func(map[string]func()))}
+func newOwned[V any]() *owned[V] {
+	o := &owned[V]{ops: make(chan func(map[string]V))}
 	go func() {
-		m := map[string]func(){}
-		for op := range r.ops {
+		m := map[string]V{}
+		for op := range o.ops {
 			op(m)
 		}
 	}()
-	return r
+	return o
 }
 
-func (r *registry) put(id string, stop func()) {
-	done := make(chan func())
-	r.ops <- func(m map[string]func()) { done <- m[id]; m[id] = stop }
-	if old := <-done; old != nil {
-		old()
+// do runs fn on the owning goroutine and waits for it.
+func (o *owned[V]) do(fn func(map[string]V)) {
+	done := make(chan struct{})
+	o.ops <- func(m map[string]V) { fn(m); close(done) }
+	<-done
+}
+
+// memServer is a registered memory MCP server; its pointer identifies
+// one registration.
+type memServer struct{ stop func() }
+
+// registry holds the per-session memory MCP servers.
+type registry struct{ o *owned[*memServer] }
+
+func newRegistry() *registry { return &registry{o: newOwned[*memServer]()} }
+
+// put registers stop for id, stopping the server it replaces.
+func (r *registry) put(id string, stop func()) *memServer {
+	s := &memServer{stop: stop}
+	var old *memServer
+	r.o.do(func(m map[string]*memServer) { old, m[id] = m[id], s })
+	if old != nil {
+		old.stop()
 	}
+	return s
 }
 
+// take unregisters id and returns its stop function (nil if none).
 func (r *registry) take(id string) func() {
-	done := make(chan func())
-	r.ops <- func(m map[string]func()) { f := m[id]; delete(m, id); done <- f }
-	return <-done
+	var s *memServer
+	r.o.do(func(m map[string]*memServer) { s = m[id]; delete(m, id) })
+	if s == nil {
+		return nil
+	}
+	return s.stop
+}
+
+// takeIf unregisters id only while s is its registration.
+func (r *registry) takeIf(id string, s *memServer) bool {
+	ok := false
+	r.o.do(func(m map[string]*memServer) {
+		if m[id] == s {
+			delete(m, id)
+			ok = true
+		}
+	})
+	return ok
 }

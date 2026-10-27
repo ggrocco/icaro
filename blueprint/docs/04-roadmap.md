@@ -65,7 +65,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 Open spikes:
 
 - S1: macOS file propagation.
-- S4: every agent CLI authenticates from the seeded home alone. This needs real logins.
+- S4: every agent CLI authenticates from the seeded home alone, and accepts the placeholder key and base URL of an `inject` profile ([ADR 0028](adr/0028-credential-injection.md)) without prompting or calling paths outside the allowlist. This needs real logins.
 - S5: microVM isolation (optional).
 - S7: `.test` resolution with VPNs.
 - S8: manifests against the live APIs.

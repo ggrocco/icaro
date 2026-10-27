@@ -102,3 +102,41 @@ func TestProjectsAndSessions(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateSessionIf(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, s *Store) {
+		ctx := context.Background()
+		r := &SessionRow{Kind: "agent", Profile: "claude", Status: "creating"}
+		if err := s.CreateSession(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		// A stop lands while the start is still creating the container.
+		if ok, err := s.TransitionSession(ctx, r.ID, "stopped", "creating", "running"); err != nil || !ok {
+			t.Fatalf("stop: %v %v", ok, err)
+		}
+		r.Status, r.ContainerID = "running", "c1"
+		if ok, err := s.UpdateSessionIf(ctx, r, "creating"); err != nil || ok {
+			t.Fatalf("the start must not overwrite the stop: %v %v", ok, err)
+		}
+		if got, _ := s.GetSession(ctx, r.ID); got.Status != "stopped" || got.ContainerID != "" {
+			t.Fatalf("%+v", got)
+		}
+		r.Status = "queued"
+		if ok, err := s.UpdateSessionIf(ctx, r, "stopped", "error"); err != nil || !ok {
+			t.Fatalf("matching status: %v %v", ok, err)
+		}
+		if got, _ := s.GetSession(ctx, r.ID); got.Status != "queued" || got.ContainerID != "c1" {
+			t.Fatalf("%+v", got)
+		}
+		if _, err := s.UpdateSessionIf(ctx, r); err == nil {
+			t.Fatal("no expected status")
+		}
+		if ok, err := s.UpdateSessionIf(ctx, &SessionRow{ID: "gone"}, "queued"); err != nil || ok {
+			t.Fatalf("missing row: %v %v", ok, err)
+		}
+		_ = s.Close()
+		if _, err := s.UpdateSessionIf(ctx, r, "queued"); err == nil {
+			t.Fatal("closed store")
+		}
+	})
+}

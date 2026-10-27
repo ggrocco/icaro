@@ -39,6 +39,9 @@ type IngestReport struct {
 	Unchanged int    `json:"unchanged"`
 	Removed   int    `json:"removed"`
 	Skipped   int    `json:"skipped"`
+	// Excluded counts files left out because they may hold secrets: dotfiles,
+	// key material and files git ignores.
+	Excluded int `json:"excluded"`
 }
 
 var skipDirs = map[string]bool{
@@ -51,6 +54,16 @@ var languages = map[string]string{
 	".go": "go", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
 	".py": "python", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".json": "json", ".sql": "sql", ".sh": "shell",
 	".rs": "rust", ".java": "java", ".rb": "ruby", ".css": "css", ".html": "html", ".toml": "toml",
+}
+
+// ingestFormat versions what ingest stores of a file. It is part of the
+// content hash, so bumping it (new redaction rules) re-indexes unchanged
+// files once instead of keeping what an older ingest stored.
+const ingestFormat = "2"
+
+func ingestHash(content []byte) string {
+	sum := sha256.Sum256(append([]byte(ingestFormat+"\x00"), content...))
+	return hex.EncodeToString(sum[:])
 }
 
 // stableID makes ingest idempotent: the same fact always gets the same id.
@@ -137,6 +150,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		return nil, err
 	}
 	defer func() { _ = fsRoot.Close() }()
+	listed, listedDirs, inGit := gitListed(ctx, abs)
 	files := 0
 	walkErr := filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -145,13 +159,22 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		inRoot, _ := filepath.Rel(abs, p)
+		inRoot = filepath.ToSlash(inRoot)
 		if d.IsDir() {
 			if p != abs && (skipDirs[d.Name()] || (strings.HasPrefix(d.Name(), ".") && d.Name() != ".github")) {
 				return fs.SkipDir
 			}
+			if p != abs && inGit && !listedDirs[inRoot] {
+				return fs.SkipDir // ignored by git, or empty
+			}
 			return nil
 		}
 		if !d.Type().IsRegular() {
+			return nil
+		}
+		if sensitiveFile(d.Name()) || (inGit && !listed[inRoot]) {
+			rep.Excluded++
 			return nil
 		}
 		if files >= opts.MaxFiles {
@@ -162,8 +185,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 			rep.Skipped++
 			return nil
 		}
-		inRoot, _ := filepath.Rel(abs, p)
-		content, err := fsRoot.ReadFile(inRoot)
+		content, err := fsRoot.ReadFile(filepath.FromSlash(inRoot))
 		if err != nil || isBinary(content) {
 			rep.Skipped++
 			return nil
@@ -171,8 +193,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		files++
 		relp, _ := filepath.Rel(base, p)
 		rel := filepath.ToSlash(relp)
-		sum := sha256.Sum256(content)
-		hash := hex.EncodeToString(sum[:])
+		hash := ingestHash(content)
 		fileID := stableID(scope.ProjectID, KindFile, rel)
 		if hashByID[fileID] == hash {
 			rep.Unchanged++
@@ -183,7 +204,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		}
 		lang := languages[strings.ToLower(filepath.Ext(p))]
 		facts := extract(rel, lang, content)
-		fileRow := newRow(KindFile, rel, rel, snippet(content, 2048), rel, 0, hash,
+		fileRow := newRow(KindFile, rel, rel, redactText(snippet(content, 2048), lang), rel, 0, hash,
 			map[string]any{"size": info.Size(), "language": lang, "lines": bytes.Count(content, []byte("\n")) + 1})
 		fileRow.Link = "file://" + filepath.ToSlash(p)
 		fb := bundle(fileRow)
@@ -192,7 +213,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		}
 		var symBundles []store.MemoryBundle
 		for _, s := range facts.symbols {
-			row := newRow(KindSymbol, rel+"#"+s.name, s.name, s.doc, rel, s.line, hash, map[string]any{"language": lang, "kind": s.kind})
+			row := newRow(KindSymbol, rel+"#"+s.name, s.name, redactText(s.doc, lang), rel, s.line, hash, map[string]any{"language": lang, "kind": s.kind})
 			row.Link = fmt.Sprintf("file://%s#L%d", filepath.ToSlash(p), s.line)
 			sb := bundle(row)
 			sb.Edges = append(sb.Edges, store.MemoryEdge{ToRef: fileRow.ID, Kind: "defined_in"})
@@ -205,7 +226,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 		pending = append(append(pending, fb), symBundles...)
 		rep.Files++
 		if adr, ok := parseADR(rel, content); ok {
-			row := newRow(KindADR, rel, adr.title, snippet(content, 16<<10), rel, 1, hash, map[string]any{"status": adr.status})
+			row := newRow(KindADR, rel, adr.title, redactText(snippet(content, 16<<10), "markdown"), rel, 1, hash, map[string]any{"status": adr.status})
 			row.Link = fileRow.Link
 			ab := bundle(row)
 			ab.Edges = append(ab.Edges, store.MemoryEdge{ToRef: fileRow.ID, Kind: "defined_in"})
@@ -233,7 +254,7 @@ func (e *Engine) Ingest(ctx context.Context, scope Scope, root string, opts Inge
 				if _, ok := hashByID[id]; ok {
 					continue
 				}
-				row := newRow(KindCommit, c.hash, c.subject, strings.TrimSpace(c.body+"\n\nAuthor: "+c.author), "commit:"+c.hash, 0, c.hash,
+				row := newRow(KindCommit, c.hash, redactText(c.subject, ""), redactText(strings.TrimSpace(c.body+"\n\nAuthor: "+c.author), ""), "commit:"+c.hash, 0, c.hash,
 					map[string]any{"author": c.author, "date": c.date.Format(time.RFC3339), "files": c.files})
 				row.Link = "commit:" + c.hash
 				b := bundle(row)

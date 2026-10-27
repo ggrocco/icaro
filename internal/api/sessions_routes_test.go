@@ -9,6 +9,7 @@ import (
 
 	"icaro/internal/creds"
 	"icaro/internal/session"
+	"icaro/internal/store"
 )
 
 func TestSessionRoutes(t *testing.T) {
@@ -113,6 +114,21 @@ func TestProfileLoginRoute(t *testing.T) {
 	// A login token over TCP needs admin scope.
 	if code, _ := doReq(t, f.tcp.Client(), "POST", f.tcp.URL+"/api/v1/profiles/claude/login", nil, nil); code != 401 {
 		t.Fatalf("tcp: %d", code)
+	}
+	// A session that will read the seed blocks the login, unless forced.
+	proj, err := f.st.UpsertProject(f.ctx, &store.Project{Name: "p", RootPath: f.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := &store.SessionRow{Kind: session.KindAgent, ProjectID: proj.ID, Profile: "claude", Branch: "b", WorktreePath: "/w", Status: session.StatusQueued}
+	if err := f.st.CreateSession(f.ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.call("POST", "/api/v1/profiles/claude/login", nil); code != 409 || !strings.Contains(body, row.ID) {
+		t.Fatalf("busy profile: %d %s", code, body)
+	}
+	if code, body := f.call("POST", "/api/v1/profiles/claude/login?force=true", nil); code != 200 {
+		t.Fatalf("forced login: %d %s", code, body)
 	}
 }
 

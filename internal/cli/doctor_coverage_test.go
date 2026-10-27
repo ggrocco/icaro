@@ -12,7 +12,7 @@ import (
 // doctorTableChecks maps each row of the doctor table in
 // blueprint/docs/03-security.md to the check that covers it. A new row
 // without an entry here fails TestDoctorCoversSecurityTable.
-var doctorTableChecks = map[string]string{
+var doctorTableChecks = map[string]string{ //nolint:gosec // doctor check names, not credentials
 	"Docker missing/inactive":             "docker",
 	"Orphaned lock/socket/PID":            "daemon lock/socket/pid",
 	"Orphaned sessions":                   "orphaned sessions",
@@ -23,6 +23,7 @@ var doctorTableChecks = map[string]string{
 	"Local DNS for `.test` misconfigured": "preview DNS",
 	"Missing webhook secret":              "webhook secrets",
 	"Dangerous compose":                   "preview compose lint",
+	"Injected credential unusable":        "credential injection",
 }
 
 func TestDoctorCoversSecurityTable(t *testing.T) {
@@ -80,5 +81,20 @@ func TestDoctorCoversSecurityTable(t *testing.T) {
 		if !found {
 			t.Errorf("row %q: no registered check named %q (have %v)", row, want, names)
 		}
+	}
+}
+
+// TestDoctorUnbuildableDockerClient is the regression test for the typed-nil
+// panic: a docker.host the client cannot parse used to crash doctor with a
+// nil pointer dereference instead of reporting an error.
+func TestDoctorUnbuildableDockerClient(t *testing.T) {
+	daemonEnv(t)
+	t.Setenv("ICARO_DOCKER__HOST", "notaurl")
+	out, err := runCLI(t, "", "doctor")
+	if err == nil || !strings.Contains(err.Error(), "doctor found errors") {
+		t.Fatalf("err = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "cannot build a Docker client") {
+		t.Errorf("docker check does not report the client error:\n%s", out)
 	}
 }

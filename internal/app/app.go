@@ -110,7 +110,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	a.Service = service.New(service.Options{Store: st, Key: key, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Log: log})
 	a.API = api.New(a.Service, log)
 
-	a.checks = append(a.checks, BaseChecks(cfg, st, eng)...)
+	a.checks = append(a.checks, BaseChecks(cfg, st, eng, nil)...)
 	for _, w := range sortedWirers() {
 		if err := w.fn(ctx, a); err != nil {
 			_ = a.Close()
@@ -237,11 +237,18 @@ func (d *dockerGated) Run(ctx context.Context) error {
 	}
 }
 
-// BaseChecks are the Phase 0 doctor checks.
-func BaseChecks(cfg *config.Config, st *store.Store, eng interface{ Ping(context.Context) error }) []doctor.Check {
+// BaseChecks are the Phase 0 doctor checks. engErr is the error from
+// building the Docker client, when that failed; eng must then be a nil
+// interface (never a typed nil pointer) and the docker check reports it.
+func BaseChecks(cfg *config.Config, st *store.Store, eng interface{ Ping(context.Context) error }, engErr error) []doctor.Check {
 	l := cfg.Layout()
 	checks := []doctor.Check{doctor.DaemonCheck(l), doctor.PermissionsCheck(l)}
-	if eng != nil {
+	switch {
+	case engErr != nil:
+		checks = append(checks, doctor.Func("docker", func(context.Context) doctor.Result {
+			return doctor.Result{Severity: doctor.Error, Detail: "cannot build a Docker client: " + engErr.Error() + "; check docker.host / DOCKER_HOST"}
+		}))
+	case eng != nil:
 		checks = append(checks, doctor.Func("docker", func(ctx context.Context) doctor.Result {
 			if err := eng.Ping(ctx); err != nil {
 				return doctor.Result{Severity: doctor.Error, Detail: "docker is not reachable: " + err.Error() + "; " + dockerHint()}

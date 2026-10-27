@@ -61,8 +61,6 @@ env:
   TOKEN: ${{ secrets.gh_token }}
 triggers:
   - type: manual
-  - type: cron
-    cron: "0 9 * * 1-5"
   - integration: github
     event: pull_request.opened
     filter: trigger.branch != 'main'
@@ -114,7 +112,7 @@ func TestParseValid(t *testing.T) {
 	if s.Name != "review-pr" || len(s.Steps) != 5 || s.Steps[3].Kind() != KindUses || s.ConcurrencyPolicy() != ConcurrencyQueue {
 		t.Fatalf("decoded: %+v", s)
 	}
-	if got := s.CronTriggers(); len(got) != 1 || len(s.IntegrationTriggers()) != 1 {
+	if got := s.CronTriggers(); len(got) != 0 || len(s.IntegrationTriggers()) != 1 {
 		t.Fatalf("triggers %v", got)
 	}
 	req, opt := TriggerFields(s)
@@ -379,5 +377,119 @@ func TestCapture(t *testing.T) {
 	}
 	if c, _ := ParseCapture("stdout:last-line"); c.Kind != CaptureStdoutLast {
 		t.Fatal("last-line kind")
+	}
+}
+
+// A cron run carries only CronFields, so a workflow with a cron trigger
+// must not read any other trigger field unguarded: its cron runs would
+// all fail.
+func TestCronTriggerFields(t *testing.T) {
+	src := `
+version: 1
+name: cron-fields
+triggers:
+  - type: cron
+    cron: "0 9 * * 1-5"
+  - type: manual
+steps:
+  - id: aa
+    image: x
+    command: echo ${{ trigger.scheduled_at }} ${{ trigger.late }}
+    env:
+      R: ${{ trigger.repo }}
+      F: ${{ trigger.fired_a }}
+      G: ${{ has(trigger.repo) && trigger.repo == 'x' }}
+`
+	s, issues := parseT(t, src, Options{})
+	mustHave(t, issues, "/steps/0/env/R", "a cron trigger does not provide trigger.repo", "put the cron trigger in its own workflow")
+	mustHave(t, issues, "/steps/0/env/F", "a cron trigger does not provide trigger.fired_a", "did you mean trigger.fired_at?")
+	for _, is := range issues {
+		if is.Path == "/steps/0/command" || is.Path == "/steps/0/env/G" {
+			t.Fatalf("unexpected: %s", is)
+		}
+	}
+	if got := s.CronTriggers(); len(got) != 1 {
+		t.Fatalf("cron triggers %v", got)
+	}
+}
+
+// repository ref and revision are templates like any other field, minus
+// secrets, and a literal git option is refused.
+func TestRepositoryFields(t *testing.T) {
+	src := `
+version: 1
+name: repo-rules
+steps:
+  - id: aa
+    image: x
+    outputs: { sha: json:sha }
+  - id: bb
+    image: x
+    repository: { ref: "${{ trigger.repo }}", revision: "${{ steps.aa.outputs.sha }}" }
+  - id: cc
+    image: x
+    needs: [aa]
+    repository: { ref: "https://h/${{ secrets.tok }}", revision: "${{ steps.aa.outputs.sah }}" }
+  - id: dd
+    image: x
+    repository: { ref: "--upload-pack=touch /tmp/x", revision: "a b" }
+  - id: ee
+    image: x
+    repository: { ref: "${{ tigger.repo }}", revision: "${{ lower( }}" }
+`
+	s, issues := parseT(t, src, Options{})
+	mustHave(t, issues, "/steps/1/repository/revision", "not an ancestor of step bb", `add "aa" to needs`)
+	mustHave(t, issues, "/steps/2/repository/ref", "repository cannot read secrets", "git access")
+	mustHave(t, issues, "/steps/2/repository/revision", `declares no output "sah"`, "")
+	mustHave(t, issues, "/steps/3/repository/ref", "git would read as an option", "")
+	mustHave(t, issues, "/steps/3/repository/revision", "whitespace", "")
+	mustHave(t, issues, "/steps/4/repository/ref", `unknown name "tigger"`, "")
+	mustHave(t, issues, "/steps/4/repository/revision", "invalid expression", "")
+	if req, _ := TriggerFields(s); !reflect.DeepEqual(req, []string{"repo"}) {
+		t.Fatalf("required trigger fields %v", req)
+	}
+	if err := CheckRepoValue("https://github.com/acme/app.git"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Integration credentials (host-bound, or named after an installed
+// integration) are not interpolable, and no condition may read a secret.
+func TestSecretRestrictions(t *testing.T) {
+	src := `
+version: 1
+name: secret-rules
+env:
+  GH: ${{ secrets['github.token'] }}
+steps:
+  - id: aa
+    image: x
+    env:
+      KEY: ${{ secrets.deploy_key }}
+      OK: ${{ secrets.plain }}
+      HOOK: ${{ has(secrets['slack.webhook_secret']) }}
+    when: secrets.plain == 'x'
+  - id: bb
+    image: x
+    when: ${{ has(secrets.plain) && trigger.go }}
+`
+	_, issues := parseT(t, src, Options{Catalog: fakeCatalog{}, SecretBound: func(n string) bool { return n == "deploy_key" }})
+	mustHave(t, issues, "/env/GH", `secret "github.token" is an integration credential`, "call github through its uses: actions")
+	mustHave(t, issues, "/steps/0/env/KEY", `secret "deploy_key" is an integration credential`, "uses: actions")
+	mustHave(t, issues, "/steps/0/env/HOOK", `secret "slack.webhook_secret" is an integration credential`, "call slack")
+	mustHave(t, issues, "/steps/0/when", "when cannot read secrets", "leaks")
+	mustHave(t, issues, "/steps/1/when", "when cannot read secrets", "")
+	for _, is := range issues {
+		if is.Path == "/steps/0/env/OK" {
+			t.Fatalf("a container secret is allowed: %s", is)
+		}
+	}
+	// Without a catalog or bindings only the when rule applies.
+	_, issues = parseT(t, src, Options{})
+	if len(issues) != 2 {
+		t.Fatalf("issues without environment knowledge: %v", issues)
+	}
+	if !IntegrationCredential("x", true, nil) || IntegrationCredential("a.b", false, []string{"c"}) || IntegrationCredentialHint("plain") == "" {
+		t.Fatal("IntegrationCredential")
 	}
 }

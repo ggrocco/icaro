@@ -21,7 +21,7 @@ func TestAgentSpecBuild(t *testing.T) {
 	spec, ns := AgentSpec{
 		Name: "s", Image: "img@sha256:x", User: "1:2", Workspace: "/w", GitDir: git, Home: HomeMount{Volume: "v"},
 		IcaroDir: "/i", Egress: Attachment{Network: "n", Env: []string{"HTTPS_PROXY=p"}},
-		Extra: []Mount{{Source: "/h", Target: "/home/host", Masks: []string{"/home/host/.ssh"}}},
+		Extra: []Mount{{Source: "/h", Target: "/home/host", Masks: []Mask{{Target: "/home/host/.ssh"}, {Target: "/home/host/.netrc", File: true}}}},
 	}.Build()
 	if ns.Network != "n" || string(spec.HostConfig.NetworkMode) != "n" || spec.WorkingDir != WorkspacePath || spec.User != "1:2" {
 		t.Fatalf("%+v %+v", spec, ns)
@@ -30,10 +30,17 @@ func TestAgentSpecBuild(t *testing.T) {
 	for _, m := range spec.HostConfig.Mounts {
 		got = append(got, string(m.Type)+":"+m.Target+":"+map[bool]string{true: "ro", false: "rw"}[m.ReadOnly])
 	}
-	want := []string{"bind:/workspace:rw", "bind:" + git + ":rw", "bind:" + git + "/hooks:ro", "bind:" + git + "/config:ro",
-		"volume:/home/icaro:rw", "bind:/icaro:rw", "bind:/home/host:rw", "tmpfs:/home/host/.ssh:rw"}
+	want := []string{"bind:/workspace:rw", "bind:" + git + ":rw", "bind:" + git + "/config:ro", "bind:" + git + "/hooks:ro",
+		"volume:/home/icaro:rw", "bind:/icaro:rw", "bind:/home/host:rw", "tmpfs:/home/host/.ssh:rw", "bind:/home/host/.netrc:ro"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("mounts:\n%v\nwant\n%v", got, want)
+	}
+	for _, m := range spec.HostConfig.Mounts {
+		// The container user (never root) must be able to write in a
+		// masked directory; Docker's default tmpfs mode does not allow it.
+		if m.Target == "/home/host/.ssh" && (m.TmpfsOptions == nil || m.TmpfsOptions.Mode != 0o777) {
+			t.Fatalf("directory mask mode: %+v", m.TmpfsOptions)
+		}
 	}
 	if _, ok := spec.HostConfig.Tmpfs["/home"]; ok {
 		t.Fatal("profile home replaces tmpfs /home")

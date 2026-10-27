@@ -32,7 +32,14 @@ func newFakeCompose() *fakeCompose {
 	return &fakeCompose{ups: map[string]int{}, downs: map[string]int{}, running: map[string]int{}, files: map[string][]string{}}
 }
 
-func (f *fakeCompose) Config(_ context.Context, _ string, files []string) ([]byte, error) {
+// filesFor returns the compose files the last up of project got.
+func (c *fakeCompose) filesFor(project string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.files[project]...)
+}
+
+func (f *fakeCompose) Config(_ context.Context, _, _ string, files []string) ([]byte, error) {
 	return os.ReadFile(files[0])
 }
 
@@ -82,6 +89,14 @@ type fakeEngine struct {
 }
 
 func newFakeEngine() *fakeEngine { return &fakeEngine{networks: map[string]bool{}} }
+
+// snapshot reads the counters under the lock: the manager's proxy loop
+// writes them from its own goroutine.
+func (e *fakeEngine) snapshot() (network bool, creates, restarts int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.networks[Network], e.creates, e.restarts
+}
 
 func (e *fakeEngine) EnsureImage(context.Context, string) error { return nil }
 func (e *fakeEngine) EnsureNetwork(_ context.Context, n string, _ map[string]string) (bool, error) {
@@ -192,10 +207,10 @@ func TestAddSyncAndNoRestartWithoutConfigChange(t *testing.T) {
 	if p.Status != store.PreviewRunning || p.Hostname != "feature-x.localhost" || p.URL != "http://feature-x.localhost:18780" || p.Port != 8000 || p.Service != "web" {
 		t.Fatalf("%+v", p)
 	}
-	if e.compose.count(e.compose.ups, p.ComposeProject) != 1 || !e.engine.networks[Network] || e.engine.creates != 1 {
+	if network, creates, _ := e.engine.snapshot(); e.compose.count(e.compose.ups, p.ComposeProject) != 1 || !network || creates != 1 {
 		t.Fatal("expected one up, the network and the proxy")
 	}
-	files := e.compose.files[p.ComposeProject]
+	files := e.compose.filesFor(p.ComposeProject)
 	if len(files) != 2 || files[0] != filepath.Join(p.WorktreePath, "compose.yaml") {
 		t.Fatalf("user compose must be passed unchanged: %v", files)
 	}
@@ -291,12 +306,22 @@ func TestDangerousComposeIsBlockedAndExplained(t *testing.T) {
 	if p.Status != store.PreviewBlocked || strings.Contains(p.Error, "web/privileged:") {
 		t.Fatalf("partial allow: %+v", p)
 	}
-	if err := e.m.Allow(e.ctx, dir, []string{"web/volumes/0"}, "test"); err != nil {
+	if err := e.m.Allow(e.ctx, dir, []string{"web/" + mountID(resolvedSock(t), "/var/run/docker.sock", false)}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	p, _ = e.m.Add(e.ctx, AddRequest{Path: dir, Wait: true, Force: true})
 	if p.Status != store.PreviewRunning {
 		t.Fatalf("all findings allowed: %+v", p)
+	}
+	// The allowed mount is swapped for a worse one in the same position:
+	// the old allowance does not carry over (ADR 0018).
+	worse := "services:\n  web:\n    image: x\n    privileged: true\n    labels: {icaro.preview.port: \"80\"}\n    volumes: [\"/:/var/run/docker.sock\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(worse), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = e.m.Add(e.ctx, AddRequest{Path: dir, Wait: true, Force: true})
+	if p.Status != store.PreviewBlocked || !strings.Contains(p.Error, "host root") {
+		t.Fatalf("a changed mount must be blocked again: %+v", p)
 	}
 }
 
@@ -378,11 +403,11 @@ func TestMacOSPollingAndProxyKick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	override, _ := os.ReadFile(e.compose.files[p.ComposeProject][1])
+	override, _ := os.ReadFile(e.compose.filesFor(p.ComposeProject)[1])
 	if !strings.Contains(string(override), "CHOKIDAR_USEPOLLING") {
 		t.Fatal("macOS override must enable polling watch")
 	}
-	if e.engine.restarts == 0 {
+	if _, _, restarts := e.engine.snapshot(); restarts == 0 {
 		t.Fatal("macOS must kick the proxy after a route change")
 	}
 }

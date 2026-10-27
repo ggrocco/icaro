@@ -19,6 +19,7 @@ import (
 	"icaro/internal/container/docker"
 	"icaro/internal/container/sandbox"
 	"icaro/internal/expr"
+	"icaro/internal/logs"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 	"icaro/internal/workflow/events"
@@ -105,11 +106,40 @@ func (rx *runExec) render(ctx context.Context, st *workflow.StepSpec, env expr.E
 	}
 	r.dir = rx.ws.Dir
 	if st.Repository != nil {
-		if r.dir, err = rx.e.d.Sessions.RepoWorktree(ctx, rx.ws.SessionID, st.Repository.Ref, st.Repository.Revision); err != nil {
-			return nil, fmt.Errorf("repository %s: %w", st.Repository.Ref, err)
+		ref, rev, err := rx.renderRepository(st.Repository, env)
+		if err != nil {
+			return nil, err
+		}
+		if r.dir, err = rx.e.d.Sessions.RepoWorktree(ctx, rx.ws.SessionID, ref, rev); err != nil {
+			return nil, fmt.Errorf("repository %s: %w", ref, err)
 		}
 	}
 	return r, nil
+}
+
+// renderRepository interpolates a step's repository ref and revision and
+// checks the result: a trigger payload must not turn either into a git
+// option, and a secret must not end up in the stored ref.
+func (rx *runExec) renderRepository(repo *workflow.RepositoryRef, env expr.Env) (ref, rev string, err error) {
+	if ref, err = expr.RenderString(repo.Ref, env); err != nil {
+		return "", "", fmt.Errorf("repository.ref: %w", err)
+	}
+	if rev, err = expr.RenderString(repo.Revision, env); err != nil {
+		return "", "", fmt.Errorf("repository.revision: %w", err)
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", "", errors.New("repository.ref is empty")
+	}
+	for _, f := range []struct{ name, val string }{{"ref", ref}, {"revision", rev}} {
+		if rx.redact.RedactString(f.val) != f.val {
+			return "", "", fmt.Errorf("repository.%s contains a secret value", f.name)
+		}
+		if err := workflow.CheckRepoValue(f.val); err != nil {
+			return "", "", fmt.Errorf("repository.%s: %w", f.name, err)
+		}
+	}
+	return ref, rev, nil
 }
 
 func envKey(k string) string {
@@ -324,7 +354,7 @@ func (rx *runExec) captureOutputs(ctx context.Context, st *workflow.StepSpec, co
 			if err != nil {
 				return nil, fmt.Errorf("output %s: %w", key, err)
 			}
-			outputs[key] = v
+			outputs[key] = redactValue(rx.redact, v)
 		case workflow.CaptureStdout, workflow.CaptureStdoutLast:
 			if lc.stdoutOver {
 				return nil, fmt.Errorf("output %s: stdout exceeds %d bytes", key, rx.e.cfg.OutputLimit)
@@ -404,6 +434,29 @@ func (rx *runExec) readWorkspaceFile(dir, rel string) (string, error) {
 		return "", err
 	}
 	return rx.redact.RedactString(strings.TrimSpace(string(b))), nil
+}
+
+// redactValue applies the run's redactor to every string inside a
+// JSON value, object keys included: captured values pass through the same
+// redactor as logs (ADR 0013), however deep the secret is nested.
+func redactValue(r *logs.Redactor, v any) any {
+	switch x := v.(type) {
+	case string:
+		return r.RedactString(x)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[r.RedactString(k)] = redactValue(r, val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = redactValue(r, val)
+		}
+		return out
+	}
+	return v
 }
 
 func mapKeys[V any](m map[string]V) []string {

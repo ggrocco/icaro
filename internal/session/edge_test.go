@@ -442,14 +442,32 @@ func TestLifecycleEdgeCases(t *testing.T) {
 	if err != nil || restarted.Status != StatusRunning || restarted.ContainerID == c.ContainerID {
 		t.Fatalf("%+v %v", restarted, err)
 	}
-	// Cleanup surfaces engine errors.
+	// Cleanup leaves a session that is no longer orphaned alone: doctor
+	// may have listed it before the daemon restarted it.
+	if ok, err := CleanupOrphan(ctx, e.st, e.eng, c.ID); err != nil || ok {
+		t.Fatalf("cleanup of a running session: %v %v", ok, err)
+	}
+	if st, _ := e.eng.Inspect(ctx, restarted.ContainerID); !st.Running {
+		t.Fatal("cleanup removed the container of a running session")
+	}
+	if got, _ := e.m.Get(ctx, c.ID); got.Status != StatusRunning || got.ContainerID != restarted.ContainerID {
+		t.Fatalf("%+v", got)
+	}
+	// Cleanup surfaces engine errors and leaves the orphan for a retry.
+	e.eng.kill(restarted.ContainerID)
+	e.m.probe(ctx)
+	e.waitStatus(t, c.ID, StatusOrphaned)
 	e.eng.fail("remove", errBoom)
 	if err := e.m.Cleanup(ctx, c.ID); !errors.Is(err, errBoom) {
 		t.Fatal(err)
 	}
+	e.waitStatus(t, c.ID, StatusOrphaned)
 	e.eng.fail("remove", nil)
 	if err := e.m.Cleanup(ctx, c.ID); err != nil {
 		t.Fatal(err)
+	}
+	if got := e.waitStatus(t, c.ID, StatusStopped); got.ContainerID != "" || !strings.Contains(got.Error, "cleaned up after") {
+		t.Fatalf("%+v", got)
 	}
 
 	// Remove keeps the worktree on request.

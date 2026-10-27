@@ -266,10 +266,17 @@ func (r *Registry) packDirs() []string {
 }
 
 // manifestFiles lists manifest paths (relative) at the pack root and
-// under manifests/.
+// under manifests/. Only regular files count, and manifests/ must be a
+// real directory: a symlink there could pull in files from outside the
+// pack, which the permission summary never showed.
 func manifestFiles(dir string) []string {
 	var out []string
 	for _, sub := range []string{"", "manifests"} {
+		if sub != "" {
+			if fi, err := os.Lstat(filepath.Join(dir, sub)); err != nil || !fi.IsDir() {
+				continue
+			}
+		}
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if err != nil {
 			continue

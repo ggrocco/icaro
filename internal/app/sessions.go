@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"icaro/internal/api"
@@ -10,7 +11,9 @@ import (
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
 	"icaro/internal/creds"
+	"icaro/internal/crypto"
 	"icaro/internal/doctor"
+	"icaro/internal/memory"
 	"icaro/internal/secrets"
 	"icaro/internal/session"
 	"icaro/internal/store"
@@ -37,22 +40,49 @@ func init() {
 	})
 }
 
+// MemorySocketCheck warns when ICARO_HOME is so long that a session's
+// memory MCP socket path would exceed the Unix socket limit: such
+// sessions would start without shared memory (ADR 0019).
+func MemorySocketCheck(cfg *config.Config) doctor.Check {
+	return doctor.Func("memory socket path", func(context.Context) doctor.Result {
+		// Session ids are 26-character ULIDs.
+		p := session.MemorySocketPath(cfg.Layout(), strings.Repeat("0", 26))
+		if len(p) >= memory.MaxSocketPath {
+			return doctor.Result{Severity: doctor.Warning, Detail: fmt.Sprintf(
+				"session memory sockets (%s) are %d bytes, over the %d-byte Unix socket limit, so sessions start without shared memory; use a shorter ICARO_HOME",
+				p, len(p), memory.MaxSocketPath-1)}
+		}
+		return doctor.Result{Severity: doctor.OK, Detail: fmt.Sprintf("%d of %d bytes", len(p), memory.MaxSocketPath-1)}
+	})
+}
+
 // SessionChecks are the Phase 1 doctor checks: the master key backend,
-// orphaned sessions and pinned images.
+// the memory socket path, credential injection (ADR 0028), orphaned
+// sessions and pinned images.
 func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []doctor.Check {
 	checks := []doctor.Check{doctor.Func("master key", func(ctx context.Context) doctor.Result {
-		_, info, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: cfg.Layout().Secrets(), Keyring: secrets.DefaultKeyring(nil)})
-		switch {
-		case err != nil:
+		dir := cfg.Layout().Secrets()
+		_, info, err := secrets.LoadMasterKey(ctx, secrets.KeyOptions{Dir: dir, Keyring: secrets.DefaultKeyring(nil)})
+		if err != nil {
 			return doctor.Result{Severity: doctor.Error, Detail: err.Error()}
-		case info.Warning != "":
-			return doctor.Result{Severity: doctor.Warning, Detail: info.Warning}
+		}
+		// Loading moves a plaintext key into a backend when one is
+		// available; one still on disk (no backend, or ICARO_MASTER_KEY
+		// in use) can decrypt every secret. This also covers the only
+		// case LoadMasterKey warns about.
+		if legacy := secrets.LegacyKeyPath(dir); fileExists(legacy) {
+			fix := secrets.LegacyKeyMigration
+			if info.Backend == secrets.BackendEnv {
+				fix = crypto.MasterKeyEnv + " is set, so the file is not used: delete it if it holds the same key, otherwise unset " + crypto.MasterKeyEnv + " and " + fix
+			}
+			return doctor.Result{Severity: doctor.Error, Detail: "a plaintext master key is on disk at " + legacy + "; " + fix}
 		}
 		return doctor.Result{Severity: doctor.OK, Detail: "stored in " + info.Backend}
-	})}
+	}), MemorySocketCheck(cfg)}
 	if st == nil {
 		return checks
 	}
+	checks = append(checks, InjectCheck(cfg, st))
 	checks = append(checks, doctor.Func("orphaned sessions", func(ctx context.Context) doctor.Result {
 		rows, err := st.ListSessions(ctx, store.SessionFilter{Statuses: []string{session.StatusOrphaned}})
 		if err != nil {
@@ -68,17 +98,27 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 		res := doctor.Result{Severity: doctor.Warning, Detail: fmt.Sprintf("%d orphaned: %s; `icaro session start <id>` re-attaches, --fix cleans up", len(rows), strings.Join(ids, ", "))}
 		if eng != nil {
 			res.Fix = func(ctx context.Context) (string, error) {
+				cleaned := 0
 				for _, r := range rows {
-					if err := session.CleanupOrphan(ctx, st, eng, r.ID); err != nil {
+					ok, err := session.CleanupOrphan(ctx, st, eng, r.ID)
+					if err != nil {
 						return "", err
 					}
+					if ok {
+						cleaned++
+					}
 				}
-				return fmt.Sprintf("cleaned up %d session(s); worktrees kept", len(rows)), nil
+				msg := fmt.Sprintf("cleaned up %d session(s); worktrees kept", cleaned)
+				if skipped := len(rows) - cleaned; skipped > 0 {
+					msg += fmt.Sprintf("; skipped %d no longer orphaned", skipped)
+				}
+				return msg, nil
 			}
 		}
 		return res
 	}))
 	if eng != nil {
+		checks = append(checks, container.EgressNetworkCheck(eng))
 		imgs := &container.Images{Engine: eng, Pins: st}
 		checks = append(checks, doctor.Func("pinned images", func(ctx context.Context) doctor.Result {
 			if err := eng.Ping(ctx); err != nil {
@@ -106,4 +146,9 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 		}))
 	}
 	return checks
+}
+
+func fileExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
 }

@@ -264,10 +264,16 @@ icaro integration webhook-tokens [flags]
 
 ## `icaro login`
 
-Log the profile's agent in once; the login seeds every session of the profile
+Log the profile's agent in once; the login seeds every session of the profile.
+
+The login rewrites the profile's home seed, which running sessions may be using, so it is refused while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.
 
 ```text
-icaro login PROFILE
+icaro login PROFILE [flags]
+```
+
+```text
+      --force   log in even while sessions of the profile use its home seed
 ```
 
 ## `icaro mcp`
@@ -635,6 +641,7 @@ icaro serve [flags]
 ```
 
 ```text
+      --allow-remote       let --listen bind a non-loopback address (plain HTTP; prefer a TLS reverse proxy to 127.0.0.1)
       --background         start the daemon detached and return once it answers
       --listen string      also listen on TCP (e.g. 127.0.0.1:8787); every TCP request needs an API token
       --log-level string   debug | info | warn | error (default "info")
@@ -689,7 +696,7 @@ Aliases: sessions
       --json   print JSON
 ```
 
-Subcommands: `attach` `create` `get` `list` `projects` `rm` `start` `stop`
+Subcommands: `attach` `create` `get` `list` `projects` `push` `rm` `start` `stop`
 
 ## `icaro session attach`
 
@@ -741,6 +748,20 @@ List projects (repositories with sessions)
 
 ```text
 icaro session projects
+```
+
+## `icaro session push`
+
+Push the session's own branch (icaro/NAME) to a remote configured in the repository, from the host, with your git credentials, so agent containers never hold any. Only that branch is pushed (no tags, no submodules); host git runs with hooks and fsmonitor disabled and the file transport refused, because the agent controlled the worktree. --force-with-lease overwrites the remote branch only while it still points where your remote-tracking ref says (fetch first); a plain force push is never done.
+
+```text
+icaro session push ID [flags]
+```
+
+```text
+      --force-with-lease   overwrite the remote branch if it still matches your remote-tracking ref
+      --remote string      name of a remote configured in the repository (default "origin")
+      --yes                do not ask before --force-with-lease
 ```
 
 ## `icaro session rm`
@@ -856,10 +877,14 @@ icaro token list
 
 ## `icaro token revoke`
 
-Revoke a token
+Revoke a token and end the browser sessions signed in with it
 
 ```text
-icaro token revoke NAME
+icaro token revoke NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro ui`
@@ -897,7 +922,8 @@ icaro update [flags]
 
 Parses the Claude Code transcripts in every profile home (and, with
 --host-claude, your own ~/.claude, read-only) into per-day, per-model token
-counts. Each row names its source and confidence. Costs come from a list-price
+counts. Each row names its source and confidence; rows whose transcript is
+gone come from saved snapshots (confidence "snapshot"). Costs come from a list-price
 table and are always estimates; unpriced models show no cost. Alerts fire when
 a day's estimated spend reaches usage.daily_limit_usd, in usage.timezone.
 
@@ -947,7 +973,11 @@ icaro workflow apply FILE
 Delete a workflow (runs are kept)
 
 ```text
-icaro workflow delete NAME
+icaro workflow delete NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro workflow disable`

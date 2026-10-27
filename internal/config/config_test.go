@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,13 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 	}
 	if len(cfg.Profiles["claude"].Egress) == 0 {
 		t.Fatal("claude profile must ship an egress allowlist")
+	}
+	// Shared ingest services anyone can send data to stay off the
+	// default allowlists.
+	for name, p := range DefaultProfiles() {
+		if slices.Contains(p.Egress, "sentry.io") {
+			t.Errorf("profile %s allows sentry.io by default", name)
+		}
 	}
 }
 
@@ -83,13 +91,45 @@ func TestValidate(t *testing.T) {
 	cfg.Profiles["bad name"] = ProfileConfig{}
 	cfg.Profiles["noegress"] = ProfileConfig{}
 	cfg.Profiles["url"] = ProfileConfig{Egress: []string{"https://x"}}
+	cfg.Profiles["inj"] = ProfileConfig{Egress: []string{}, Inject: map[string]string{"gemini": "k", "openai": "bad name", "anthropic": "ok-key"}}
 	cfg.Sessions.DefaultProfile = "nope"
 	cfg.Database.Driver = "mysql"
 	err = cfg.Validate()
-	for _, want := range []string{"version 99", "bad name", "noegress.egress is mandatory", "hostname", "default_profile", "mysql"} {
+	for _, want := range []string{"version 99", "bad name", "noegress.egress is mandatory", "hostname", "default_profile", "mysql",
+		"inj.inject: unknown provider \"gemini\"", "inj.inject.openai: \"bad name\" is not a secret name"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}
+	}
+}
+
+// TestLoadInject: profiles.<name>.inject loads from the file and from the
+// environment, and a valid block passes validation.
+func TestLoadInject(t *testing.T) {
+	home := isolate(t)
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "version: 1\nprofiles:\n  claude:\n    inject:\n      anthropic: anthropic-key\n"
+	if err := os.WriteFile(filepath.Join(home, "config", "icaro.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ICARO_PROFILES__CODEX__INJECT__OPENAI", "openai-key")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Profiles["claude"]; got.Inject["anthropic"] != "anthropic-key" || got.Agent != "claude" || len(got.Egress) == 0 {
+		t.Fatalf("%+v", got)
+	}
+	if got := cfg.Profiles["codex"].Inject["openai"]; got != "openai-key" {
+		t.Fatalf("env inject: %q", got)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Profiles["shell"].Inject != nil {
+		t.Fatal("profiles without inject keep ADR 0005 behaviour")
 	}
 }
 
@@ -115,13 +155,44 @@ func TestValidateRanges(t *testing.T) {
 	cfg.Database.DSN = ""
 	cfg.Daemon.UIListen = "0.0.0.0:8787"
 	cfg.Workflows.Concurrency = 0
+	cfg.Workflows.MaxRuns = -1
+	cfg.Workflows.RunParallelism = -2
 	cfg.Limits.Timeout = 0
 	cfg.Sessions.MaxActive = -1
 	cfg.Workflows.Profile = "ghost"
 	err = cfg.Validate()
-	for _, want := range []string{"version 0", "home is required", "database.dsn is required", "daemon.ui_listen", "workflows.concurrency", "limits.timeout", "sessions.max_active", `workflows.profile "ghost"`} {
+	for _, want := range []string{"version 0", "home is required", "database.dsn is required", "daemon.ui_listen", "workflows.concurrency", "workflows.max_runs", "workflows.run_parallelism", "limits.timeout", "sessions.max_active", `workflows.profile "ghost"`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
+		}
+	}
+}
+
+// TestValidateRemoteListen is the regression test for daemon.listen
+// accepting any address with plain HTTP (MVP cut 2).
+func TestValidateRemoteListen(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, addr := range []string{"0.0.0.0:8787", ":8787", "10.0.0.1:80"} {
+		cfg.Daemon.Listen, cfg.Daemon.AllowRemote = addr, false
+		if !cfg.Daemon.RemoteListen() {
+			t.Errorf("%s: not remote", addr)
+		}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "daemon.allow_remote") {
+			t.Errorf("%s accepted without allow_remote: %v", addr, err)
+		}
+		cfg.Daemon.AllowRemote = true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s with allow_remote: %v", addr, err)
+		}
+	}
+	for _, addr := range []string{"", "127.0.0.1:8787", "localhost:0"} {
+		cfg.Daemon.Listen, cfg.Daemon.AllowRemote = addr, false
+		if cfg.Daemon.RemoteListen() || cfg.Validate() != nil {
+			t.Errorf("%s: refused: %v", addr, cfg.Validate())
 		}
 	}
 }
@@ -161,12 +232,12 @@ func TestPathsAndConfigFile(t *testing.T) {
 
 	// ICARO_CONFIG names the file; a missing one is an error.
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	if err := os.WriteFile(p, []byte("workflows:\n  concurrency: 3\n"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("workflows:\n  concurrency: 3\n  max_runs: 2\n  run_parallelism: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("ICARO_CONFIG", p)
 	cfg, err = Load("")
-	if err != nil || cfg.Workflows.Concurrency != 3 {
+	if err != nil || cfg.Workflows.Concurrency != 3 || cfg.Workflows.MaxRuns != 2 || cfg.Workflows.RunParallelism != 1 {
 		t.Fatalf("ICARO_CONFIG: %v %+v", err, cfg)
 	}
 	t.Setenv("ICARO_CONFIG", p+".missing")

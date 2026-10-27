@@ -51,6 +51,9 @@ type Hub struct {
 	maxSkew  time.Duration
 	poll     time.Duration
 	limiter  *limiter
+	// retention and maxRejected bound the delivery records (webhooks.*).
+	retention   time.Duration
+	maxRejected int
 
 	enq   atomic.Pointer[workflow.Enqueuer]
 	specs atomic.Pointer[workflow.SpecSource]
@@ -79,10 +82,19 @@ func NewHub(o HubOptions) *Hub {
 	if rate <= 0 {
 		rate = 120
 	}
+	retention := o.Webhooks.Retention
+	if retention <= 0 {
+		retention = 30 * 24 * time.Hour
+	}
+	maxRejected := o.Webhooks.MaxRejected
+	if maxRejected <= 0 {
+		maxRejected = 1000
+	}
 	reg := NewRegistry(o.Dir, o.Git)
 	h := &Hub{
 		registry: reg, packs: NewPacks(o.Dir, o.Git), store: o.Store, secrets: o.Secrets, log: o.Log, now: o.Now,
 		maxBody: maxBody, maxSkew: skew, poll: o.PollInterval, limiter: newLimiter(rate, o.Now),
+		retention: retention, maxRejected: maxRejected,
 		executor: &Executor{Registry: reg, Secrets: o.Secrets, Settings: o.Settings},
 	}
 	if o.Store != nil {
@@ -127,16 +139,26 @@ func (h *Hub) specSource() workflow.SpecSource {
 // Name implements app.Component.
 func (h *Hub) Name() string { return "integrations" }
 
-// Run watches packs, keeps the generic webhook tokens in sync and owns
-// the rate limiter until ctx ends.
+// pruneEvery is how often Run prunes delivery records.
+const pruneEvery = time.Hour
+
+// Run watches packs, keeps the generic webhook tokens in sync, prunes
+// delivery records and owns the rate limiter until ctx ends.
 func (h *Hub) Run(ctx context.Context) error {
 	go h.limiter.run(ctx)
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
+		var pruned time.Time
 		for {
 			if _, err := h.SyncWebhookTokens(ctx); err != nil && ctx.Err() == nil {
 				h.log.Warn("sync webhook tokens", "err", err)
+			}
+			if now := h.now(); now.Sub(pruned) >= pruneEvery {
+				pruned = now
+				if _, err := h.PruneDeliveries(ctx); err != nil && ctx.Err() == nil {
+					h.log.Warn("prune webhook deliveries", "err", err)
+				}
 			}
 			select {
 			case <-ctx.Done():
@@ -146,6 +168,17 @@ func (h *Hub) Run(ctx context.Context) error {
 		}
 	}()
 	return h.registry.Run(ctx, h.poll)
+}
+
+// PruneDeliveries applies webhooks.retention and webhooks.max_rejected
+// to the delivery records. The retention is also the window in which a
+// replay is recognized as a duplicate.
+func (h *Hub) PruneDeliveries(ctx context.Context) (int64, error) {
+	n, err := h.store.PruneDeliveries(ctx, h.now().Add(-h.retention), h.maxRejected)
+	if n > 0 {
+		h.log.Info("pruned webhook deliveries", "count", n)
+	}
+	return n, err
 }
 
 // SyncWebhookTokens ensures every active workflow subscribed to the
@@ -205,8 +238,14 @@ func (h *Hub) ServeHookToken(w http.ResponseWriter, r *http.Request) {
 	}
 	tok, err := h.store.WebhookTokenByToken(r.Context(), r.PathValue("token"))
 	if err != nil {
-		// Rate-limit misses too, so tokens cannot be brute-forced quickly.
-		h.limiter.allow("webhook:miss")
+		// Misses share one bucket: once it is spent a token scan gets 429s,
+		// which throttles it and makes it visible. (Tokens carry 192
+		// random bits, so guessing is hopeless anyway.)
+		if !h.limiter.allow("webhook:miss") {
+			w.Header().Set("Retry-After", "60")
+			writeHookJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+			return
+		}
 		writeHookJSON(w, http.StatusNotFound, map[string]string{"error": "unknown webhook token"})
 		return
 	}
@@ -247,22 +286,26 @@ func writeHookJSON(w http.ResponseWriter, code int, v any) {
 
 // DeliveryInfo is the API view of a delivery record.
 type DeliveryInfo struct {
-	ID           string              `json:"id"`
-	Integration  string              `json:"integration"`
-	DeliveryKey  string              `json:"delivery_key"`
-	Workflow     string              `json:"workflow,omitempty"`
-	Method       string              `json:"method"`
-	Headers      map[string][]string `json:"headers,omitempty"`
-	Query        string              `json:"query,omitempty"`
-	Body         string              `json:"body,omitempty"`
-	Verified     bool                `json:"verified"`
-	VerifyError  string              `json:"verify_error,omitempty"`
-	Status       string              `json:"status"`
-	Error        string              `json:"error,omitempty"`
-	Events       []EventResult       `json:"events"`
-	Results      []WorkflowResult    `json:"results"`
-	RedeliveryOf string              `json:"redelivery_of,omitempty"`
-	ReceivedAt   string              `json:"received_at"`
+	ID          string              `json:"id"`
+	Integration string              `json:"integration"`
+	DeliveryKey string              `json:"delivery_key"`
+	Workflow    string              `json:"workflow,omitempty"`
+	Method      string              `json:"method"`
+	Headers     map[string][]string `json:"headers,omitempty"`
+	Query       string              `json:"query,omitempty"`
+	Body        string              `json:"body,omitempty"`
+	BodySize    int64               `json:"body_size"`
+	BodySHA256  string              `json:"body_sha256,omitempty"`
+	// BodyTruncated marks a body stored only as a prefix (rejected).
+	BodyTruncated bool             `json:"body_truncated,omitempty"`
+	Verified      bool             `json:"verified"`
+	VerifyError   string           `json:"verify_error,omitempty"`
+	Status        string           `json:"status"`
+	Error         string           `json:"error,omitempty"`
+	Events        []EventResult    `json:"events"`
+	Results       []WorkflowResult `json:"results"`
+	RedeliveryOf  string           `json:"redelivery_of,omitempty"`
+	ReceivedAt    string           `json:"received_at"`
 }
 
 func deliveryInfo(d *store.Delivery, full bool) DeliveryInfo {
@@ -270,6 +313,7 @@ func deliveryInfo(d *store.Delivery, full bool) DeliveryInfo {
 		ID: d.ID, Integration: d.Integration, DeliveryKey: d.DeliveryKey, Workflow: d.Workflow, Method: d.Method,
 		Verified: d.Verified, VerifyError: d.VerifyError, Status: d.Status, Error: d.Error, RedeliveryOf: d.RedeliveryOf,
 		ReceivedAt: d.ReceivedAt.UTC().Format(time.RFC3339), Events: []EventResult{}, Results: []WorkflowResult{},
+		BodySize: d.BodySize, BodySHA256: d.BodySHA256, BodyTruncated: int64(len(d.Body)) < d.BodySize,
 	}
 	_ = json.Unmarshal([]byte(d.EventsJSON), &info.Events)
 	_ = json.Unmarshal([]byte(d.ResultsJSON), &info.Results)

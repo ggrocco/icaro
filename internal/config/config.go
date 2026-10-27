@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,8 +56,14 @@ type Config struct {
 
 // DaemonConfig controls `icaro serve` and how clients reach it.
 type DaemonConfig struct {
-	// Listen adds a TCP listener (token required). Empty means Unix socket only.
+	// Listen adds a TCP listener (token required). Empty means Unix socket
+	// only. It must be a loopback address unless AllowRemote is set: the
+	// daemon speaks plain HTTP, so remote access belongs behind a
+	// TLS-terminating reverse proxy on the same host.
 	Listen string `koanf:"listen" yaml:"listen"`
+	// AllowRemote lets Listen bind a non-loopback address (plain HTTP,
+	// tokens in clear on the wire). Off by default (MVP cut 2).
+	AllowRemote bool `koanf:"allow_remote" yaml:"allow_remote"`
 	// URL makes CLI clients use TCP instead of the local socket.
 	URL string `koanf:"url" yaml:"url"`
 	// Token is the API token clients send over TCP.
@@ -116,7 +123,18 @@ type ProfileConfig struct {
 	Runtime string   `koanf:"runtime" yaml:"runtime"`
 	// Tools are asdf plugin@version pairs materialized during setup.
 	Tools []string `koanf:"tools" yaml:"tools"`
+	// Inject maps a provider (InjectProviders) to the name of the secret
+	// holding its API key. The key never enters the container: the agent
+	// gets a base URL on the profile's egress proxy and a per-session
+	// placeholder, and the daemon adds the key host-side (ADR 0028).
+	Inject map[string]string `koanf:"inject" yaml:"inject,omitempty"`
 }
+
+// InjectProviders are the providers profiles.<name>.inject accepts.
+var InjectProviders = []string{"anthropic", "openai"}
+
+// secretNameRe mirrors secrets.ValidName (config cannot import secrets).
+var secretNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$`)
 
 // MountsConfig is the allowlist of host directories that may be mounted.
 type MountsConfig struct {
@@ -125,8 +143,13 @@ type MountsConfig struct {
 
 // WorkflowsConfig tunes the workflow engine.
 type WorkflowsConfig struct {
-	Concurrency int    `koanf:"concurrency" yaml:"concurrency"`
-	Profile     string `koanf:"profile" yaml:"profile"`
+	// Concurrency caps step containers running at once across all runs.
+	Concurrency int `koanf:"concurrency" yaml:"concurrency"`
+	// MaxRuns caps runs executing at once (0 = Concurrency); RunParallelism
+	// caps parallel steps within one run (0 = only the global cap).
+	MaxRuns        int    `koanf:"max_runs" yaml:"max_runs"`
+	RunParallelism int    `koanf:"run_parallelism" yaml:"run_parallelism"`
+	Profile        string `koanf:"profile" yaml:"profile"`
 	// AllowHost permits image steps to run on the host (MVP cut 4: off).
 	AllowHost bool `koanf:"allow_host" yaml:"allow_host"`
 }
@@ -153,6 +176,11 @@ type WebhooksConfig struct {
 	MaxBodyBytes int64         `koanf:"max_body_bytes" yaml:"max_body_bytes"`
 	MaxSkew      time.Duration `koanf:"max_skew" yaml:"max_skew"`
 	RatePerMin   int           `koanf:"rate_per_min" yaml:"rate_per_min"`
+	// Retention is how long delivery records are kept; it is also the
+	// window in which a replayed delivery is recognized as a duplicate.
+	Retention time.Duration `koanf:"retention" yaml:"retention"`
+	// MaxRejected caps how many rejected (unverified) deliveries are kept.
+	MaxRejected int `koanf:"max_rejected" yaml:"max_rejected"`
 }
 
 // IntegrationConfig holds user opt-ins for one integration.
@@ -180,7 +208,7 @@ type UpdateConfig struct {
 func DefaultProfiles() map[string]ProfileConfig {
 	return map[string]ProfileConfig{
 		"claude": {Agent: "claude", Image: DefaultAgentImage, Egress: []string{
-			"api.anthropic.com", "console.anthropic.com", "claude.ai", "statsig.anthropic.com", "sentry.io",
+			"api.anthropic.com", "console.anthropic.com", "claude.ai", "statsig.anthropic.com",
 		}},
 		"codex": {Agent: "codex", Image: DefaultAgentImage, Egress: []string{
 			"api.openai.com", "auth.openai.com", "chatgpt.com",
@@ -214,6 +242,8 @@ func Defaults() map[string]any {
 		"webhooks.max_body_bytes":  1 << 20,
 		"webhooks.max_skew":        "5m",
 		"webhooks.rate_per_min":    120,
+		"webhooks.retention":       "720h",
+		"webhooks.max_rejected":    1000,
 		"usage.timezone":           "Local",
 	}
 }
@@ -302,11 +332,20 @@ func (c *Config) Validate() error {
 	if c.Database.Driver == "postgres" && c.Database.DSN == "" {
 		errs = append(errs, errors.New("database.dsn is required for postgres"))
 	}
+	if c.Daemon.RemoteListen() && !c.Daemon.AllowRemote {
+		errs = append(errs, fmt.Errorf("daemon.listen %q is not a loopback address; the daemon speaks plain HTTP, so listen on 127.0.0.1 behind a TLS-terminating reverse proxy, or set daemon.allow_remote: true (--allow-remote) to accept the risk", c.Daemon.Listen))
+	}
 	if c.Daemon.UIListen != "" && !isLoopback(c.Daemon.UIListen) {
 		errs = append(errs, fmt.Errorf("daemon.ui_listen %q must be a loopback address (use --listen for anything else)", c.Daemon.UIListen))
 	}
 	if c.Workflows.Concurrency < 1 {
 		errs = append(errs, errors.New("workflows.concurrency must be >= 1"))
+	}
+	if c.Workflows.MaxRuns < 0 {
+		errs = append(errs, errors.New("workflows.max_runs must be >= 0 (0 = workflows.concurrency)"))
+	}
+	if c.Workflows.RunParallelism < 0 {
+		errs = append(errs, errors.New("workflows.run_parallelism must be >= 0 (0 = no per-run cap)"))
 	}
 	if c.Limits.Timeout <= 0 {
 		errs = append(errs, errors.New("limits.timeout must be > 0"))
@@ -324,6 +363,14 @@ func (c *Config) Validate() error {
 		for _, h := range p.Egress {
 			if strings.ContainsAny(h, "/: ") {
 				errs = append(errs, fmt.Errorf("profiles.%s.egress: %q must be a hostname or *.domain", name, h))
+			}
+		}
+		for prov, secret := range p.Inject {
+			if !slices.Contains(InjectProviders, prov) {
+				errs = append(errs, fmt.Errorf("profiles.%s.inject: unknown provider %q (known: %s)", name, prov, strings.Join(InjectProviders, ", ")))
+			}
+			if !secretNameRe.MatchString(secret) {
+				errs = append(errs, fmt.Errorf("profiles.%s.inject.%s: %q is not a secret name (set one with icaro secret set)", name, prov, secret))
 			}
 		}
 	}
@@ -383,6 +430,12 @@ func expandHome(p string) string {
 		}
 	}
 	return p
+}
+
+// RemoteListen reports whether Listen binds something other than a
+// loopback address (":8787" binds every interface).
+func (d DaemonConfig) RemoteListen() bool {
+	return d.Listen != "" && !isLoopback(d.Listen)
 }
 
 func isLoopback(addr string) bool {

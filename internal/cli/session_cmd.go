@@ -47,6 +47,20 @@ func printSessions(w io.Writer, ss []*session.Session) error {
 	return tw.Flush()
 }
 
+func remoteOrOrigin(r string) string {
+	if r == "" {
+		return "origin"
+	}
+	return r
+}
+
+func short12(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
 func dash(s string) string {
 	if s == "" {
 		return "-"
@@ -178,6 +192,47 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 	rm.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	rm.Flags().BoolVar(&keep, "keep-worktree", false, "keep the worktree directory")
 
+	var pushReq session.PushRequest
+	var pushYes bool
+	push := &cobra.Command{
+		Use:   "push ID",
+		Short: "Push the session's branch from the host with your git credentials",
+		Long: "Push the session's own branch (icaro/NAME) to a remote configured in the repository, from the host, " +
+			"with your git credentials, so agent containers never hold any. Only that branch is pushed (no tags, no " +
+			"submodules); host git runs with hooks and fsmonitor disabled and the file transport refused, because the " +
+			"agent controlled the worktree. --force-with-lease overwrites the remote branch only while it still points " +
+			"where your remote-tracking ref says (fetch first); a plain force push is never done.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if pushReq.ForceWithLease && !pushYes {
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(), fmt.Sprintf("Overwrite the remote branch of session %s on %s if it moved?", args[0], remoteOrOrigin(pushReq.Remote)))
+				if err != nil || !ok {
+					return err
+				}
+			}
+			c, err := opts.client(cmd.Context())
+			if err != nil {
+				return err
+			}
+			res, err := c.PushSession(cmd.Context(), args[0], pushReq)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), res)
+			}
+			verb := "pushed"
+			if res.Forced {
+				verb = "force-pushed (with lease)"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s) to %s\n", verb, res.Branch, short12(res.Commit), res.Remote)
+			return nil
+		},
+	}
+	push.Flags().StringVar(&pushReq.Remote, "remote", "origin", "name of a remote configured in the repository")
+	push.Flags().BoolVar(&pushReq.ForceWithLease, "force-with-lease", false, "overwrite the remote branch if it still matches your remote-tracking ref")
+	push.Flags().BoolVar(&pushYes, "yes", false, "do not ask before --force-with-lease")
+
 	attach := &cobra.Command{
 		Use:   "attach ID [-- CMD...]",
 		Short: "Open the session's agent (or a shell) with a TTY",
@@ -195,7 +250,7 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 			if len(run) == 0 {
 				run = info.AgentCmd
 			}
-			return execInSession(cmd.Context(), info, run)
+			return execInSession(cmd.Context(), opts, info, run)
 		},
 	}
 
@@ -219,13 +274,17 @@ func newSessionCmd(opts *rootOpts) *cobra.Command {
 			return tw.Flush()
 		},
 	}
-	cmd.AddCommand(create, list, get, stop, start, rm, attach, projects)
+	cmd.AddCommand(create, list, get, stop, start, rm, push, attach, projects)
 	return cmd
 }
 
 // execInSession runs argv in the session container with TTY passthrough
 // and propagates the exit code.
-func execInSession(ctx context.Context, info *session.ExecInfo, argv []string) error {
+func execInSession(ctx context.Context, opts *rootOpts, info *session.ExecInfo, argv []string) error {
+	cfg, err := opts.loadConfig()
+	if err != nil {
+		return err
+	}
 	if len(argv) == 0 {
 		argv = container.ShellCommand
 	}
@@ -233,12 +292,25 @@ func execInSession(ctx context.Context, info *session.ExecInfo, argv []string) e
 	args := container.ExecArgs(container.ExecOptions{
 		Container: info.ContainerID, User: info.User, Workdir: info.Workdir, TTY: tty, Interactive: true, Cmd: argv,
 	})
-	return runDockerCLI(ctx, args)
+	return runDockerCLI(ctx, cfg.Docker.Host, args)
 }
 
-// runDockerCLI runs the docker CLI attached to our stdio.
-func runDockerCLI(ctx context.Context, args []string) error {
+// dockerEnv is the docker CLI's environment: environ, pointed at host
+// (config docker.host) when set, so the CLI reaches the same engine as
+// the daemon. A later DOCKER_HOST entry wins, and DOCKER_HOST overrides
+// the CLI's current context.
+func dockerEnv(environ []string, host string) []string {
+	if host == "" {
+		return environ
+	}
+	return append(append([]string{}, environ...), "DOCKER_HOST="+host)
+}
+
+// runDockerCLI runs the docker CLI against host ("" keeps the user's
+// environment) attached to our stdio.
+func runDockerCLI(ctx context.Context, host string, args []string) error {
 	c := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // argv built by container.ExecArgs
+	c.Env = dockerEnv(os.Environ(), host)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := c.Run()
 	if err == nil {
@@ -288,7 +360,7 @@ func newShCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return execInSession(cmd.Context(), info, args)
+			return execInSession(cmd.Context(), opts, info, args)
 		},
 	}
 	cmd.Flags().StringVar(&profile, "profile", "", "profile for a new session (default: sessions.default_profile)")
@@ -318,16 +390,20 @@ func newAgentCmd(opts *rootOpts, agent string) *cobra.Command {
 			if len(info.AgentCmd) == 0 {
 				return fmt.Errorf("profile %s has no agent; use `icaro sh`", profile)
 			}
-			return execInSession(cmd.Context(), info, append(append([]string{}, info.AgentCmd...), args...))
+			return execInSession(cmd.Context(), opts, info, append(append([]string{}, info.AgentCmd...), args...))
 		},
 	}
 }
 
 func newLoginCmd(opts *rootOpts) *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "login PROFILE",
 		Short: "Log the profile's agent in once; the login seeds every session of the profile",
-		Args:  cobra.ExactArgs(1),
+		Long: "Log the profile's agent in once; the login seeds every session of the profile.\n\n" +
+			"The login rewrites the profile's home seed, which running sessions may be using, so it is refused " +
+			"while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := opts.loadConfig()
 			if err != nil {
@@ -337,7 +413,7 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			info, err := c.PrepareLogin(cmd.Context(), args[0])
+			info, err := c.PrepareLogin(cmd.Context(), args[0], force)
 			if err != nil {
 				return err
 			}
@@ -347,9 +423,11 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			}
 			dargs := loginArgs(info, seccomp, isTerminal(os.Stdin))
 			fmt.Fprintf(cmd.ErrOrStderr(), "logging in %s; the seed lives in %s (never your host ~/.claude)\n", info.Profile, info.SeedDir)
-			return runDockerCLI(cmd.Context(), dargs)
+			return runDockerCLI(cmd.Context(), cfg.Docker.Host, dargs)
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "log in even while sessions of the profile use its home seed")
+	return cmd
 }
 
 // loginArgs builds `docker run` for a login under the container baseline,

@@ -91,11 +91,11 @@ func (m *Manager) RepoWorktree(ctx context.Context, sessionID, ref, revision str
 		if err := os.MkdirAll(m.layout.Repos(), 0o700); err != nil {
 			return "", err
 		}
-		if _, err := git(ctx, m.layout.Repos(), "clone", "--mirror", "--quiet", ref, cache); err != nil {
+		if _, err := gitSource(ctx, m.layout.Repos(), "clone", "--mirror", "--quiet", ref, cache); err != nil {
 			return "", err
 		}
 	} else if !fetched {
-		if _, err := git(ctx, cache, "remote", "update", "--prune"); err != nil {
+		if _, err := gitSource(ctx, cache, "remote", "update", "--prune"); err != nil {
 			return "", err
 		}
 	}

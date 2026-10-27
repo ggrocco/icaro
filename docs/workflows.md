@@ -59,16 +59,16 @@ Both forms take the same scheduling fields:
 
 | Field | Meaning |
 |---|---|
-| `needs` | Step ids that must finish first. Independent steps run in parallel, up to `workflows.concurrency` per daemon. |
+| `needs` | Step ids that must finish first. Independent steps run in parallel, within the [parallelism limits](#parallelism). |
 | `when` | A boolean expression; false records the step as `skipped`. It is evaluated once, after every need is final. |
 | `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. |
 | `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). |
-| `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. |
+| `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. Both fields may use `${{ }}` (for example `https://github.com/${{ trigger.repo }}.git`) with the same root and `needs` rules as other fields, but not `secrets`. A rendered value that is empty (ref), starts with `-`, contains whitespace or carries a secret fails the step before git runs. |
 | `env` | Image steps only. Merged over the workflow `env`. |
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
 | `outputs` | Image steps only. A map from name to capture source; see below. |
 
-A step runs only when each of its `needs` **succeeded** or was **skipped by its own `when`**. If a need failed, was cancelled, or did not run, the step is recorded as `skipped` with `not run: needs <id> <status>`, its dependents skip in turn, and the run fails. The details are in [ADR 0013](../blueprint/docs/adr/0013-workflow-execution-semantics.md).
+A step runs only when each of its `needs` **succeeded** or was **skipped by its own `when`**. If a need failed, was cancelled, or did not run, the step is recorded as `skipped` with `not run: needs <id> <status>`, its dependents skip in turn, and the run fails. If the run fails before any step starts (its session, egress or workflow `env` could not be set up), every step is recorded as `skipped` with `not run: <run error>`, or as `cancelled` if the run was cancelled. The details are in [ADR 0013](../blueprint/docs/adr/0013-workflow-execution-semantics.md).
 
 ## The image-step contract
 
@@ -99,7 +99,7 @@ Later steps read the values as `${{ steps.<id>.outputs.<name> }}`, but only from
 
 `${{ … }}` is one small language shared with integration manifests ([ADR 0009](../blueprint/docs/adr/0009-expression-language.md)). Expressions are parsed when you validate, and a missing key is an error, never an empty string.
 
-- **Roots:** `steps`, `trigger`, `env`, `secrets`, `run` (`run.id`), `workflow` (`workflow.name`, `workflow.version`).
+- **Roots:** `steps`, `trigger`, `env`, `secrets`, `run` (`run.id`), `workflow` (`workflow.name`, `workflow.version`). A `when` cannot read `secrets`: whether a step ran is visible to anyone who can see the run, so a condition on a secret would leak it a bit at a time.
 - **Operators:** `== != < <= > >= && || !`, parentheses, literals (`'text'`, `"text"`, numbers, `true`, `false`, `null`) and indexing (`headers['x-github-event']`, `trigger.labels[0]`). There is no arithmetic.
 - **Functions:** `contains startsWith endsWith lower upper trim length toJSON fromJSON join split format coalesce string number`, plus `has(ref)`, the only construct for which a missing key is not an error.
 - **Templates:** a string that is exactly one `${{ }}` keeps the value's type, so `number: ${{ trigger.pr_number }}` passes a number. Mixed text renders values as strings, and objects as JSON.
@@ -139,15 +139,16 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 
 ## Secrets
 
-`${{ secrets.NAME }}` in `env` is resolved by the daemon at run time. Its value is never stored in the workflow, and it is redacted from logs and captured outputs. Create secrets with `icaro secret set NAME` (the value is read from stdin or a hidden prompt). A workflow that references a secret that does not exist fails validation, with a hint to create it. Integration credentials for `uses` steps are separate and host-bound; see [Integrations](integrations.md#credentials).
+`${{ secrets.NAME }}` in `env` is resolved by the daemon at run time. Its value is never stored in the workflow, and it is redacted from logs and captured outputs. Create secrets with `icaro secret set NAME` (the value is read from stdin or a hidden prompt). A workflow that references a secret that does not exist fails validation, with a hint to create it. Integration credentials for `uses` steps are separate and host-bound: a secret with a host binding, or one named `<integration>.<name>` for an installed integration, cannot be interpolated, and the run fails if one is referenced anyway. Call the integration through its `uses:` actions; see [Integrations](integrations.md#credentials).
 
 ## Runs
 
-- **Manual runs.** `icaro run NAME` takes the `trigger.*` payload from `--set key=value` (numbers, booleans and JSON are parsed), `--trigger-json` or `--trigger-file`. Fields the workflow reads outside `has()` are required: the CLI prompts for missing ones (unless `--no-prompt`), and the API answers 400 with the list. `icaro workflow apply` prints them as `manual runs need: --set who=...`.
+- **Manual runs.** `icaro run NAME` takes the `trigger.*` payload from `--set key=value` (numbers, booleans and JSON are parsed), `--trigger-json` or `--trigger-file`. Fields the workflow reads outside `has()` are required, unless the read sits behind a `has()` check of the same field (`has(trigger.label) && trigger.label == 'bug'`, `!has(trigger.x) || trigger.x == 1`): the CLI prompts for missing ones (unless `--no-prompt`), and the API answers 400 with the list. `icaro workflow apply` prints them as `manual runs need: --set who=...`.
 - **Watching.** `--wait` streams the logs and exits non-zero unless the run succeeds; with `--json` it prints only the final run, and the exit status is the same. `icaro workflow validate --json` likewise prints the issues and exits non-zero for an invalid file. `icaro runs get ID`, `icaro runs logs ID [STEP] [-f]` and `icaro runs cancel ID` inspect and stop runs. Cancelling kills the step containers.
 - **Streaming API.** `GET /api/v1/runs/{id}/events?logs=1` is a Server-Sent Events stream with one stream per run. It sends a `snapshot` (with the log backlog), then `step` and `log` events, and finally `end`. The web UI uses it, so it never polls.
 - **Restarts.** A step's container id is recorded before the container starts. After a daemon restart, a running step re-attaches to its container. If the container is gone, the attempt fails and `retry` decides. `uses` steps are therefore at-least-once across restarts.
 - **Versions.** Every apply stores a version (`icaro workflow versions NAME [N]`), and a run always executes the version it was started with.
+- **Deleting.** `icaro workflow delete NAME` cancels the workflow's queued and running runs. Its runs are kept, and so are the versions they executed, so their history stays readable.
 
 ## Concurrency
 
@@ -156,9 +157,26 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 | `allow` (default) | Start another run |
 | `forbid` | Skip the new run; webhook deliveries record the reason |
 | `queue` | Wait until the active run finishes |
-| `replace` | Cancel the active runs, then start |
+| `replace` | Cancel the active runs; the new run starts once they have stopped |
 
-Webhook and cron runs carry an idempotency key, so a retried delivery or a repeated cron tick never starts a second run.
+The policy is checked and the run created in one transaction, so concurrent triggers cannot both slip past `forbid`. Webhook and cron runs carry an idempotency key, so a retried delivery or a repeated cron tick never starts a second run.
+
+## Parallelism
+
+Three config keys bound how much runs at once. A workflow cannot change them.
+
+| Key | Default | Caps |
+|---|---|---|
+| `workflows.concurrency` | `4` | Step containers and actions running at once, across all runs |
+| `workflows.max_runs` | `0` (= `workflows.concurrency`) | Runs executing at once; further runs wait in the queue |
+| `workflows.run_parallelism` | `0` (no extra cap) | Parallel steps within one run, so one wide DAG cannot take every slot |
+
+```yaml
+workflows:
+  concurrency: 8
+  max_runs: 4
+  run_parallelism: 2
+```
 
 ## Scheduling
 
@@ -176,7 +194,7 @@ steps:
     command: echo "sweeping"
 ```
 
-Cron expressions have five fields (minute, hour, day of month, month, day of week) or use an `@daily`-style descriptor. The scheduler persists each trigger's next fire time. A fire missed while the daemon was down runs **once** on restart, however many ticks were missed. `icaro schedules` lists the triggers with their next fire times.
+Cron expressions have five fields (minute, hour, day of month, month, day of week) or use an `@daily`-style descriptor. A cron run's `trigger` holds only `scheduled_at`, `fired_at` (RFC 3339) and `late` (fired more than a minute after its time), so a workflow with a cron trigger can read other `trigger.*` fields only behind `has()`; validation rejects it otherwise. The scheduler persists each trigger's next fire time. A fire missed while the daemon was down runs **once** on restart, however many ticks were missed. `icaro schedules` lists the triggers with their next fire times.
 
 ## More examples
 

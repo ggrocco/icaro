@@ -57,6 +57,10 @@ type Options struct {
 	Catalog Catalog
 	// SecretExists reports whether a secret exists. Nil skips the check.
 	SecretExists func(name string) bool
+	// SecretBound reports whether a secret has a host binding (an
+	// integration credential). Nil skips the binding check; credentials
+	// named after an integration in Catalog are refused regardless.
+	SecretBound func(name string) bool
 }
 
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
@@ -463,10 +467,68 @@ func (v *validator) checkExpressions() {
 			if err != nil {
 				v.addExpr(base+"/when", "invalid expression: ", err)
 			} else {
-				v.checkRefs(base+"/when", e.Refs(), RootsStep, i)
+				v.checkWhenRefs(base+"/when", e.Refs(), i)
 			}
 		}
+		if st.Repository != nil {
+			v.checkRepoField(base+"/repository/ref", st.Repository.Ref, i)
+			v.checkRepoField(base+"/repository/revision", st.Repository.Revision, i)
+		}
 	}
+}
+
+// checkRepoField validates a repository ref or revision: a template like
+// any other field, minus secrets (the ref is stored with the run and
+// shown in errors), and never a git option once rendered.
+func (v *validator) checkRepoField(path, s string, step int) {
+	if !expr.Contains(s) {
+		if err := CheckRepoValue(s); err != nil {
+			v.add(path, err.Error())
+		}
+		return
+	}
+	t, err := expr.ParseTemplate(s)
+	if err != nil {
+		v.addExpr(path, "invalid expression: ", err)
+		return
+	}
+	v.checkRefsNoSecrets(path, t.Refs(), step, "repository cannot read secrets", "the ref is stored with the run and shown in errors; give the daemon's git access to the host instead")
+}
+
+// CheckRepoValue rejects a (rendered) repository ref or revision that git
+// would read as an option, or that carries whitespace or control
+// characters. Empty is the caller's concern.
+func CheckRepoValue(s string) error {
+	if strings.HasPrefix(s, "-") {
+		return fmt.Errorf("%q starts with '-', which git would read as an option", s)
+	}
+	for _, r := range s {
+		if r <= ' ' || r == 0x7f {
+			return fmt.Errorf("%q contains whitespace or a control character", s)
+		}
+	}
+	return nil
+}
+
+// checkWhenRefs refuses secrets in a condition: whether a step ran is
+// visible in the run, so a `when` on a secret's value would leak it one
+// bit per run. Secrets are not even exposed to `when` at run time.
+func (v *validator) checkWhenRefs(path string, refs []expr.Ref, step int) {
+	v.checkRefsNoSecrets(path, refs, step, "when cannot read secrets", "a condition on a secret leaks it through the step's status; branch on env, trigger or step outputs instead")
+}
+
+// checkRefsNoSecrets is checkRefs with the step roots, reporting msg for
+// every secrets reference.
+func (v *validator) checkRefsNoSecrets(path string, refs []expr.Ref, step int, msg, hint string) {
+	rest := refs[:0:0]
+	for _, r := range refs {
+		if len(r.Path) > 0 && r.Path[0] == "secrets" {
+			v.add(path, msg, hint)
+			continue
+		}
+		rest = append(rest, r)
+	}
+	v.checkRefs(path, rest, RootsStep, step)
 }
 
 func (v *validator) checkTemplate(path, s string, roots []string, step int) {
@@ -505,6 +567,10 @@ func (v *validator) checkRefs(path string, refs []expr.Ref, roots []string, step
 				}
 			}
 		case "secrets":
+			if v.integrationCredential(r.Path[1]) {
+				v.add(path, fmt.Sprintf("secret %q is an integration credential: it is only sent to its bound hosts by uses: actions and never enters a template or a container", r.Path[1]), IntegrationCredentialHint(r.Path[1]))
+				continue
+			}
 			if v.opts.SecretExists != nil && !r.Guarded && !v.opts.SecretExists(r.Path[1]) {
 				v.add(path, fmt.Sprintf("secret %q does not exist", r.Path[1]), "create it with: icaro secret set "+r.Path[1])
 			}
@@ -512,6 +578,15 @@ func (v *validator) checkRefs(path string, refs []expr.Ref, roots []string, step
 			v.checkTriggerRef(path, r)
 		}
 	}
+}
+
+func (v *validator) integrationCredential(name string) bool {
+	bound := v.opts.SecretBound != nil && v.opts.SecretBound(name)
+	var integrations []string
+	if v.opts.Catalog != nil {
+		integrations = v.opts.Catalog.Integrations()
+	}
+	return IntegrationCredential(name, bound, integrations)
 }
 
 func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
@@ -582,9 +657,19 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 }
 
 // checkTriggerRef requires trigger.<field> to be provided by every
-// integration event the workflow subscribes to, when all are known.
+// trigger that can start the workflow: a cron trigger (CronFields), and
+// every integration event when all are known. Manual runs supply any
+// field. Without this a cron run of a workflow that reads, say,
+// trigger.repo always fails.
 func (v *validator) checkTriggerRef(path string, r expr.Ref) {
-	if r.Guarded || v.opts.Catalog == nil {
+	if r.Guarded {
+		return
+	}
+	if field := r.Path[1]; len(v.s.CronTriggers()) > 0 && !contains(CronFields, field) {
+		v.add(path, fmt.Sprintf("a cron trigger does not provide trigger.%s", field), fieldHint(field, CronFields)+"; guard it with has(trigger."+field+") or put the cron trigger in its own workflow")
+		return
+	}
+	if v.opts.Catalog == nil {
 		return
 	}
 	triggers := v.s.IntegrationTriggers()
@@ -635,6 +720,10 @@ func TriggerFields(s *Spec) (required, optional []string) {
 		}
 		if st.Input != nil {
 			expr.WalkTemplates(map[string]any(st.Input), func(_, s string) { tmpl(s) })
+		}
+		if st.Repository != nil {
+			tmpl(st.Repository.Ref)
+			tmpl(st.Repository.Revision)
 		}
 		if st.When != "" {
 			if e, err := expr.ParseCondition(st.When); err == nil {

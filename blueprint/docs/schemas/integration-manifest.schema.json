@@ -12,7 +12,7 @@
     "description": {"type": "string", "maxLength": 500},
     "hosts": {
       "type": "array",
-      "description": "Complete list of hosts actions may contact (hostname or *.domain). Shown in the permission summary.",
+      "description": "Complete list of hosts actions may contact (hostname, or *.domain with at least two labels after *. so *.com is refused). Shown in the permission summary.",
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"}
     },

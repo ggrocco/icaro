@@ -50,6 +50,12 @@ func TestSecretsLifecycle(t *testing.T) {
 	if len(infos) != 1 || infos[0].Hosts[0] != "*.githubusercontent.com" {
 		t.Fatalf("%+v", infos)
 	}
+	if hosts, err := s.Hosts(ctx, "github.token"); err != nil || len(hosts) != 2 || hosts[0] != "*.githubusercontent.com" {
+		t.Fatalf("hosts: %v %v", hosts, err)
+	}
+	if _, err := s.Hosts(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("hosts of a missing secret: %v", err)
+	}
 	vals, _ := s.Values(ctx)
 	names, _ := s.Names(ctx)
 	if len(vals) != 1 || names[0] != "github.token" {
@@ -74,5 +80,18 @@ func TestSecretsLifecycle(t *testing.T) {
 	}
 	if HostAllowed(nil, "a") {
 		t.Fatal("empty binding")
+	}
+	// A wildcard must keep at least two labels: *.com would bind a
+	// credential to every .com host.
+	for _, bad := range []string{"*.com", "*.com.", "*", "*.*.example.com", "api.*.example.com"} {
+		if err := s.Set(ctx, "x", "v", []string{bad}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%q accepted: %v", bad, err)
+		}
+	}
+	if err := s.Set(ctx, "x", "v", []string{"*.co.uk", "*.sentry.io"}); err != nil {
+		t.Fatal(err)
+	}
+	if HostAllowed([]string{"*.com"}, "evil.com") || !HostAllowed([]string{"*.sentry.io"}, "us.sentry.io") {
+		t.Fatal("a stored top-level wildcard must match nothing")
 	}
 }

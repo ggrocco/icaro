@@ -115,3 +115,48 @@ func TestUISessions(t *testing.T) {
 		}
 	})
 }
+
+// TestRevokeTokenEndsUISessions is the regression test for browser
+// sessions outliving the API token they were signed in with.
+func TestRevokeTokenEndsUISessions(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, s *Store) {
+		ctx := context.Background()
+		tok, err := s.CreateToken(ctx, "ci", "h-ci", ScopeAdmin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := s.CreateToken(ctx, "other", "h-other", ScopeAdmin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exp := Now().Add(time.Hour)
+		for _, r := range []*UISessionRow{
+			{ID: "from-ci", Kind: UISession, Name: "ci", Scope: ScopeAdmin, TokenID: tok.ID, ExpiresAt: exp},
+			{ID: "from-other", Kind: UISession, Name: "other", Scope: ScopeAdmin, TokenID: other.ID, ExpiresAt: exp},
+			{ID: "from-code", Kind: UISession, Name: "local", Scope: ScopeWrite, ExpiresAt: exp},
+		} {
+			if err := s.CreateUISession(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, err := s.GetUISession(ctx, "from-ci", UISession); err != nil || got.TokenID != tok.ID {
+			t.Fatalf("token id not stored: %+v %v", got, err)
+		}
+		if err := s.RevokeToken(ctx, "ci"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.GetUISession(ctx, "from-ci", UISession); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("a session from a revoked token still resolves: %v", err)
+		}
+		for _, id := range []string{"from-other", "from-code"} {
+			if got, err := s.GetUISession(ctx, id, UISession); err != nil {
+				t.Fatalf("%s ended by an unrelated revoke: %v", id, err)
+			} else if id == "from-code" && got.TokenID != "" {
+				t.Fatalf("login-code session has a token: %+v", got)
+			}
+		}
+		if err := s.RevokeToken(ctx, "ci"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("revoke twice: %v", err)
+		}
+	})
+}

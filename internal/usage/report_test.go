@@ -173,3 +173,85 @@ func TestInProjectsAndProfileRoots(t *testing.T) {
 		t.Fatalf("only directories are profiles: %+v", got)
 	}
 }
+
+// TestBuildReportMergesSnapshots is the regression test for snapshots
+// that were written but never read: a row whose transcript is gone comes
+// back from the store, marked as a snapshot, and live rows win.
+func TestBuildReportMergesSnapshots(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2025, 3, 3, 12, 0, 0, 0, time.UTC)
+	roots := []Root{{Label: "host", Dir: "testdata/hostclaude"}}
+	st, err := store.Open(ctx, store.SQLite, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	live, err := BuildReport(ctx, ReportOptions{Roots: roots, Timezone: "UTC", Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveRow := find(live.Records, "host", "claude-3-5-haiku-20241022")
+	if liveRow == nil {
+		t.Fatalf("live: %+v", live.Records)
+	}
+	cost := 9.0
+	stale := *liveRow
+	stale.InputTokens = 1 // an older collection of a row that is still live
+	if err := Save(ctx, st, []Record{
+		stale,
+		{Provider: "claude-code", Source: "host", Day: "2025-02-25", Model: "gone", InputTokens: 42, CostUSD: &cost, Confidence: ConfidenceHigh},
+		{Provider: "claude-code", Source: "profile:other", Day: "2025-02-25", Model: "elsewhere", Confidence: ConfidenceHigh},
+		{Provider: "claude-code", Source: "host", Day: "2025-01-01", Model: "too-old", Confidence: ConfidenceHigh},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := BuildReport(ctx, ReportOptions{Roots: roots, Timezone: "UTC", Now: now, LimitUSD: 5, Store: st})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(r.Records, "host", "claude-3-5-haiku-20241022"); got == nil || got.InputTokens != liveRow.InputTokens || got.Confidence != ConfidenceHigh {
+		t.Fatalf("a live row must win over its snapshot: %+v", got)
+	}
+	gone := find(r.Records, "host", "gone")
+	if gone == nil || gone.Confidence != ConfidenceSnapshot || gone.InputTokens != 42 {
+		t.Fatalf("a row without a transcript must come from its snapshot: %+v", r.Records)
+	}
+	if find(r.Records, "profile:other", "elsewhere") != nil || find(r.Records, "host", "too-old") != nil {
+		t.Fatalf("snapshots outside the roots or the window leaked: %+v", r.Records)
+	}
+	if r.Records[0].Day != "2025-02-25" {
+		t.Fatalf("merged rows are sorted by day: %+v", r.Records)
+	}
+	// Snapshot rows count towards alerts.
+	if len(r.Alerts) != 1 || r.Alerts[0].Day != "2025-02-25" {
+		t.Fatalf("alerts: %+v", r.Alerts)
+	}
+
+	// Saving a merged report does not rewrite snapshot rows as live.
+	if err := Save(ctx, st, r.Records); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(ctx, st, "2025-02-25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range got {
+		if g.Confidence == ConfidenceSnapshot {
+			t.Fatalf("a snapshot row was stored back: %+v", g)
+		}
+	}
+
+	// A store that cannot be read is an unavailable row, not a failure.
+	_ = st.Close()
+	r, err = BuildReport(ctx, ReportOptions{Roots: roots, Timezone: "UTC", Now: now, Store: st})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if find(r.Records, "*", "") == nil {
+		t.Fatalf("closed store: %+v", r.Records)
+	}
+}

@@ -64,6 +64,12 @@ func (c *Client) StartSession(ctx context.Context, id string) (*session.Session,
 	return &out, c.doJSON(ctx, http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/start", nil, &out)
 }
 
+// PushSession pushes the session's own branch from the host.
+func (c *Client) PushSession(ctx context.Context, id string, req session.PushRequest) (*session.PushResult, error) {
+	var out session.PushResult
+	return &out, c.doJSON(ctx, http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/push", req, &out)
+}
+
 // RemoveSession removes a session (and its worktree unless keep).
 func (c *Client) RemoveSession(ctx context.Context, id string, keepWorktree bool) error {
 	path := "/api/v1/sessions/" + url.PathEscape(id)
@@ -115,10 +121,15 @@ type LoginInfo struct {
 	Egress  container.Attachment `json:"egress"`
 }
 
-// PrepareLogin provisions what `icaro login` needs for a profile.
-func (c *Client) PrepareLogin(ctx context.Context, profile string) (*LoginInfo, error) {
+// PrepareLogin provisions what `icaro login` needs for a profile. The
+// daemon refuses while sessions of the profile use its seed, unless force.
+func (c *Client) PrepareLogin(ctx context.Context, profile string, force bool) (*LoginInfo, error) {
 	var out LoginInfo
-	return &out, c.doJSON(ctx, http.MethodPost, "/api/v1/profiles/"+url.PathEscape(profile)+"/login", nil, &out)
+	path := "/api/v1/profiles/" + url.PathEscape(profile) + "/login"
+	if force {
+		path += "?force=true"
+	}
+	return &out, c.doJSON(ctx, http.MethodPost, path, nil, &out)
 }
 
 // ListSecrets lists secret names and bindings (never values).

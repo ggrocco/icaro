@@ -73,24 +73,32 @@ printf %s "$WEBHOOK_SECRET" | icaro credential add github webhook_secret
 icaro credential list                                           # names and hosts, never values
 ```
 
-The binding defaults to the manifest's `hosts` plus the host of a `base_url` you configured. Use `--host` to choose it yourself, and `--yes` to skip the confirmation. `<integration>.webhook_secret` verifies inbound webhooks and is never sent anywhere, so it has no binding. Credentials never enter a container.
+The binding defaults to the manifest's `hosts` plus the host of a `base_url` you configured. Use `--host` to choose it yourself (a hostname, or a wildcard such as `*.example.com`; a top-level wildcard like `*.com` is refused, in a binding and in a manifest's `hosts`), and `--yes` to skip the confirmation. `<integration>.webhook_secret` verifies inbound webhooks and is never sent anywhere, so it has no binding. Credentials never enter a container, and a workflow cannot read one through `${{ secrets.NAME }}`: validation and the engine refuse any host-bound secret and any secret named `<integration>.<name>` for an installed integration. Use the integration's `uses:` actions instead.
 
 ## Webhooks
 
-Each integration has one endpoint: `POST /hooks/<integration>`. The generic `webhook` integration uses `POST /hooks/webhook/<token>`, with one random token per subscribed workflow (`icaro integration webhook-tokens`, `--rotate WORKFLOW`). The daemon must be reachable by the provider, which means a TCP listener (`icaro serve --listen 0.0.0.0:8787` behind TLS, or a reverse proxy). Set `daemon.public_url` so the generated URLs are correct. On a laptop, use manual or `cron` triggers instead; a `cron` workflow whose first step checks the source and gates the rest with `when` stands in for polling.
+Each integration has one endpoint: `POST /hooks/<integration>`. The generic `webhook` integration uses `POST /hooks/webhook/<token>`, with one random token per subscribed workflow (`icaro integration webhook-tokens`, `--rotate WORKFLOW`). The daemon must be reachable by the provider. The supported way is a TLS-terminating reverse proxy (Caddy, nginx, a tunnel) on the same host in front of a loopback listener: `icaro serve --listen 127.0.0.1:8787`. The daemon speaks plain HTTP, so it refuses a non-loopback `--listen` / `daemon.listen` unless you also pass `--allow-remote` (`daemon.allow_remote: true`), and then logs a warning. Set `daemon.public_url` so the generated URLs are correct. On a laptop, use manual or `cron` triggers instead; a `cron` workflow whose first step checks the source and gates the rest with `when` stands in for polling.
 
 Every request goes through the same pipeline ([ADR 0015](../blueprint/docs/adr/0015-manifest-schema-webhook-pipeline.md)):
 
 1. Rate limit (`webhooks.rate_per_min`) and body cap (`webhooks.max_body_bytes`).
-2. Verify the signature as the manifest says (HMAC-SHA256/SHA1, shared-secret header, or URL token), with replay protection where the provider sends a timestamp (`webhooks.max_skew`).
-3. Record the delivery, rejected ones included.
-4. Deduplicate: a provider retry of a processed delivery starts nothing.
+2. Verify the signature as the manifest says (HMAC-SHA256/SHA1, shared-secret header, or URL token), and check the timestamp header when the manifest declares one (`webhooks.max_skew`). A timestamp only stops replays when the signature covers it, as Slack's does.
+3. Record the delivery, rejected ones included. A rejected request is unauthenticated, so only its first 4 KiB is kept, with its full size and SHA-256.
+4. Deduplicate: a provider retry of a processed delivery starts nothing. A delivery is a duplicate when its delivery id matches, or when its HMAC-signed material does: delivery ids travel in headers the signature does not cover, so a replay with a fresh id is still caught.
 5. Normalize the payload into `trigger.*`, evaluate each subscribed workflow's `filter`, and enqueue.
 
 ```sh
 icaro deliveries list                 # status: processed, duplicate, rejected, no_match, error, challenge
 icaro deliveries get ID               # headers (secrets masked), body, matched workflows, runs
 icaro deliveries redeliver ID         # re-run the pipeline from the stored record
+```
+
+Delivery records are kept for `webhooks.retention` (default `720h`, 30 days), which is also how long a replay is recognized as a duplicate; only the newest `webhooks.max_rejected` rejected deliveries are kept (default `1000`). Verified deliveries are only aged out, so a flood of rejected requests cannot push out the records that catch replays. The daemon prunes hourly.
+
+```yaml
+webhooks:
+  retention: 720h
+  max_rejected: 1000
 ```
 
 A delivery record answers "why didn't my workflow fire?". It shows the verification error, the duplicate, the absence of a matching event, the filter that excluded the run, the concurrency policy that skipped it, or the run id. The web UI's **Deliveries** page shows the same data.
