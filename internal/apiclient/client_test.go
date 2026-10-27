@@ -164,6 +164,7 @@ func TestEndpoints(t *testing.T) {
 			return err
 		}, "POST", "/api/v1/profiles/default/login", ""},
 		{"PrepareLogin force", func(ctx context.Context, c *Client) error { _, err := c.PrepareLogin(ctx, "default", true); return err }, "POST", "/api/v1/profiles/default/login?force=true", ""},
+		{"EndLogin", func(ctx context.Context, c *Client) error { return c.EndLogin(ctx, "default") }, "DELETE", "/api/v1/profiles/default/login", ""},
 		{"ListSecrets", func(ctx context.Context, c *Client) error { _, err := c.ListSecrets(ctx); return err }, "GET", "/api/v1/secrets", ""},
 		{"SetSecret", func(ctx context.Context, c *Client) error { return c.SetSecret(ctx, "k", "v", []string{"h"}) }, "PUT", "/api/v1/secrets/k", `{"hosts":["h"],"value":"v"}`},
 		{"DeleteSecret", func(ctx context.Context, c *Client) error { return c.DeleteSecret(ctx, "k") }, "DELETE", "/api/v1/secrets/k", ""},

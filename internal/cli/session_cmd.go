@@ -402,7 +402,8 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 		Short: "Log the profile's agent in once; the login seeds every session of the profile",
 		Long: "Log the profile's agent in once; the login seeds every session of the profile.\n\n" +
 			"The login rewrites the profile's home seed, which running sessions may be using, so it is refused " +
-			"while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.",
+			"while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force. " +
+			"While the login runs, new sessions of the profile wait and start when it ends.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := opts.loadConfig()
@@ -417,6 +418,9 @@ func newLoginCmd(opts *rootOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Sessions of the profile wait while the login runs; let them
+			// go however it ends (the daemon also drops a stale lease).
+			defer func() { _ = c.EndLogin(context.WithoutCancel(cmd.Context()), args[0]) }()
 			seccomp := filepath.Join(cfg.Layout().RunDir(), "seccomp.json")
 			if err := os.WriteFile(seccomp, []byte(sandbox.SeccompProfile()), 0o600); err != nil {
 				return err

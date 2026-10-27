@@ -105,6 +105,13 @@ func TestProfileLoginRoute(t *testing.T) {
 		li.User != "1234:1234" || strings.Join(li.Command, " ") != "claude" || li.Egress.Network == "" {
 		t.Fatalf("login: %d %s", code, body)
 	}
+	// The login holds the profile until the CLI ends it.
+	if code, body := f.call("POST", "/api/v1/profiles/claude/login", nil); code != 409 || !strings.Contains(body, "already in progress") {
+		t.Fatalf("second login: %d %s", code, body)
+	}
+	if code, _ := f.call("DELETE", "/api/v1/profiles/claude/login", nil); code != 204 {
+		t.Fatalf("end login: %d", code)
+	}
 	if code, _ := f.call("POST", "/api/v1/profiles/nope/login", nil); code != 404 {
 		t.Fatalf("unknown profile: %d", code)
 	}

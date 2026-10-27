@@ -4,9 +4,58 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"icaro/internal/store"
 )
+
+// LoginLease bounds how long a login holds its profile when the CLI never
+// reports its end (it crashed, or lost the daemon).
+const LoginLease = 30 * time.Minute
+
+// BeginLogin reserves profile for a login. While the lease is held, no
+// session of the profile starts: queued ones wait, so nothing reads the
+// seed the login is rewriting. The lease is taken before the busy check,
+// so a session that starts in between is seen by the check. EndLogin
+// releases it; force skips the busy check and replaces another login's
+// lease.
+func (m *Manager) BeginLogin(ctx context.Context, profile string, force bool) error {
+	held := false
+	m.logins.do(func(l map[string]time.Time) {
+		if end, ok := l[profile]; ok && time.Now().Before(end) && !force {
+			held = true
+			return
+		}
+		l[profile] = time.Now().Add(LoginLease)
+	})
+	if held {
+		return &ErrBusy{Msg: fmt.Sprintf("a login of profile %s is already in progress; wait for it to finish, or pass --force", profile)}
+	}
+	if err := m.CheckLogin(ctx, profile, force); err != nil {
+		m.EndLogin(profile)
+		return err
+	}
+	return nil
+}
+
+// EndLogin releases the login lease of profile and starts what waited.
+func (m *Manager) EndLogin(profile string) {
+	m.logins.do(func(l map[string]time.Time) { delete(l, profile) })
+	m.nudge()
+}
+
+// loginHeld reports whether a login holds profile.
+func (m *Manager) loginHeld(profile string) bool {
+	held := false
+	m.logins.do(func(l map[string]time.Time) {
+		end, ok := l[profile]
+		held = ok && time.Now().Before(end)
+		if ok && !held {
+			delete(l, profile)
+		}
+	})
+	return held
+}
 
 // ErrBusy reports an operation refused because sessions are using what it
 // would change.
