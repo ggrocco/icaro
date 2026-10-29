@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -70,17 +71,17 @@ func TestUsageSummary(t *testing.T) {
 		{Day: "2026-10-23", InputTokens: 99999, CostUSD: cost(9)},
 		{Error: "source unavailable: /h/x"},
 	}, Alerts: []usage.Alert{{Day: "2026-10-23"}}}
-	u := summarize(rep, now)
+	u := summarize(asWire(t, rep), now)
 	if u.Day != "2026-10-24" || u.Tokens != 1660 || u.CostUSD != 1.25 || !u.Unpriced || u.Over || u.Err != "" || u.LimitUSD != 5 {
 		t.Fatalf("%+v", u)
 	}
 	rep.Alerts = append(rep.Alerts, usage.Alert{Day: "2026-10-24"})
-	if u := summarize(rep, now); !u.Over {
+	if u := summarize(asWire(t, rep), now); !u.Over {
 		t.Fatal("today's alert")
 	}
 	// Nothing today and a broken source: the error is the news.
 	rep = &usage.Report{Timezone: "bogus/zone", Records: []usage.Record{{Error: "unreadable"}}}
-	if u := summarize(rep, now); u.Err != "unreadable" || u.Day != now.In(time.Local).Format(time.DateOnly) {
+	if u := summarize(asWire(t, rep), now); u.Err != "unreadable" || u.Day != now.In(time.Local).Format(time.DateOnly) {
 		t.Fatalf("%+v", u)
 	}
 
@@ -94,5 +95,30 @@ func TestUsageSummary(t *testing.T) {
 	f.set(func(f *fakeAPI) { f.fail["GET /api/v1/usage"] = http.StatusBadRequest })
 	if u := FetchUsage(context.Background(), remoteDaemon(srv), now); !strings.Contains(u.Err, "injected") {
 		t.Fatalf("%+v", u)
+	}
+}
+
+// asWire sends a report through JSON, as the daemon does, into the
+// fields the tray reads.
+func asWire(t *testing.T, rep *usage.Report) *usageReport {
+	t.Helper()
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out usageReport
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	return &out
+}
+
+// The tray names states without importing store, which would link the
+// database drivers into the app.
+func TestStatesMatchTheStore(t *testing.T) {
+	for got, want := range map[string]string{runRunning: store.RunRunning, runQueued: store.RunQueued, runFailed: store.RunFailed, workflowActive: store.WorkflowActive} {
+		if got != want {
+			t.Errorf("%q != store's %q", got, want)
+		}
 	}
 }

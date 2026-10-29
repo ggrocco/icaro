@@ -3,12 +3,63 @@ package desktop
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"time"
 
-	"icaro/internal/apiclient"
-	"icaro/internal/store"
-	"icaro/internal/usage"
+	"icaro/internal/apiclient/rest"
+)
+
+// The run and workflow states the tray asks for (store's values).
+const (
+	runRunning     = "running"
+	runQueued      = "queued"
+	runFailed      = "failed"
+	workflowActive = "active"
+)
+
+// The parts of the daemon's responses the tray reads. The app decodes them
+// here rather than through package apiclient, whose types would link the
+// whole daemon into it.
+type (
+	runInfo struct {
+		ID       string `json:"id"`
+		Workflow string `json:"workflow"`
+		Status   string `json:"status"`
+		Error    string `json:"error"`
+	}
+	previewInfo struct {
+		ID           string `json:"id"`
+		WorktreePath string `json:"worktree_path"`
+		Status       string `json:"status"`
+		URL          string `json:"url"`
+		Error        string `json:"error"`
+	}
+	workflowInfo struct {
+		Name          string `json:"name"`
+		Status        string `json:"status"`
+		TriggerFields struct {
+			Required []string `json:"required"`
+		} `json:"trigger_fields"`
+	}
+	usageReport struct {
+		Timezone string  `json:"timezone"`
+		LimitUSD float64 `json:"daily_limit_usd"`
+		Records  []struct {
+			Day              string   `json:"day"`
+			InputTokens      int64    `json:"input_tokens"`
+			OutputTokens     int64    `json:"output_tokens"`
+			CacheReadTokens  int64    `json:"cache_read_tokens"`
+			CacheWriteTokens int64    `json:"cache_write_tokens"`
+			CostUSD          *float64 `json:"cost_usd_estimate"`
+			Error            string   `json:"error"`
+		} `json:"records"`
+		Alerts []struct {
+			Day string `json:"day"`
+		} `json:"alerts"`
+	}
 )
 
 // State is one poll of the daemon: everything the tray shows. It is built
@@ -87,32 +138,40 @@ func Fetch(ctx context.Context, d *Daemon) State {
 		}
 	}
 	var err error
-	st.Running, err = runs(ctx, c, store.RunRunning, listLimit)
+	st.Running, err = runs(ctx, c, runRunning, listLimit)
 	keep(err)
-	st.Queued, err = runs(ctx, c, store.RunQueued, listLimit)
+	st.Queued, err = runs(ctx, c, runQueued, listLimit)
 	keep(err)
-	st.Failed, err = runs(ctx, c, store.RunFailed, failedLimit)
+	st.Failed, err = runs(ctx, c, runFailed, failedLimit)
 	keep(err)
-	previews, err := c.ListPreviews(ctx)
-	keep(err)
-	for _, p := range previews {
+	var previews struct {
+		Previews []previewInfo `json:"previews"`
+	}
+	keep(c.Do(ctx, http.MethodGet, "/api/v1/previews", nil, &previews))
+	for _, p := range previews.Previews {
 		st.Previews = append(st.Previews, Preview{ID: p.ID, Name: filepath.Base(p.WorktreePath), Status: p.Status, URL: p.URL, Error: p.Error})
 	}
-	wfs, err := c.ListWorkflows(ctx)
-	keep(err)
-	for _, w := range wfs {
-		if w.Status == store.WorkflowActive {
+	var wfs struct {
+		Workflows []workflowInfo `json:"workflows"`
+	}
+	keep(c.Do(ctx, http.MethodGet, "/api/v1/workflows", nil, &wfs))
+	for _, w := range wfs.Workflows {
+		if w.Status == workflowActive {
 			st.Workflows = append(st.Workflows, Workflow{Name: w.Name, NeedsInput: len(w.TriggerFields.Required) > 0})
 		}
 	}
 	return st
 }
 
-func runs(ctx context.Context, c *apiclient.Client, status string, limit int) ([]Run, error) {
-	infos, err := c.ListRuns(ctx, "", status, limit)
-	out := make([]Run, 0, len(infos))
-	for _, r := range infos {
-		out = append(out, Run{ID: r.ID, Workflow: r.Workflow, Status: r.Status, Error: r.Error})
+func runs(ctx context.Context, c *rest.Client, status string, limit int) ([]Run, error) {
+	q := url.Values{"status": {status}, "limit": {strconv.Itoa(limit)}}
+	var infos struct {
+		Runs []runInfo `json:"runs"`
+	}
+	err := c.Do(ctx, http.MethodGet, "/api/v1/runs?"+q.Encode(), nil, &infos)
+	out := make([]Run, 0, len(infos.Runs))
+	for _, r := range infos.Runs {
+		out = append(out, Run(r))
 	}
 	return out, err
 }
@@ -120,17 +179,19 @@ func runs(ctx context.Context, c *apiclient.Client, status string, limit int) ([
 // FetchUsage summarizes today's usage. Parsing transcripts costs more
 // than the other queries, so the controller polls it less often.
 func FetchUsage(ctx context.Context, d *Daemon, now time.Time) *Usage {
-	rep, err := d.Client.Usage(ctx, "0d")
-	if err != nil {
+	var rep usageReport
+	if err := d.Client.Do(ctx, http.MethodGet, "/api/v1/usage?since=0d", nil, &rep); err != nil {
 		return &Usage{Err: err.Error()}
 	}
-	return summarize(rep, now)
+	return summarize(&rep, now)
 }
 
-func summarize(rep *usage.Report, now time.Time) *Usage {
-	loc, err := usage.Location(rep.Timezone)
-	if err != nil {
-		loc = time.Local
+func summarize(rep *usageReport, now time.Time) *Usage {
+	loc := time.Local
+	if rep.Timezone != "" && rep.Timezone != "Local" && rep.Timezone != "local" {
+		if l, err := time.LoadLocation(rep.Timezone); err == nil {
+			loc = l
+		}
 	}
 	u := &Usage{Day: now.In(loc).Format(time.DateOnly), LimitUSD: rep.LimitUSD}
 	var errs []error

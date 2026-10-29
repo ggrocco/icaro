@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"icaro/internal/apiclient"
+	"icaro/internal/apiclient/rest"
 	"icaro/internal/config"
 	"icaro/internal/daemon"
 	"icaro/internal/paths"
@@ -35,7 +35,7 @@ type Options struct {
 // API as the CLI and, when none answers, starts `icaro serve` the way the
 // CLI does. The daemon's lock keeps that to one daemon, whoever starts it.
 type Daemon struct {
-	Client *apiclient.Client
+	Client *rest.Client
 	Layout paths.Layout
 	// Remote is set when daemon.url points at a TCP daemon, which the app
 	// reaches but never starts.
@@ -76,10 +76,10 @@ func Open(o Options) (*Daemon, error) {
 			return nil, errors.New("daemon.url is set but no token: set daemon.token or ICARO_DAEMON__TOKEN")
 		}
 		d.Remote = true
-		d.Client = apiclient.New(cfg.Daemon.URL, cfg.Daemon.Token)
+		d.Client = rest.New(cfg.Daemon.URL, cfg.Daemon.Token)
 		return d, nil
 	}
-	d.Client = apiclient.NewWithHTTP(daemon.SocketBaseURL, "", daemon.HTTPClient(d.Layout, 30*time.Second))
+	d.Client = rest.NewWithHTTP(daemon.SocketBaseURL, "", daemon.HTTPClient(d.Layout, 30*time.Second))
 	return d, nil
 }
 

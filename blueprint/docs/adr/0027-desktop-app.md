@@ -33,6 +33,8 @@ The fallback in the spike table, "Wails v2 behind `internal/platform`", does not
 
 The separate module keeps cgo, GTK/WebKit and Wails' dependencies out of the CLI's build, `go test ./...`, its license list and govulncheck.
 
+The other direction holds too: the app links none of the daemon. `internal/desktop` talks to the API through `internal/apiclient/rest`, the transport alone, and decodes the few response fields it reads into its own structs, because `internal/apiclient`'s typed calls return the daemon's types and would link the store, its database drivers and the Docker client. A CI step in the lint job fails if `internal/desktop` links any module beyond the YAML parser its config loading needs.
+
 `internal/desktop` is UI glue rather than domain code. Its controller state (the last poll, the settings, the cached usage) is read by menu clicks on the shell's threads and written by the poll loop, so a single mutex guards it. That is the one exception to the engineering rule of channels over mutexes, recorded here as that rule requires. The app has its own `desktop/THIRD_PARTY_LICENSES.md`, generated for the macOS build.
 
 **One daemon.** The app resolves the configuration as the CLI does: the same `--config`/`--home` flags, `ICARO_HOME` and `daemon.url`.

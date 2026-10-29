@@ -28,6 +28,13 @@ jobs:
       # shellcheck for their run scripts.
       - name: actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      # The desktop app reaches the daemon over its HTTP API only (ADR
+      # 0027), so its logic must not link the daemon's packages and their
+      # dependencies (database drivers, the Docker client).
+      - name: the desktop app links no daemon internals
+        run: |
+          extra=$(go list -deps -f '{{with .Module}}{{.Path}}{{end}}' ./internal/desktop | sort -u | grep -vxE 'icaro|go.yaml.in/yaml/v3' || true)
+          test -z "$extra" || { echo "internal/desktop links: $extra"; exit 1; }
       # golangci-lint is built from source and needs a toolchain at least as
       # new as the one it was released with, so build it with current stable
       # Go and pin the version (05-engineering: pinned dependencies).
