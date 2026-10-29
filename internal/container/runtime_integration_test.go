@@ -106,3 +106,64 @@ func TestAgentReachesTheSessionSocket(t *testing.T) {
 		t.Fatalf("the bridge did not reach the session socket: %v %q", err, out)
 	}
 }
+
+// TestRuntimeMountKinds starts one container per kind of mount an agent
+// spec uses and reports which ones testRuntime cannot start. It only
+// logs: it is the diagnosis for TestAgentGitProtection under gVisor.
+func TestRuntimeMountKinds(t *testing.T) {
+	if testRuntime == "" {
+		t.Skip("ICARO_TEST_RUNTIME is not set")
+	}
+	eng := engine(t)
+	ctx := context.Background()
+	if err := eng.EnsureImage(ctx, testImage); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	repo, ws := filepath.Join(root, "repo"), filepath.Join(root, "wt", "s1")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-q")
+	gitRun(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "icaro/s1", ws)
+	hh := filepath.Join(root, "hosthome")
+	_ = os.MkdirAll(filepath.Join(hh, ".ssh"), 0o700)
+	_ = os.WriteFile(filepath.Join(hh, ".netrc"), []byte("x"), 0o600)
+	user := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	limits := sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64}
+	cases := map[string]AgentSpec{
+		"workspace":   {Workspace: ws},
+		"git":         {Workspace: ws, GitDir: filepath.Join(repo, ".git")},
+		"git no pids": {Workspace: ws, GitDir: filepath.Join(repo, ".git")},
+		"extra":       {Extra: []Mount{{Source: hh, Target: "/h"}}},
+		"dir mask":    {Extra: []Mount{{Source: hh, Target: "/h", Masks: []Mask{{Target: "/h/.ssh"}}}}},
+		"file mask":   {Extra: []Mount{{Source: hh, Target: "/h", Masks: []Mask{{Target: "/h/.netrc", File: true}}}}},
+		"host user":   {},
+		"limits only": {},
+	}
+	for name, a := range cases {
+		a.Name = "icaro-it-kind-" + strings.ReplaceAll(name, " ", "-") + "-" + time.Now().Format("150405")
+		a.Image, a.Labels, a.Runtime = testImage, map[string]string{LabelSession: "it"}, testRuntime
+		a.User = "1234:1234"
+		if name != "limits only" {
+			a.User = user
+		}
+		switch name {
+		case "host user":
+		case "git no pids":
+			a.Limits = sandbox.Limits{MemoryBytes: limits.MemoryBytes}
+		default:
+			a.Limits = limits
+		}
+		spec, ns := a.Build()
+		id, err := eng.CreateContainerOn(ctx, spec, ns)
+		if err != nil {
+			t.Logf("%-11s create: %v", name, err)
+			continue
+		}
+		err = eng.StartContainer(ctx, id)
+		t.Logf("%-11s start: %v", name, err)
+		_ = eng.RemoveContainer(ctx, id)
+	}
+}
