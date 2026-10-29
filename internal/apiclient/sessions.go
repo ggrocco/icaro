@@ -132,6 +132,12 @@ func (c *Client) PrepareLogin(ctx context.Context, profile string, force bool) (
 	return &out, c.doJSON(ctx, http.MethodPost, path, nil, &out)
 }
 
+// EndLogin tells the daemon the login of profile is over, so its queued
+// sessions may start.
+func (c *Client) EndLogin(ctx context.Context, profile string) error {
+	return c.doJSON(ctx, http.MethodDelete, "/api/v1/profiles/"+url.PathEscape(profile)+"/login", nil, nil)
+}
+
 // ListSecrets lists secret names and bindings (never values).
 func (c *Client) ListSecrets(ctx context.Context) ([]secrets.Info, error) {
 	var out struct {

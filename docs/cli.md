@@ -266,7 +266,7 @@ icaro integration webhook-tokens [flags]
 
 Log the profile's agent in once; the login seeds every session of the profile.
 
-The login rewrites the profile's home seed, which running sessions may be using, so it is refused while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force.
+The login rewrites the profile's home seed, which running sessions may be using, so it is refused while sessions of the profile are queued, starting, or running on overlay homes; stop them first, or pass --force. While the login runs, new sessions of the profile wait and start when it ends.
 
 ```text
 icaro login PROFILE [flags]
@@ -532,7 +532,7 @@ Inspect runs
       --json   print JSON
 ```
 
-Subcommands: `cancel` `get` `list` `logs`
+Subcommands: `cancel` `get` `list` `logs` `rerun`
 
 ## `icaro runs cancel`
 
@@ -576,6 +576,14 @@ icaro runs logs ID [STEP] [flags]
       --attempt int   attempt number (default: latest)
   -f, --follow        stream until the run ends
       --tail int      only the last N bytes
+```
+
+## `icaro runs rerun`
+
+Run a run again: the same workflow version and trigger payload
+
+```text
+icaro runs rerun ID
 ```
 
 ## `icaro schedules`

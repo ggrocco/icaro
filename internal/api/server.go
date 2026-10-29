@@ -79,6 +79,7 @@ func (s *Server) routes() {
 	m.Handle("GET /api/v1/runs", s.auth(store.ScopeRead, s.handleListRuns))
 	m.Handle("GET /api/v1/runs/{id}", s.auth(store.ScopeRead, s.handleGetRun))
 	m.Handle("POST /api/v1/runs/{id}/cancel", s.auth(store.ScopeWrite, s.handleCancelRun))
+	m.Handle("POST /api/v1/runs/{id}/rerun", s.auth(store.ScopeWrite, s.handleRerun))
 	m.Handle("GET /api/v1/runs/{id}/events", s.auth(store.ScopeRead, s.handleRunEvents))
 	m.Handle("GET /api/v1/runs/{id}/steps/{step}/logs", s.auth(store.ScopeRead, s.handleStepLogs))
 }

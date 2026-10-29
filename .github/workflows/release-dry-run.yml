@@ -1,0 +1,74 @@
+name: release dry run
+
+# The release build (release.yml) runs only on v* tags, so a change to it
+# would first run on a real release. This builds the same artifacts in
+# goreleaser's snapshot mode whenever a release input changes: archives,
+# packages, the Homebrew cask, the signed install.sh, and the ed25519
+# signature over checksums.txt with an ephemeral key. Nothing is published
+# and no secret is used. The macOS app bundle is built by ci.yml (desktop).
+on:
+  pull_request:
+    paths:
+      - .goreleaser.yaml
+      - .github/workflows/release.yml
+      - .github/workflows/release-dry-run.yml
+      - install.sh
+      - hack/sign/**
+      - internal/update/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make web
+      - name: an ephemeral signing key (thrown away with the runner)
+        run: |
+          out=$(go run ./hack/sign keygen)
+          seed=$(printf '%s\n' "$out" | sed -n 's/^ICARO_SIGNING_KEY=//p')
+          pub=$(printf '%s\n' "$out" | sed -n 's/^public key (base64): //p')
+          echo "::add-mask::$seed"
+          { echo "ICARO_SIGNING_KEY=$seed"; echo "ICARO_RELEASE_PUBKEY=$pub"; } >> "$GITHUB_ENV"
+      # The release's goreleaser, in snapshot mode: no publishing, and the
+      # signing (ed25519 and cosign) and SBOM steps that need the release
+      # environment are skipped; the next step signs as the release does.
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: release --snapshot --clean --skip=sign,sbom,publish
+        env:
+          HOMEBREW_TAP_TOKEN: dry-run
+      - name: sign checksums.txt and verify it offline, as the release does
+        run: |
+          go run ./hack/sign sign -in dist/checksums.txt -out dist/checksums.txt.sig
+          printf '%s' "$ICARO_RELEASE_PUBKEY" > "$RUNNER_TEMP/pub.b64"
+          go run ./hack/sign verify -pub "$RUNNER_TEMP/pub.b64" -in dist/checksums.txt -sig dist/checksums.txt.sig
+      - name: the artifacts a release publishes
+        run: |
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            ls dist/icaro_*_"$target".tar.gz
+          done
+          ls dist/*.deb dist/*.rpm
+          grep -q "$ICARO_RELEASE_PUBKEY" build/install.sh
+          cask=$(find dist -path '*Casks/icaro.rb')
+          test -n "$cask" && grep -q 'binary "icaro"' "$cask"
+          # The binary embeds the web UI and the release public key.
+          tar -xzf dist/icaro_*_linux_amd64.tar.gz -C "$RUNNER_TEMP" icaro
+          "$RUNNER_TEMP/icaro" version
+          strings "$RUNNER_TEMP/icaro" | grep -q '<div id="root">'
+          strings "$RUNNER_TEMP/icaro" | grep -q "$ICARO_RELEASE_PUBKEY"

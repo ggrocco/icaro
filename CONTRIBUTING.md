@@ -49,6 +49,8 @@ The release is gated:
 
 Every third-party action is pinned to a commit SHA with its version in a comment; Dependabot proposes the bumps. goreleaser, syft, and cosign run at exact versions.
 
+A release is never the first run of its build. [`release-dry-run.yml`](.github/workflows/release-dry-run.yml) runs on every pull request that changes a release input (`.goreleaser.yaml`, `release.yml`, `install.sh`, `hack/sign`, `internal/update`): goreleaser in snapshot mode builds the archives, packages, cask and signed `install.sh`, and an ephemeral key signs and verifies `checksums.txt` the way the release does, with no secret and nothing published. CI's lint job also runs `actionlint` (with `shellcheck`) on every workflow, `release.yml` included. Locally: `goreleaser release --snapshot --clean --skip=sign,sbom,publish` with `ICARO_RELEASE_PUBKEY` and `HOMEBREW_TAP_TOKEN` set to any value.
+
 These repository settings back the gates and must stay in place:
 
 - **Environment `release`** (Settings → Environments): required reviewers (at least one maintainer other than the tagger when there is one), "Prevent self-review", and deployment tags limited to `v*`. It holds the secrets `ICARO_SIGNING_KEY`, `HOMEBREW_TAP_TOKEN`, `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD`. Delete any repository-level copies of them, so no other workflow can read them.

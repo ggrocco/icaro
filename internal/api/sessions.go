@@ -193,12 +193,18 @@ func (s *Server) RegisterSessions(d SessionDeps) {
 			s.writeError(w, err)
 			return
 		}
-		// The login rewrites the seed that live sessions may be using.
-		if err := d.Sessions.CheckLogin(r.Context(), name, r.URL.Query().Get("force") == "true"); err != nil {
+		// The login rewrites the seed that live sessions may be using; the
+		// lease keeps new ones from starting until DELETE ends it.
+		if err := d.Sessions.BeginLogin(r.Context(), name, r.URL.Query().Get("force") == "true"); err != nil {
 			s.writeError(w, sessionErr(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, LoginInfo{Profile: name, Image: image, SeedDir: seed, User: d.Sessions.User(), Command: agent.Login, Egress: att})
+	}))
+	// The login is over (done or failed): sessions of the profile may start.
+	m.Handle("DELETE /api/v1/profiles/{name}/login", s.auth(store.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
+		d.Sessions.EndLogin(r.PathValue("name"))
+		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	m.Handle("GET /api/v1/secrets", s.auth(store.ScopeRead, func(w http.ResponseWriter, r *http.Request) {

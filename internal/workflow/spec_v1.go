@@ -171,6 +171,10 @@ type EnqueueRequest struct {
 	IdempotencyKey string // e.g. "<integration>:<delivery id>" or "cron:<workflow>:<fire time>"
 	Actor          string
 	DeliveryID     string
+	// Version runs that version of the workflow instead of the current
+	// one (a re-run); RerunOf links the new run to the run it repeats.
+	Version int
+	RerunOf string
 }
 
 // EnqueueResult reports what happened to an EnqueueRequest.

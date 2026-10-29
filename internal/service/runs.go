@@ -30,6 +30,7 @@ type RunInfo struct {
 	Actor       string          `json:"actor,omitempty"`
 	RootRunID   string          `json:"root_run_id"`
 	ParentRunID string          `json:"parent_run_id,omitempty"`
+	RerunOf     string          `json:"rerun_of,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	CreatedAt   string          `json:"created_at"`
 	StartedAt   *string         `json:"started_at,omitempty"`
@@ -85,6 +86,24 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 	if err != nil {
 		return workflow.EnqueueResult{}, err
 	}
+	version := w.Version
+	if req.Version != 0 && req.Version != w.Version {
+		v, err := s.store.GetWorkflowVersion(ctx, w.ID, req.Version)
+		if errors.Is(err, store.ErrNotFound) {
+			return workflow.EnqueueResult{}, ErrNotFound
+		}
+		if err != nil {
+			return workflow.EnqueueResult{}, err
+		}
+		old, issues, err := workflow.Parse([]byte(v.SpecYAML), workflow.Options{})
+		if err == nil && len(issues) > 0 {
+			err = issues
+		}
+		if err != nil || old == nil {
+			return workflow.EnqueueResult{}, badRequest("version %d of %s no longer parses: %v", req.Version, w.Name, err)
+		}
+		spec, version = old, req.Version
+	}
 	policy := spec.ConcurrencyPolicy()
 	steps, err := engine.StepInits(spec)
 	if err != nil {
@@ -103,8 +122,9 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 		kind = workflow.RunTriggerManual
 	}
 	run := &store.Run{
-		WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: w.Version, TriggerKind: kind, TriggerJSON: string(tj),
+		WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: version, TriggerKind: kind, TriggerJSON: string(tj),
 		IdempotencyKey: req.IdempotencyKey, Concurrency: policy, DeliveryID: req.DeliveryID, Actor: req.Actor,
+		RerunOf: req.RerunOf,
 	}
 	out, err := s.store.EnqueueRun(ctx, run, steps)
 	if err != nil {
@@ -170,6 +190,34 @@ func (s *Service) StartRun(ctx context.Context, name string, trigger map[string]
 		return nil, &MissingTriggerFieldsError{Fields: missing}
 	}
 	res, err := s.EnqueueRun(ctx, workflow.EnqueueRequest{Workflow: name, TriggerKind: workflow.RunTriggerManual, Trigger: trigger, Actor: actor})
+	if err != nil {
+		return nil, err
+	}
+	if res.Skipped != "" {
+		return nil, &Conflict{Msg: res.Skipped}
+	}
+	return s.GetRun(ctx, res.RunID)
+}
+
+// RerunRun starts a run again: the same workflow version, trigger kind
+// and payload, linked to the original by rerun_of. A deleted workflow, or
+// a version no run references any more, cannot be re-run.
+func (s *Service) RerunRun(ctx context.Context, id, actor string) (*RunInfo, error) {
+	r, err := s.store.GetRun(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var trigger map[string]any
+	if err := json.Unmarshal([]byte(orJSON(r.TriggerJSON)), &trigger); err != nil {
+		return nil, fmt.Errorf("run %s trigger: %w", id, err)
+	}
+	res, err := s.EnqueueRun(ctx, workflow.EnqueueRequest{
+		Workflow: r.WorkflowName, TriggerKind: r.TriggerKind, Trigger: trigger, Actor: actor,
+		Version: r.WorkflowVersion, RerunOf: r.ID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +375,7 @@ func runInfo(r *store.Run) *RunInfo {
 	return &RunInfo{
 		ID: r.ID, Workflow: r.WorkflowName, Version: r.WorkflowVersion, Status: r.Status, TriggerKind: r.TriggerKind,
 		Trigger: json.RawMessage(orJSON(r.TriggerJSON)), Concurrency: r.Concurrency, SessionID: r.SessionID,
-		DeliveryID: r.DeliveryID, Actor: r.Actor, RootRunID: r.RootRunID, ParentRunID: r.ParentRunID, Error: r.Error,
+		DeliveryID: r.DeliveryID, Actor: r.Actor, RootRunID: r.RootRunID, ParentRunID: r.ParentRunID, RerunOf: r.RerunOf, Error: r.Error,
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), StartedAt: tsp(r.StartedAt), FinishedAt: tsp(r.FinishedAt),
 	}
 }

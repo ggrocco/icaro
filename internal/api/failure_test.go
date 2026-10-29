@@ -32,6 +32,7 @@ func TestStoreFailureMapping(t *testing.T) {
 		{"GET", "/api/v1/runs", nil, internal},
 		{"GET", "/api/v1/runs/r1", nil, internal},
 		{"POST", "/api/v1/runs/r1/cancel", nil, internal},
+		{"POST", "/api/v1/runs/r1/rerun", nil, internal},
 		{"GET", "/api/v1/runs/r1/events", nil, internal},
 		{"GET", "/api/v1/runs/r1/steps/s/logs", nil, internal},
 

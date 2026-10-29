@@ -102,6 +102,7 @@ export interface RunInfo {
   status: string;
   trigger_kind: string;
   trigger?: Record<string, unknown>;
+  rerun_of?: string;
   error?: string;
   created_at: string;
   started_at?: string;
@@ -219,7 +220,8 @@ export const api = {
   getRun: (id: string) => request<RunInfo>("GET", `/api/v1/runs/${id}`),
   cancel: (id: string) => request<RunInfo>("POST", `/api/v1/runs/${id}/cancel`),
   // A re-run starts the same workflow with the same trigger payload.
-  rerun: (run: RunInfo) => api.run(run.workflow, run.trigger ?? {}),
+  // The same workflow version and trigger the run had (POST .../rerun).
+  rerun: (run: RunInfo) => request<RunInfo>("POST", `/api/v1/runs/${encodeURIComponent(run.id)}/rerun`),
   stepLogs: (id: string, step: string) => request<string>("GET", `/api/v1/runs/${id}/steps/${encodeURIComponent(step)}/logs`, undefined, true),
 
   integrations: () => request<{ integrations: IntegrationInfo[] }>("GET", "/api/v1/integrations").then((r) => r.integrations ?? []),

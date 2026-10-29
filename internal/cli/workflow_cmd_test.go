@@ -120,6 +120,9 @@ func TestRunAndRunsCommands(t *testing.T) {
 	wantCLI(t, []string{"runs", "get", id}, "run "+id, "STEP", "greet", "shout", "greet")
 	wantCLI(t, []string{"runs", "get", "--json", id}, `"id": "`+id+`"`)
 	failCLI(t, "", "runs", "get", "run_nope")
+	wantCLI(t, []string{"runs", "rerun", id}, "version 1, re-run of "+id)
+	wantCLI(t, []string{"runs", "rerun", "--json", id}, `"rerun_of": "`+id+`"`)
+	failCLI(t, "", "runs", "rerun", "run_nope")
 
 	// No step has an attempt yet, so logs print nothing.
 	if out := mustCLI(t, "runs", "logs", id); out != "" {

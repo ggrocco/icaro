@@ -239,6 +239,13 @@ func (c *Client) ListRuns(ctx context.Context, workflowName, status string, limi
 	return out.Runs, err
 }
 
+// Rerun starts a run again on the same workflow version and trigger.
+func (c *Client) Rerun(ctx context.Context, id string) (*service.RunInfo, error) {
+	var out service.RunInfo
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(id)+"/rerun", nil, &out)
+	return &out, err
+}
+
 // CancelRun requests cancellation.
 func (c *Client) CancelRun(ctx context.Context, id string) (*service.RunInfo, error) {
 	var out service.RunInfo

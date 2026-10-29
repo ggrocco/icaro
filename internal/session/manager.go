@@ -98,6 +98,7 @@ type Manager struct {
 	gitLock  chan struct{} // serializes repository-cache operations
 	mcp      *registry
 	starting *owned[chan struct{}] // session id -> closed when its start goroutine returns
+	logins   *owned[time.Time]     // profile -> end of the login lease (see BeginLogin)
 }
 
 // New builds a Manager; call Run to process starts.
@@ -120,7 +121,7 @@ func New(o Options) *Manager {
 		o: o, layout: l,
 		policy:  container.MountPolicy{Allow: o.Config.Mounts.Allow, Home: home},
 		startCh: make(chan chan struct{}), wake: make(chan struct{}, 1), gitLock: make(chan struct{}, 1),
-		mcp: newRegistry(), starting: newOwned[chan struct{}](),
+		mcp: newRegistry(), starting: newOwned[chan struct{}](), logins: newOwned[time.Time](),
 	}
 }
 
@@ -195,6 +196,9 @@ func (m *Manager) fill(ctx context.Context) {
 	for _, row := range queued {
 		if active >= m.MaxActive() {
 			return
+		}
+		if m.loginHeld(row.Profile) {
+			continue // the login is rewriting this profile's seed; start it after
 		}
 		// Register the start before claiming the session, so a Stop that
 		// wins the session after the claim always finds a start to wait for.

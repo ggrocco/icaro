@@ -20,8 +20,14 @@ jobs:
         with:
           go-version-file: go.mod
       - name: gofmt
-        run: test -z "$(gofmt -s -l $(git ls-files '*.go'))" || (gofmt -s -l $(git ls-files '*.go'); exit 1)
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -s -l)
+          test -z "$unformatted" || { echo "$unformatted"; exit 1; }
       - run: go vet ./...
+      # Workflows, release.yml included (it only runs on tags), checked with
+      # shellcheck for their run scripts.
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       # golangci-lint is built from source and needs a toolchain at least as
       # new as the one it was released with, so build it with current stable
       # Go and pin the version (05-engineering: pinned dependencies).

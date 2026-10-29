@@ -20,6 +20,8 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 
 **Git credentials never enter a container.** `icaro session push` pushes a session's branch from the host with your credentials. Host git runs with hooks, fsmonitor, the file transport and submodule recursion disabled on session worktrees. See [Sessions: Pushing a session's branch](sessions.md#pushing-a-sessions-branch).
 
+**Git you run yourself in a session worktree is not hardened.** The agent cannot change the project's `.git`, but it owns its worktree: a nested repository or submodule it creates there has its own config, which your git reads when you run it inside that directory or let it recurse into submodules. Review a session's changes with `git diff` from the project root (or the web UI), and push with `icaro session push` rather than running git inside directories the agent created.
+
 **Mounts.** Only the session worktree, the managed profile home and an explicit allowlist (`mounts.allow`) are mounted. Container engine sockets and state directories, system paths, `$HOME` as a whole, credential directories (`~/.claude`, `~/.ssh`, `~/.aws`, …) and any directory that contains one (such as `~/.config`) are always refused. See [Sessions: Mounts](sessions.md#mounts).
 
 **Secrets.** The master key is kept in the macOS Keychain or the Linux Secret Service, or in an encrypted file that needs a password. Secrets are sealed in the database, never shown by any API, CLI or MCP tool after they are written, and redacted from logs and captured outputs. Integration credentials are **host-bound**: the action executor refuses to send one to a host outside its binding. See [Integrations: Credentials](integrations.md#credentials).

@@ -67,6 +67,7 @@ func TestEndpoints(t *testing.T) {
 		{"ListRuns all", func(ctx context.Context, c *Client) error { _, err := c.ListRuns(ctx, "", "", 0); return err }, "GET", "/api/v1/runs?", ""},
 		{"ListRuns filtered", func(ctx context.Context, c *Client) error { _, err := c.ListRuns(ctx, "w", "failed", 5); return err }, "GET", "/api/v1/runs?limit=5&status=failed&workflow=w", ""},
 		{"CancelRun", func(ctx context.Context, c *Client) error { _, err := c.CancelRun(ctx, "r1"); return err }, "POST", "/api/v1/runs/r1/cancel", ""},
+		{"Rerun", func(ctx context.Context, c *Client) error { _, err := c.Rerun(ctx, "r1"); return err }, "POST", "/api/v1/runs/r1/rerun", ""},
 		{"StepLogs", func(ctx context.Context, c *Client) error { _, err := c.StepLogs(ctx, "r1", "s", 2, 100); return err }, "GET", "/api/v1/runs/r1/steps/s/logs?attempt=2&tail=100", ""},
 		{"StepLogs latest", func(ctx context.Context, c *Client) error { _, err := c.StepLogs(ctx, "r1", "s", 0, 0); return err }, "GET", "/api/v1/runs/r1/steps/s/logs?", ""},
 
@@ -164,6 +165,7 @@ func TestEndpoints(t *testing.T) {
 			return err
 		}, "POST", "/api/v1/profiles/default/login", ""},
 		{"PrepareLogin force", func(ctx context.Context, c *Client) error { _, err := c.PrepareLogin(ctx, "default", true); return err }, "POST", "/api/v1/profiles/default/login?force=true", ""},
+		{"EndLogin", func(ctx context.Context, c *Client) error { return c.EndLogin(ctx, "default") }, "DELETE", "/api/v1/profiles/default/login", ""},
 		{"ListSecrets", func(ctx context.Context, c *Client) error { _, err := c.ListSecrets(ctx); return err }, "GET", "/api/v1/secrets", ""},
 		{"SetSecret", func(ctx context.Context, c *Client) error { return c.SetSecret(ctx, "k", "v", []string{"h"}) }, "PUT", "/api/v1/secrets/k", `{"hosts":["h"],"value":"v"}`},
 		{"DeleteSecret", func(ctx context.Context, c *Client) error { return c.DeleteSecret(ctx, "k") }, "DELETE", "/api/v1/secrets/k", ""},
