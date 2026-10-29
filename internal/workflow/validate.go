@@ -18,35 +18,17 @@ import (
 	"golang.org/x/text/message"
 
 	"icaro/internal/expr"
+	"icaro/internal/workflow/issue"
 )
 
 var printer = message.NewPrinter(language.English)
 
 // Issue is one validation problem, addressed by JSON Pointer. The CLI,
 // API, UI and the MCP validate_workflow tool all show this list.
-type Issue struct {
-	Path    string `json:"path"`
-	Message string `json:"message"`
-	Hint    string `json:"hint,omitempty"`
-}
-
-func (i Issue) String() string {
-	if i.Hint != "" {
-		return fmt.Sprintf("%s: %s (hint: %s)", i.Path, i.Message, i.Hint)
-	}
-	return fmt.Sprintf("%s: %s", i.Path, i.Message)
-}
+type Issue = issue.Issue
 
 // Issues is a list of validation problems.
-type Issues []Issue
-
-func (is Issues) Error() string {
-	parts := make([]string, len(is))
-	for i, it := range is {
-		parts[i] = it.String()
-	}
-	return strings.Join(parts, "; ")
-}
+type Issues = issue.Issues
 
 // Options parameterize validation with knowledge of the environment.
 type Options struct {

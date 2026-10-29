@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"icaro/internal/apiclient"
+	"icaro/internal/apiclient/rest"
 	"icaro/internal/paths"
 	"icaro/internal/service"
 	"icaro/internal/store"
@@ -91,7 +92,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // remoteDaemon reaches the fake as a TCP daemon.
 func remoteDaemon(srv *httptest.Server) *Daemon {
-	return &Daemon{Client: apiclient.New(srv.URL, "t"), Remote: true}
+	return &Daemon{Client: rest.New(srv.URL, "t"), Remote: true}
 }
 
 // localDaemon reaches the fake as the local daemon, with its health
@@ -121,7 +122,7 @@ func (s *starter) count() int {
 
 func localDaemon(f *fakeAPI, srv *httptest.Server, st *starter) *Daemon {
 	return &Daemon{
-		Client: apiclient.New(srv.URL, ""), icaro: "/opt/icaro/bin/icaro", args: []string{"--home", "/h"},
+		Client: rest.New(srv.URL, ""), icaro: "/opt/icaro/bin/icaro", args: []string{"--home", "/h"},
 		start: st.start,
 		ping: func(context.Context, paths.Layout) error {
 			f.mu.Lock()

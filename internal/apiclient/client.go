@@ -1,13 +1,11 @@
 // Package apiclient is the Go client for the icaro HTTP API, used by the
-// CLI and by the stdio MCP server.
+// CLI and by the stdio MCP server. Its transport is package rest.
 package apiclient
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,118 +14,38 @@ import (
 	"strings"
 	"time"
 
+	"icaro/internal/apiclient/rest"
 	"icaro/internal/service"
 	"icaro/internal/usage"
 	"icaro/internal/workflow"
 )
 
-// Client talks to an icaro server.
+// Client talks to an icaro server: the rest transport plus typed calls.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	*rest.Client
 }
 
 // New creates a client.
-func New(baseURL, token string) *Client {
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{Timeout: 60 * time.Second}}
-}
+func New(baseURL, token string) *Client { return &Client{rest.New(baseURL, token)} }
 
 // NewWithHTTP creates a client over a custom transport (e.g. the daemon's
 // Unix socket).
 func NewWithHTTP(baseURL, token string, hc *http.Client) *Client {
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: hc}
-}
-
-// Do performs a raw request against the API; out may be *[]byte for raw
-// bodies. Exposed for commands added by other packages.
-func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {
-	return c.doJSON(ctx, method, path, in, out)
+	return &Client{rest.NewWithHTTP(baseURL, token, hc)}
 }
 
 // Error is an API error response.
-type Error struct {
-	Status int
-	Msg    string
-	Issues workflow.Issues
-	// Fields lists missing trigger fields (manual runs).
-	Fields []string
-}
-
-func (e *Error) Error() string {
-	if len(e.Issues) > 0 {
-		return fmt.Sprintf("%s:\n  %s", e.Msg, strings.ReplaceAll(e.Issues.Error(), "; ", "\n  "))
-	}
-	return fmt.Sprintf("%s (HTTP %d)", e.Msg, e.Status)
-}
-
-func decodeError(status int, data []byte) error {
-	e := &Error{Status: status, Msg: http.StatusText(status)}
-	var eb struct {
-		Error  string          `json:"error"`
-		Issues workflow.Issues `json:"issues"`
-		Fields []string        `json:"fields"`
-	}
-	if json.Unmarshal(data, &eb) == nil && eb.Error != "" {
-		e.Msg, e.Issues, e.Fields = eb.Error, eb.Issues, eb.Fields
-	}
-	return e
-}
+type Error = rest.Error
 
 // IsNotFound reports a 404.
-func IsNotFound(err error) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Status == http.StatusNotFound
-}
+func IsNotFound(err error) bool { return rest.IsNotFound(err) }
 
 func (c *Client) do(ctx context.Context, method, path string, contentType string, body io.Reader, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
-	if err != nil {
-		return err
-	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= 400 {
-		return decodeError(resp.StatusCode, data)
-	}
-	if out == nil || len(data) == 0 {
-		return nil
-	}
-	if raw, ok := out.(*[]byte); ok {
-		*raw = data
-		return nil
-	}
-	return json.Unmarshal(data, out)
+	return c.Send(ctx, method, path, contentType, body, out)
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
-	if in != nil {
-		b, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(b)
-	}
-	return c.do(ctx, method, path, "application/json", body, out)
-}
-
-// Health checks the server.
-func (c *Client) Health(ctx context.Context) error {
-	return c.do(ctx, http.MethodGet, "/healthz", "", nil, nil)
+	return c.Do(ctx, method, path, in, out)
 }
 
 // Schema returns the workflow JSON Schema.
@@ -300,7 +218,7 @@ func (c *Client) Events(ctx context.Context, id string, withLogs bool, fn func(E
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return decodeError(resp.StatusCode, data)
+		return rest.DecodeError(resp.StatusCode, data)
 	}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 8<<20)

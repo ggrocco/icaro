@@ -270,3 +270,44 @@ func TestExpandHome(t *testing.T) {
 		t.Fatalf("abs: %s", got)
 	}
 }
+
+// Every layer is typed by the field it lands in: an environment value
+// that looks like a number stays a string where the field is a string,
+// and a file overrides one key of a map without dropping the defaults.
+func TestLoadTypesEveryLayer(t *testing.T) {
+	home := isolate(t)
+	p := filepath.Join(home, "icaro.yaml")
+	if err := os.WriteFile(p, []byte("version: 1\nlimits:\n  cpus: 1.5\npreviews:\n  debounce: 750ms\nprofiles:\n  claude:\n    runtime: runsc\n  codex:\n    egress: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ICARO_DAEMON__TOKEN", "12345")
+	t.Setenv("ICARO_PREVIEWS__ENABLED", "false")
+	t.Setenv("ICARO_WEBHOOKS__MAX_SKEW", "90s")
+	t.Setenv("ICARO_USAGE__DAILY_LIMIT_USD", "2.5")
+	t.Setenv("ICARO_MEMORY__PREAMBLE", "a: b # not a comment")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Daemon.Token != "12345" || cfg.Previews.Enabled || cfg.Webhooks.MaxSkew != 90*time.Second || cfg.Usage.DailyLimit != 2.5 {
+		t.Fatalf("env: %+v %+v %+v %+v", cfg.Daemon, cfg.Previews, cfg.Webhooks, cfg.Usage)
+	}
+	if cfg.Memory.Preamble != "a: b # not a comment" {
+		t.Fatalf("a value with YAML syntax stays a string: %q", cfg.Memory.Preamble)
+	}
+	if cfg.Limits.CPUs != 1.5 || cfg.Limits.MemoryMB != 2048 || cfg.Previews.Debounce != 750*time.Millisecond || cfg.Previews.HTTPPort != 8780 {
+		t.Fatalf("file over defaults: %+v %+v", cfg.Limits, cfg.Previews)
+	}
+	claude := cfg.Profiles["claude"]
+	if claude.Runtime != "runsc" || claude.Agent != "claude" || len(claude.Egress) == 0 {
+		t.Fatalf("a profile set in the file keeps its defaults: %+v", claude)
+	}
+	if codex := cfg.Profiles["codex"]; codex.Egress == nil || len(codex.Egress) != 0 {
+		t.Fatalf("an explicit empty allowlist denies all, not the default list: %#v", codex.Egress)
+	}
+
+	t.Setenv("ICARO_WORKFLOWS__CONCURRENCY", "many")
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "many") {
+		t.Fatalf("a mistyped value is an error naming it: %v", err)
+	}
+}

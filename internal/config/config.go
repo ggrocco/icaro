@@ -15,11 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/providers/env/v2"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/v2"
+	"go.yaml.in/yaml/v3"
 
 	"icaro/internal/paths"
 )
@@ -34,24 +30,24 @@ const DefaultAgentImage = "ghcr.io/icaro-dev/agent-base:latest"
 
 // Config is the full configuration.
 type Config struct {
-	Version   int                      `koanf:"version" yaml:"version"`
-	Home      string                   `koanf:"home" yaml:"home"`
-	Daemon    DaemonConfig             `koanf:"daemon" yaml:"daemon"`
-	Database  DatabaseConfig           `koanf:"database" yaml:"database"`
-	Docker    DockerConfig             `koanf:"docker" yaml:"docker"`
-	Limits    Limits                   `koanf:"limits" yaml:"limits"`
-	Sessions  SessionsConfig           `koanf:"sessions" yaml:"sessions"`
-	Profiles  map[string]ProfileConfig `koanf:"profiles" yaml:"profiles"`
-	Mounts    MountsConfig             `koanf:"mounts" yaml:"mounts"`
-	Workflows WorkflowsConfig          `koanf:"workflows" yaml:"workflows"`
-	Previews  PreviewsConfig           `koanf:"previews" yaml:"previews"`
-	Memory    MemoryConfig             `koanf:"memory" yaml:"memory"`
-	Webhooks  WebhooksConfig           `koanf:"webhooks" yaml:"webhooks"`
+	Version   int                      `yaml:"version"`
+	Home      string                   `yaml:"home"`
+	Daemon    DaemonConfig             `yaml:"daemon"`
+	Database  DatabaseConfig           `yaml:"database"`
+	Docker    DockerConfig             `yaml:"docker"`
+	Limits    Limits                   `yaml:"limits"`
+	Sessions  SessionsConfig           `yaml:"sessions"`
+	Profiles  map[string]ProfileConfig `yaml:"profiles"`
+	Mounts    MountsConfig             `yaml:"mounts"`
+	Workflows WorkflowsConfig          `yaml:"workflows"`
+	Previews  PreviewsConfig           `yaml:"previews"`
+	Memory    MemoryConfig             `yaml:"memory"`
+	Webhooks  WebhooksConfig           `yaml:"webhooks"`
 	// Integrations holds user-owned per-integration settings; a pack can
 	// never grant itself these.
-	Integrations map[string]IntegrationConfig `koanf:"integrations" yaml:"integrations"`
-	Usage        UsageConfig                  `koanf:"usage" yaml:"usage"`
-	Update       UpdateConfig                 `koanf:"update" yaml:"update"`
+	Integrations map[string]IntegrationConfig `yaml:"integrations"`
+	Usage        UsageConfig                  `yaml:"usage"`
+	Update       UpdateConfig                 `yaml:"update"`
 }
 
 // DaemonConfig controls `icaro serve` and how clients reach it.
@@ -60,74 +56,74 @@ type DaemonConfig struct {
 	// only. It must be a loopback address unless AllowRemote is set: the
 	// daemon speaks plain HTTP, so remote access belongs behind a
 	// TLS-terminating reverse proxy on the same host.
-	Listen string `koanf:"listen" yaml:"listen"`
+	Listen string `yaml:"listen"`
 	// AllowRemote lets Listen bind a non-loopback address (plain HTTP,
 	// tokens in clear on the wire). Off by default (MVP cut 2).
-	AllowRemote bool `koanf:"allow_remote" yaml:"allow_remote"`
+	AllowRemote bool `yaml:"allow_remote"`
 	// URL makes CLI clients use TCP instead of the local socket.
-	URL string `koanf:"url" yaml:"url"`
+	URL string `yaml:"url"`
 	// Token is the API token clients send over TCP.
-	Token string `koanf:"token" yaml:"token"`
+	Token string `yaml:"token"`
 	// UIListen is the loopback address `icaro ui` opens for the browser
 	// (ADR 0023). It must be a loopback address.
-	UIListen string `koanf:"ui_listen" yaml:"ui_listen"`
+	UIListen string `yaml:"ui_listen"`
 	// Pprof serves net/http/pprof under /debug/pprof on the Unix socket
 	// only (never TCP), for profiling (ADR 0024).
-	Pprof bool `koanf:"pprof" yaml:"pprof"`
+	Pprof bool `yaml:"pprof"`
 	// PublicURL is the externally reachable base URL (webhook URLs).
-	PublicURL string `koanf:"public_url" yaml:"public_url"`
+	PublicURL string `yaml:"public_url"`
 }
 
 // DatabaseConfig selects the storage backend.
 type DatabaseConfig struct {
-	Driver string `koanf:"driver" yaml:"driver"` // sqlite | postgres
-	DSN    string `koanf:"dsn" yaml:"dsn"`       // empty for sqlite => <home>/config/icaro.db
+	Driver string `yaml:"driver"` // sqlite | postgres
+	DSN    string `yaml:"dsn"`    // empty for sqlite => <home>/config/icaro.db
 }
 
 // DockerConfig points at the engine.
 type DockerConfig struct {
-	Host string `koanf:"host" yaml:"host"` // empty => DOCKER_HOST / default socket
+	Host string `yaml:"host"` // empty => DOCKER_HOST / default socket
 	// StrictRuntime is an optional OCI runtime (e.g. runsc) for untrusted profiles.
-	StrictRuntime string `koanf:"strict_runtime" yaml:"strict_runtime"`
+	StrictRuntime string `yaml:"strict_runtime"`
 	// HelperImage contains /icaro and runs Ícaro's helper containers (the
 	// egress proxy). Empty: on Linux, built from the running binary.
-	HelperImage string `koanf:"helper_image" yaml:"helper_image"`
+	HelperImage string `yaml:"helper_image"`
 }
 
 // Limits are the resource ceilings applied to every container Ícaro
 // creates. Nothing in a workflow can raise them.
 type Limits struct {
-	Timeout  time.Duration `koanf:"timeout" yaml:"timeout"`
-	MemoryMB int64         `koanf:"memory_mb" yaml:"memory_mb"`
-	CPUs     float64       `koanf:"cpus" yaml:"cpus"`
-	Pids     int64         `koanf:"pids" yaml:"pids"`
-	NoFile   int64         `koanf:"nofile" yaml:"nofile"`
+	Timeout  time.Duration `yaml:"timeout"`
+	MemoryMB int64         `yaml:"memory_mb"`
+	CPUs     float64       `yaml:"cpus"`
+	Pids     int64         `yaml:"pids"`
+	NoFile   int64         `yaml:"nofile"`
 }
 
 // SessionsConfig governs the session spine.
 type SessionsConfig struct {
 	// MaxActive caps concurrently running sessions (O1); 0 derives it from RAM.
-	MaxActive      int    `koanf:"max_active" yaml:"max_active"`
-	DefaultProfile string `koanf:"default_profile" yaml:"default_profile"`
+	MaxActive      int    `yaml:"max_active"`
+	DefaultProfile string `yaml:"default_profile"`
 	// HomeMode picks how profile homes are layered: auto | overlay | copy.
-	HomeMode string `koanf:"home_mode" yaml:"home_mode"`
+	HomeMode string `yaml:"home_mode"`
 }
 
 // ProfileConfig is one agent profile: image, agent CLI, egress allowlist
 // and extra mounts. The egress allowlist is mandatory (ADR 0005).
 type ProfileConfig struct {
-	Agent   string   `koanf:"agent" yaml:"agent"`
-	Image   string   `koanf:"image" yaml:"image"`
-	Egress  []string `koanf:"egress" yaml:"egress"`
-	Mounts  []string `koanf:"mounts" yaml:"mounts"`
-	Runtime string   `koanf:"runtime" yaml:"runtime"`
+	Agent   string   `yaml:"agent"`
+	Image   string   `yaml:"image"`
+	Egress  []string `yaml:"egress"`
+	Mounts  []string `yaml:"mounts"`
+	Runtime string   `yaml:"runtime"`
 	// Tools are asdf plugin@version pairs materialized during setup.
-	Tools []string `koanf:"tools" yaml:"tools"`
+	Tools []string `yaml:"tools"`
 	// Inject maps a provider (InjectProviders) to the name of the secret
 	// holding its API key. The key never enters the container: the agent
 	// gets a base URL on the profile's egress proxy and a per-session
 	// placeholder, and the daemon adds the key host-side (ADR 0028).
-	Inject map[string]string `koanf:"inject" yaml:"inject,omitempty"`
+	Inject map[string]string `yaml:"inject,omitempty"`
 }
 
 // InjectProviders are the providers profiles.<name>.inject accepts.
@@ -138,69 +134,69 @@ var secretNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$`)
 
 // MountsConfig is the allowlist of host directories that may be mounted.
 type MountsConfig struct {
-	Allow []string `koanf:"allow" yaml:"allow"`
+	Allow []string `yaml:"allow"`
 }
 
 // WorkflowsConfig tunes the workflow engine.
 type WorkflowsConfig struct {
 	// Concurrency caps step containers running at once across all runs.
-	Concurrency int `koanf:"concurrency" yaml:"concurrency"`
+	Concurrency int `yaml:"concurrency"`
 	// MaxRuns caps runs executing at once (0 = Concurrency); RunParallelism
 	// caps parallel steps within one run (0 = only the global cap).
-	MaxRuns        int    `koanf:"max_runs" yaml:"max_runs"`
-	RunParallelism int    `koanf:"run_parallelism" yaml:"run_parallelism"`
-	Profile        string `koanf:"profile" yaml:"profile"`
+	MaxRuns        int    `yaml:"max_runs"`
+	RunParallelism int    `yaml:"run_parallelism"`
+	Profile        string `yaml:"profile"`
 	// AllowHost permits image steps to run on the host (MVP cut 4: off).
-	AllowHost bool `koanf:"allow_host" yaml:"allow_host"`
+	AllowHost bool `yaml:"allow_host"`
 }
 
 // PreviewsConfig governs per-worktree previews.
 type PreviewsConfig struct {
-	Enabled      bool          `koanf:"enabled" yaml:"enabled"`
-	Domain       string        `koanf:"domain" yaml:"domain"` // e.g. "test" for slug.test; empty => localhost:<port>
-	HTTPPort     int           `koanf:"http_port" yaml:"http_port"`
-	TraefikImage string        `koanf:"traefik_image" yaml:"traefik_image"`
-	Debounce     time.Duration `koanf:"debounce" yaml:"debounce"`
+	Enabled      bool          `yaml:"enabled"`
+	Domain       string        `yaml:"domain"` // e.g. "test" for slug.test; empty => localhost:<port>
+	HTTPPort     int           `yaml:"http_port"`
+	TraefikImage string        `yaml:"traefik_image"`
+	Debounce     time.Duration `yaml:"debounce"`
 	// Roots are extra directories watched for compose projects, in
 	// addition to the session worktrees.
-	Roots []string `koanf:"roots" yaml:"roots"`
+	Roots []string `yaml:"roots"`
 }
 
 // MemoryConfig tunes shared memory.
 type MemoryConfig struct {
-	Preamble string `koanf:"preamble" yaml:"preamble"`
+	Preamble string `yaml:"preamble"`
 }
 
 // WebhooksConfig bounds inbound webhooks.
 type WebhooksConfig struct {
-	MaxBodyBytes int64         `koanf:"max_body_bytes" yaml:"max_body_bytes"`
-	MaxSkew      time.Duration `koanf:"max_skew" yaml:"max_skew"`
-	RatePerMin   int           `koanf:"rate_per_min" yaml:"rate_per_min"`
+	MaxBodyBytes int64         `yaml:"max_body_bytes"`
+	MaxSkew      time.Duration `yaml:"max_skew"`
+	RatePerMin   int           `yaml:"rate_per_min"`
 	// Retention is how long delivery records are kept; it is also the
 	// window in which a replayed delivery is recognized as a duplicate.
-	Retention time.Duration `koanf:"retention" yaml:"retention"`
+	Retention time.Duration `yaml:"retention"`
 	// MaxRejected caps how many rejected (unverified) deliveries are kept.
-	MaxRejected int `koanf:"max_rejected" yaml:"max_rejected"`
+	MaxRejected int `yaml:"max_rejected"`
 }
 
 // IntegrationConfig holds user opt-ins for one integration.
 type IntegrationConfig struct {
 	// AllowPrivate lets actions reach private-range addresses (self-hosted).
-	AllowPrivate bool `koanf:"allow_private" yaml:"allow_private"`
+	AllowPrivate bool `yaml:"allow_private"`
 	// BaseURL overrides a manifest's base URL for self-hosted services.
-	BaseURL string `koanf:"base_url" yaml:"base_url"`
+	BaseURL string `yaml:"base_url"`
 }
 
 // UsageConfig governs Phase 9 usage tracking.
 type UsageConfig struct {
-	Timezone   string  `koanf:"timezone" yaml:"timezone"`
-	DailyLimit float64 `koanf:"daily_limit_usd" yaml:"daily_limit_usd"`
+	Timezone   string  `yaml:"timezone"`
+	DailyLimit float64 `yaml:"daily_limit_usd"`
 }
 
 // UpdateConfig controls self-update.
 type UpdateConfig struct {
-	BaseURL   string `koanf:"base_url" yaml:"base_url"`
-	PublicKey string `koanf:"public_key" yaml:"public_key"` // base64 ed25519 release key
+	BaseURL   string `yaml:"base_url"`
+	PublicKey string `yaml:"public_key"` // base64 ed25519 release key
 }
 
 // DefaultProfiles are the built-in profiles. Their egress allowlists are
@@ -255,28 +251,44 @@ const DefaultPreamble = "Before you start, call the icaro memory tool `memory_qu
 // environment. The file is the explicit path, else $ICARO_CONFIG, else
 // <home>/config/icaro.yaml when it exists.
 func Load(path string) (*Config, error) {
-	k := koanf.New(".")
-	if err := k.Load(confmap.Provider(Defaults(), "."), nil); err != nil {
-		return nil, err
+	tree := map[string]any{}
+	for key, v := range Defaults() {
+		setKey(tree, key, v)
 	}
 	resolved, err := resolveConfigPath(path)
 	if err != nil {
 		return nil, err
 	}
 	if resolved != "" {
-		if err := k.Load(file.Provider(resolved), yaml.Parser()); err != nil {
+		data, err := os.ReadFile(resolved)
+		if err != nil {
 			return nil, fmt.Errorf("config %s: %w", resolved, err)
 		}
+		var file map[string]any
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			return nil, fmt.Errorf("config %s: %w", resolved, err)
+		}
+		merge(tree, file)
 	}
-	if err := k.Load(env.Provider(".", env.Opt{
-		Prefix:        envPrefix,
-		TransformFunc: func(name, value string) (string, any) { return envKey(name), value },
-	}), nil); err != nil {
+	for _, kv := range os.Environ() {
+		name, value, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, envPrefix) {
+			continue
+		}
+		if key := envKey(name); key != "" {
+			setKey(tree, key, envValue(value))
+		}
+	}
+	// The merged tree is decoded as YAML, so every layer gets the same
+	// typing: durations parse from "30m", and an environment value is
+	// typed by the field it lands in.
+	data, err := yaml.Marshal(tree)
+	if err != nil {
 		return nil, err
 	}
 	var cfg Config
-	if err := k.Unmarshal("", &cfg); err != nil {
-		return nil, err
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
 	cfg.Home = expandHome(cfg.Home)
 	profiles := DefaultProfiles()
@@ -300,6 +312,43 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.Profiles = profiles
 	return &cfg, nil
+}
+
+// setKey sets a dotted key (daemon.listen) in a nested tree.
+func setKey(tree map[string]any, key string, v any) {
+	parts := strings.Split(key, ".")
+	for _, p := range parts[:len(parts)-1] {
+		next, ok := tree[p].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			tree[p] = next
+		}
+		tree = next
+	}
+	tree[parts[len(parts)-1]] = v
+}
+
+// merge lays src over dst: maps merge key by key, anything else (lists
+// included) replaces.
+func merge(dst, src map[string]any) {
+	for k, v := range src {
+		if sm, ok := v.(map[string]any); ok {
+			if dm, ok := dst[k].(map[string]any); ok {
+				merge(dm, sm)
+				continue
+			}
+		}
+		dst[k] = v
+	}
+}
+
+// envValue is an environment value, emitted as an untagged scalar so it
+// decodes as the field's type: "7" into an int, "true" into a bool, and
+// "2s" into a duration.
+type envValue string
+
+func (v envValue) MarshalYAML() (any, error) {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: string(v)}, nil
 }
 
 // envKey maps ICARO_DAEMON__LISTEN to daemon.listen. ICARO_HOME,

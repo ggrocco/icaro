@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -68,18 +67,23 @@ func TestPendingMigrations(t *testing.T) {
 	}
 }
 
-// TestPostgresProvider checks that a Postgres store picks the Postgres
-// migrations without needing a server: goose only reads the embedded files.
-func TestPostgresProvider(t *testing.T) {
-	db, err := sql.Open("pgx", "postgres://icaro@127.0.0.1:1/icaro?sslmode=disable") // lazy: never dialed
-	if err != nil {
-		t.Fatal(err)
+// TestPostgresMigrations checks that a Postgres store reads the Postgres
+// migrations without needing a server: only the embedded files are read.
+func TestPostgresMigrations(t *testing.T) {
+	ms, err := (&Store{dialect: Postgres}).migrations()
+	if err != nil || len(ms) == 0 {
+		t.Fatalf("%d migrations, %v", len(ms), err)
 	}
-	defer func() { _ = db.Close() }()
-	if _, err := (&Store{db: db, dialect: Postgres}).provider(); err != nil {
-		t.Fatal(err)
+	lite, err := (&Store{dialect: SQLite}).migrations()
+	if err != nil || len(lite) != len(ms) {
+		t.Fatalf("every migration exists for both dialects: %d sqlite, %d postgres, %v", len(lite), len(ms), err)
 	}
-	if _, err := (&Store{db: db, dialect: "nope"}).provider(); err == nil {
+	for i := range ms {
+		if ms[i].version != lite[i].version {
+			t.Fatalf("version %d vs %d", ms[i].version, lite[i].version)
+		}
+	}
+	if _, err := (&Store{dialect: "nope"}).migrations(); err == nil {
 		t.Fatal("a dialect without migrations must fail")
 	}
 }

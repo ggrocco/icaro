@@ -227,11 +227,10 @@ func (c *Controller) Do(ctx context.Context, a Action) error {
 		}
 		c.UI.OpenBrowser(a.Arg)
 	case ActCancelRun:
-		_, err := c.Daemon.Client.CancelRun(ctx, a.Arg)
-		return err
+		return c.Daemon.Client.Do(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(a.Arg)+"/cancel", nil, nil)
 	case ActRunWorkflow:
-		r, err := c.Daemon.Client.Run(ctx, a.Arg, nil)
-		if err != nil {
+		var r runInfo
+		if err := c.Daemon.Client.Do(ctx, http.MethodPost, "/api/v1/workflows/"+url.PathEscape(a.Arg)+"/runs", map[string]any{"trigger": nil}, &r); err != nil {
 			return err
 		}
 		c.UI.Notify(Notification{ID: "run-started-" + r.ID, Title: "Started " + a.Arg, Body: "Run " + r.ID,
