@@ -42,6 +42,16 @@ func runtimeArgs(att Attachment) []string {
 	return args
 }
 
+// testPids is the pids limit of a test agent container. gVisor's kernel
+// and gofer run as host threads in the container's cgroup, so under
+// another runtime the limit also budgets those: keep Ícaro's default.
+func testPids() int64 {
+	if testRuntime != "" {
+		return 0
+	}
+	return 64
+}
+
 // checkRuntime asserts that container id runs on testRuntime: Docker
 // recorded it, and under gVisor the container sees gVisor's kernel.
 func checkRuntime(t *testing.T, id string) {
@@ -321,7 +331,7 @@ func TestAgentGitProtection(t *testing.T) {
 		Name: "icaro-it-git-" + time.Now().Format("150405"), Image: testImage, User: user,
 		Workspace: ws, GitDir: g, Labels: map[string]string{LabelSession: "it"},
 		Extra:   []Mount{{Source: hh, Target: "/h", Masks: []Mask{{Target: "/h/.ssh"}, {Target: "/h/.netrc", File: true}}}},
-		Limits:  sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64},
+		Limits:  sandbox.Limits{MemoryBytes: 256 << 20, Pids: testPids()},
 		Runtime: testRuntime,
 	}.Build()
 	id, err := eng.CreateContainerOn(ctx, spec, ns)
