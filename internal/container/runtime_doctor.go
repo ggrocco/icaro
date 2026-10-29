@@ -48,7 +48,7 @@ func RuntimeCheck(e RuntimeEngine, runtimes map[string]string) doctor.Check {
 		}
 		if len(missing) > 0 {
 			return doctor.Result{Severity: doctor.Error, Detail: fmt.Sprintf(
-				"not registered with Docker, so these profiles cannot start containers: %s (registered: %s); install the runtime and register it in /etc/docker/daemon.json (gVisor: `sudo runsc install` and restart Docker), or clear the profile's runtime",
+				"not registered with Docker, so these profiles cannot start containers: %s (registered: %s); install the runtime and register it in /etc/docker/daemon.json (gVisor: `sudo runsc install -- --host-uds=open` and restart Docker), or clear the profile's runtime",
 				strings.Join(missing, ", "), strings.Join(registered, ", "))}
 		}
 		return doctor.Result{Severity: doctor.OK, Detail: strings.Join(ok, ", ")}

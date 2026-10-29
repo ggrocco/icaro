@@ -155,7 +155,7 @@ On Linux, a profile can run its containers under [gVisor](https://gvisor.dev), a
 
 New sessions of the profile start under gVisor; a running session keeps its container until it is recreated. A workflow's image steps run on the runtime of `workflows.profile` (`workflow` by default). Ícaro's own helpers (the egress proxy, the preview proxy) and preview stacks stay on Docker's default runtime. `icaro doctor` reports a profile whose runtime Docker has not registered.
 
-System calls are slower under gVisor, so builds and tests in a session take longer. Docker Desktop on macOS has no gVisor runtime.
+System calls are slower under gVisor, so builds and tests in a session take longer. gVisor's own kernel runs as threads inside the container's process limit, so keep `limits.pids` at its default (512) or higher: with 64, a session with many mounts failed to start. Docker Desktop on macOS has no gVisor runtime.
 
 ## Concurrency cap
 

@@ -198,14 +198,11 @@ jobs:
           sudo mkdir -p /usr/local/gvisor
           sudo tar -xjf "$tarball" -C /usr/local/gvisor
           # The session's memory socket is a host Unix socket (ADR 0029).
-          # Debug logs are printed below when a step fails.
-          sudo /usr/local/gvisor/runsc install -- --host-uds=open --debug --debug-log=/tmp/runsc/%ID%/
+          # Its warnings and errors are printed below when a step fails.
+          sudo /usr/local/gvisor/runsc install -- --host-uds=open --debug-log=/tmp/runsc/%ID%/
           sudo systemctl restart docker
           docker run --rm --runtime=runsc mirror.gcr.io/library/busybox:1.36 dmesg
-      - name: which mounts runsc starts (diagnostic)
-        run: go test -count=1 -tags integration -run TestRuntimeMountKinds -v ./internal/container
       - name: container integration tests on runsc
-        if: ${{ !cancelled() }}
         run: go test -count=1 -tags integration ./internal/container
       # The e2e sessions run even when the integration tests fail, so one
       # run reports both.

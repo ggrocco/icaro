@@ -32,5 +32,6 @@ What the code had before this decision:
 - Untrusted profiles on Linux get a real boundary without changing how Ícaro builds containers: no new engine, no new adapter.
 - Docker Desktop on macOS has no gVisor runtime, so this protects Linux hosts only.
 - System calls cost more under gVisor, so builds and tests in a session run slower. That is why it is per profile, not the default.
+- gVisor's kernel and gofer are Go programs whose host threads run in the container's cgroup, so `limits.pids` budgets them too. In CI, a container with a session's full set of mounts failed to start at a limit of 64 (three runs, three ways: exit status 2, "creating process: out of memory", the sandbox closing at start) and starts at the default of 512. Each kind of mount alone started at 64. Keep `limits.pids` at the default or higher for profiles on gVisor.
 - A session on gVisor knows the proxy by the address it had when the session started. If the proxy is recreated with a new address (a changed allowlist, a Docker restart), restart the session.
 - `--host-uds=open` is a runtime-wide flag. Every container on that runtime may connect to a host socket that is mounted into it. Ícaro mounts one socket, the session's own memory endpoint.
