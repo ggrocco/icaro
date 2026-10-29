@@ -167,14 +167,18 @@ func TestSessionSpine(t *testing.T) {
 
 	// The agent edits code inside its own container (non-root, read-only
 	// root filesystem, /workspace = the session worktree).
-	out := h.icaro(ctx, "sh", s.ID, "--", "sh", "-c", `id -u; echo '<h1>v2 from agent</h1>' > /workspace/site/index.html; touch /etc/x 2>&1 || true`)
-	if strings.HasPrefix(strings.TrimSpace(out), "0") || !strings.Contains(out, "Read-only") {
+	out := h.icaro(ctx, "sh", s.ID, "--", "sh", "-c", `id -u; echo '<h1>v2 from agent</h1>' > /workspace/site/index.html; touch /etc/x 2>&1 || true; test -e /etc/x && echo ROOT-WRITTEN || true`)
+	rt := os.Getenv("ICARO_TEST_RUNTIME")
+	// The write to the root filesystem fails as read-only; gVisor checks
+	// the permission first, so as a non-root user it is refused that way.
+	refused := strings.Contains(out, "Read-only") || (rt != "" && strings.Contains(out, "Permission denied"))
+	if strings.HasPrefix(strings.TrimSpace(out), "0") || !refused || strings.Contains(out, "ROOT-WRITTEN") {
 		t.Fatalf("agent container is not confined: %s", out)
 	}
-	if rt := os.Getenv("ICARO_TEST_RUNTIME"); rt != "" {
-		got, err := command("docker", "inspect", "-f", "{{.HostConfig.Runtime}}", "icaro-session-"+strings.ToLower(s.ID)).Output()
-		if err != nil || strings.TrimSpace(string(got)) != rt {
-			t.Fatalf("session runtime %q, want %q: %v", got, rt, err)
+	if rt != "" {
+		got, err := command("docker", "inspect", "-f", "{{.HostConfig.Runtime}} {{.HostConfig.ReadonlyRootfs}}", "icaro-session-"+strings.ToLower(s.ID)).Output()
+		if err != nil || strings.TrimSpace(string(got)) != rt+" true" {
+			t.Fatalf("session runtime and read-only root %q, want %q: %v", got, rt+" true", err)
 		}
 	}
 	waitFor(t, "preview shows the agent's edit", func() bool { return strings.Contains(get(host, port), "v2 from agent") })
