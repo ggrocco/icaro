@@ -38,6 +38,8 @@ type State struct {
 	ExitCode  int
 	OOMKilled bool
 	Labels    map[string]string
+	// IPs maps each network the container is on to its IPv4 address.
+	IPs map[string]string
 }
 
 // Client is the engine API surface used by the runner.
@@ -215,6 +217,16 @@ func (e *Engine) Inspect(ctx context.Context, id string) (State, error) {
 		st.Running = res.Container.State.Running
 		st.ExitCode = res.Container.State.ExitCode
 		st.OOMKilled = res.Container.State.OOMKilled
+	}
+	if res.Container.NetworkSettings != nil {
+		for name, ep := range res.Container.NetworkSettings.Networks {
+			if ep != nil && ep.IPAddress.IsValid() {
+				if st.IPs == nil {
+					st.IPs = map[string]string{}
+				}
+				st.IPs[name] = ep.IPAddress.String()
+			}
+		}
 	}
 	return st, nil
 }

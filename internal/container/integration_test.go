@@ -28,12 +28,18 @@ const testImage = "mirror.gcr.io/library/busybox:1.36"
 // default. Helper containers (the egress proxy) stay on the default.
 var testRuntime = os.Getenv("ICARO_TEST_RUNTIME")
 
-// runtimeArgs are the `docker run` flags for testRuntime.
-func runtimeArgs() []string {
+// runtimeArgs are the `docker run` flags for testRuntime and egress
+// attachment att, as AgentSpec.Build sets them: on another runtime the
+// proxy is named in /etc/hosts.
+func runtimeArgs(att Attachment) []string {
 	if testRuntime == "" {
 		return nil
 	}
-	return []string{"--runtime", testRuntime}
+	args := []string{"--runtime", testRuntime}
+	for _, h := range att.Hosts {
+		args = append(args, "--add-host", h)
+	}
+	return args
 }
 
 // checkRuntime asserts that container id runs on testRuntime: Docker
@@ -52,7 +58,9 @@ func checkRuntime(t *testing.T, id string) {
 		// kernel release 4.4.0; the host's kernel does neither.
 		out, _ := run(t, "exec", id, "sh", "-c", "dmesg 2>/dev/null; uname -r")
 		if !strings.Contains(out, "gVisor") && !strings.Contains(out, "4.4.0") {
-			t.Fatalf("not running under gVisor: %q", out)
+			state, _ := run(t, "inspect", "-f", "{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}", id)
+			logs, _ := run(t, "logs", id)
+			t.Fatalf("not running under gVisor: %q\nstate: %s\nlogs: %s", out, state, logs)
 		}
 	}
 }
@@ -140,7 +148,7 @@ func TestEgressConfinement(t *testing.T) {
 	time.Sleep(time.Second)
 
 	client := func(script string) (string, error) {
-		args := append([]string{"run", "--rm", "--network", att.Network}, runtimeArgs()...)
+		args := append([]string{"run", "--rm", "--network", att.Network}, runtimeArgs(att)...)
 		for _, e := range att.Env {
 			args = append(args, "-e", e)
 		}

@@ -203,8 +203,12 @@ jobs:
           docker run --rm --runtime=runsc mirror.gcr.io/library/busybox:1.36 dmesg
       - name: container integration tests on runsc
         run: go test -count=1 -tags integration ./internal/container
-      - run: make web build
+      # The e2e sessions run even when the integration tests fail, so one
+      # run reports both.
+      - if: ${{ !cancelled() }}
+        run: make web build
       - name: e2e sessions on runsc
+        if: ${{ !cancelled() }}
         run: go test -count=1 -tags e2e ./hack/e2e/
 
   build:

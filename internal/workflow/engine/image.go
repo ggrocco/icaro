@@ -288,6 +288,11 @@ func (rx *runExec) createContainer(ctx context.Context, st *workflow.StepSpec, r
 	}
 	if rx.attach.Network != "" {
 		hc.NetworkMode = container.NetworkMode(rx.attach.Network)
+		if e.cfg.Runtime != "" {
+			// Another runtime (gVisor) cannot use Docker's DNS: name the
+			// proxy in /etc/hosts.
+			hc.ExtraHosts = rx.attach.Hosts
+		}
 	}
 	spec := docker.Spec{
 		Name: containerName(rx.run.ID, st.ID, attempt), Image: st.Image, Env: r.env, WorkingDir: sandbox.WorkspacePath,
