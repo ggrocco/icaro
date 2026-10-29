@@ -66,6 +66,8 @@ func newHarness(t *testing.T) *harness {
 	port := freePort(t)
 	h := &harness{t: t, bin: bin, home: home, repo: repo,
 		env: append(os.Environ(), "ICARO_HOME="+home, "ICARO_PASSWORD=e2e-password", "ICARO_CONFIG=")}
+	// ICARO_TEST_RUNTIME runs the session on another OCI runtime (runsc
+	// in CI's gvisor job); empty is Docker's default.
 	writeFile(t, filepath.Join(home, "config", "icaro.yaml"), fmt.Sprintf(`version: 1
 sessions:
   default_profile: shell
@@ -73,10 +75,11 @@ profiles:
   shell:
     image: %s
     egress: []
+    runtime: %q
 previews:
   http_port: %d
   traefik_image: mirror.gcr.io/library/traefik:v3.1
-`, busybox, port))
+`, busybox, os.Getenv("ICARO_TEST_RUNTIME"), port))
 	t.Cleanup(func() {
 		h.icaro(context.Background(), "session", "list") // keep output on failure
 		if pid, err := os.ReadFile(filepath.Join(home, "run", "icaro.pid")); err == nil {
@@ -167,6 +170,12 @@ func TestSessionSpine(t *testing.T) {
 	out := h.icaro(ctx, "sh", s.ID, "--", "sh", "-c", `id -u; echo '<h1>v2 from agent</h1>' > /workspace/site/index.html; touch /etc/x 2>&1 || true`)
 	if strings.HasPrefix(strings.TrimSpace(out), "0") || !strings.Contains(out, "Read-only") {
 		t.Fatalf("agent container is not confined: %s", out)
+	}
+	if rt := os.Getenv("ICARO_TEST_RUNTIME"); rt != "" {
+		got, err := command("docker", "inspect", "-f", "{{.HostConfig.Runtime}}", "icaro-session-"+strings.ToLower(s.ID)).Output()
+		if err != nil || strings.TrimSpace(string(got)) != rt {
+			t.Fatalf("session runtime %q, want %q: %v", got, rt, err)
+		}
 	}
 	waitFor(t, "preview shows the agent's edit", func() bool { return strings.Contains(get(host, port), "v2 from agent") })
 

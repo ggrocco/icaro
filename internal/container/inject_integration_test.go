@@ -93,7 +93,7 @@ func TestCredentialInjectionThroughTheProxy(t *testing.T) {
 
 	env := inject.Env(att.Inject, map[string]string{"anthropic": "anthropic-key"}, inject.TokenPrefix+"SESSION.tok")
 	client := func(script string, extra ...string) (string, error) {
-		args := []string{"run", "--rm", "--network", att.Network}
+		args := append([]string{"run", "--rm", "--network", att.Network}, runtimeArgs()...)
 		for _, e := range append(append(append([]string{}, att.Env...), env...), extra...) {
 			args = append(args, "-e", e)
 		}

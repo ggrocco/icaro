@@ -10,7 +10,8 @@ This page summarizes what Ícaro protects against and what it does not. The cano
 - under a seccomp profile without `ptrace`, `bpf`, `keyctl`, `mount` or namespace calls;
 - with a read-only root filesystem and a tmpfs `/tmp`;
 - with pids, memory, CPU and open-file limits;
-- without the Docker socket.
+- without the Docker socket;
+- on Linux, optionally under gVisor, a user-space kernel between the container and yours ([Sessions: Stronger isolation](sessions.md#stronger-isolation-gvisor)).
 
 A workflow file cannot weaken any of this. Preview stacks run your own containers, so they go through the [compose lint](previews.md#the-compose-lint) instead.
 
@@ -36,7 +37,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 
 - **An allowlisted endpoint is a channel.** A prompt-injected agent can still use its credential against hosts its profile allows, for example to spend quota at the provider. Keep allowlists short.
 - **An injected key can still be used.** With credential injection the agent cannot read the key, but it can still make the allowed provider calls through the proxy, so it can spend your quota. The per-session audit log shows which session did. Subscription logins (Claude Pro/Max, ChatGPT) are not injected; their token lives in the profile home.
-- **Docker non-root is a weak boundary.** Container escapes are a kernel/runtime problem. Stronger isolation (microVMs, gVisor via `docker.strict_runtime`) is optional and not the default.
+- **Docker non-root is a weak boundary.** Container escapes are a kernel/runtime problem. On Linux, a profile with `runtime: runsc` runs under gVisor, so an escape also needs a gVisor bug; it is opt-in, and Docker Desktop on macOS has no gVisor runtime.
 - **What you put in a workflow.** A step whose `command` interpolates untrusted text (a PR title, an issue body) can be shell-injected. Pass such values through `env` ([Workflows](workflows.md#keep-untrusted-text-out-of-the-shell)).
 - **Preview overrides.** A compose finding you allow with `icaro preview allow` weakens that preview's isolation on purpose.
 
@@ -52,6 +53,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 - that every `inject` secret exists and is bound to its provider's host;
 - orphaned sessions;
 - that every egress network (`icaro-egress-*`) is internal;
+- that every profile's `runtime` is registered with Docker;
 - pinned image digests;
 - the preview network, blocked compose files and `.test` DNS;
 - pack load errors and missing webhook secrets;

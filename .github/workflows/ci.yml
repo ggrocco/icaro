@@ -170,6 +170,43 @@ jobs:
           name: playwright-traces
           path: web/test-results
 
+  gvisor:
+    # Spike S5 (ADR 0029): agent containers under gVisor. The container
+    # integration tests and the e2e sessions run their agent containers on
+    # runsc and check from inside that gVisor's kernel answers; Ícaro's
+    # helpers stay on runc.
+    runs-on: ubuntu-latest
+    env:
+      GVISOR_RELEASE: "20261012"
+      GVISOR_SHA512: 9606445eed5aedfcf05310e7ccef61d994089914c6622fc82624c24d2b18db1b2210f40e40a7be27b8b7772859de7d95c501b4eba66423053c960bf671377c5e
+      ICARO_TEST_RUNTIME: runsc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: install gVisor (pinned release, checksum verified)
+        run: |
+          tarball="$RUNNER_TEMP/gvisor.tar.bz2"
+          curl -fsSL -o "$tarball" "https://storage.googleapis.com/gvisor/releases/release/$GVISOR_RELEASE/x86_64/gvisor.tar.bz2"
+          echo "$GVISOR_SHA512  $tarball" | sha512sum -c -
+          sudo mkdir -p /usr/local/gvisor
+          sudo tar -xjf "$tarball" -C /usr/local/gvisor
+          # The session's memory socket is a host Unix socket (ADR 0029).
+          sudo /usr/local/gvisor/runsc install -- --host-uds=open
+          sudo systemctl restart docker
+          docker run --rm --runtime=runsc mirror.gcr.io/library/busybox:1.36 dmesg
+      - name: container integration tests on runsc
+        run: go test -count=1 -tags integration ./internal/container
+      - run: make web build
+      - name: e2e sessions on runsc
+        run: go test -count=1 -tags e2e ./hack/e2e/
+
   build:
     runs-on: ubuntu-latest
     strategy:

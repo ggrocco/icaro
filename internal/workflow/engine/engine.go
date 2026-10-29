@@ -60,6 +60,9 @@ type Config struct {
 	// and Allow its egress allowlist.
 	Profile string
 	Allow   []string
+	// Runtime is the OCI runtime of step containers: the run profile's
+	// runtime (e.g. runsc for gVisor); empty is Docker's default.
+	Runtime string
 	// User runs step containers as uid:gid ("" = image default).
 	User string
 	// LogsDir holds step logs: <dir>/<run>/<step>.<attempt>.log.

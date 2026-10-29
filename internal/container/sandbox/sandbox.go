@@ -1,6 +1,7 @@
 // Package sandbox builds the hardened container host configuration for
-// steps. "standard" is the floor applied to every step; "strict" tightens
-// it further. Nothing in the workflow schema can weaken these defaults.
+// steps and agent sessions. Nothing in the workflow schema can weaken
+// these defaults; a profile can only add a stronger OCI runtime (gVisor's
+// runsc) underneath them.
 package sandbox
 
 import (
@@ -14,12 +15,6 @@ import (
 
 //go:embed seccomp.json
 var seccompProfile string
-
-// Profiles.
-const (
-	Standard = "standard"
-	Strict   = "strict"
-)
 
 // Networks.
 const (
@@ -43,13 +38,12 @@ type Limits struct {
 
 // Options select how a step container is confined.
 type Options struct {
-	Profile         string // standard | strict
 	Network         string // egress | none
 	Limits          Limits
 	WorkspaceVolume string
 	IOVolume        string
-	// StrictRuntime, when set, is used as the OCI runtime for strict steps (e.g. runsc).
-	StrictRuntime string
+	// Runtime is the OCI runtime (e.g. runsc); empty is Docker's default.
+	Runtime string
 }
 
 // Tighten returns the stricter of the configured default and a requested
@@ -63,9 +57,6 @@ func Tighten(def, requested int64) int64 {
 
 // HostConfig builds the container host configuration for the options.
 func HostConfig(o Options) (*container.HostConfig, error) {
-	if o.Profile == "" {
-		o.Profile = Standard
-	}
 	if o.Network == "" {
 		o.Network = NetworkEgress
 	}
@@ -112,13 +103,7 @@ func HostConfig(o Options) (*container.HostConfig, error) {
 		},
 	}
 
-	if o.Profile == Strict {
-		strictPids := min(pids, 64)
-		hc.PidsLimit = &strictPids
-		if o.StrictRuntime != "" {
-			hc.Runtime = o.StrictRuntime
-		}
-	}
+	hc.Runtime = o.Runtime
 	return hc, nil
 }
 

@@ -274,7 +274,7 @@ func (rx *runExec) createContainer(ctx context.Context, st *workflow.StepSpec, r
 		return fmt.Errorf("create io volume: %w", err)
 	}
 	hc, err := sandbox.HostConfig(sandbox.Options{
-		Profile: sandbox.Standard, Network: sandbox.NetworkNone, Limits: e.cfg.Limits,
+		Network: sandbox.NetworkNone, Limits: e.cfg.Limits, Runtime: e.cfg.Runtime,
 		WorkspaceVolume: "workspace", IOVolume: ioVol,
 	})
 	if err != nil {

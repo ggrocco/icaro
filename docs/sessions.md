@@ -134,6 +134,29 @@ profiles:
 
 Mount sources are resolved through symlinks before they are checked. These are refused even if allowed ([ADR 0011](../blueprint/docs/adr/0011-mount-policy.md)): the host root, `/var/run`, `/proc`, `/sys`, `/dev`, `/etc`, any ancestor of `$HOME`, any credential directory (`~/.ssh`, `~/.aws`, `~/.config/gh`, …), any directory that contains one (so `~/.config`, `~/.local` and `~/Library` are refused, while `~/.config/nvim` is fine), container engine state directories (`~/.colima`, `~/.orbstack`, `~/.rd`, `~/.lima`, …), and a container engine socket or a directory holding one near its top. A refused mount fails the session and gives the reason.
 
+## Stronger isolation (gVisor)
+
+On Linux, a profile can run its containers under [gVisor](https://gvisor.dev), a user-space kernel between the container and yours, so a container escape needs a gVisor bug as well as a kernel bug ([ADR 0029](../blueprint/docs/adr/0029-gvisor-runtime.md)). Everything above still applies; gVisor is added underneath it.
+
+1. [Install gVisor](https://gvisor.dev/docs/user_guide/install/), then register it with Docker so that containers may connect to host sockets mounted into them. The session's memory socket, `/icaro/mcp.sock`, is one; Ícaro mounts no other.
+
+   ```sh
+   sudo runsc install -- --host-uds=open
+   sudo systemctl restart docker
+   ```
+
+2. Set the profile's runtime and restart the daemon:
+
+   ```yaml
+   profiles:
+     claude:
+       runtime: runsc
+   ```
+
+New sessions of the profile start under gVisor; a running session keeps its container until it is recreated. A workflow's image steps run on the runtime of `workflows.profile` (`workflow` by default). Ícaro's own helpers (the egress proxy, the preview proxy) and preview stacks stay on Docker's default runtime. `icaro doctor` reports a profile whose runtime Docker has not registered.
+
+System calls are slower under gVisor, so builds and tests in a session take longer. Docker Desktop on macOS has no gVisor runtime.
+
 ## Concurrency cap
 
 At most `sessions.max_active` agent sessions run at once. The default, `0`, means one per 4 GiB of RAM, with a minimum of 1. Sessions over the cap are stored as `queued` and start when a slot frees. Each container is also bounded by `limits` (memory, CPUs, pids, open files).

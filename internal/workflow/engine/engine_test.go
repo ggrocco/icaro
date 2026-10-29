@@ -842,7 +842,7 @@ func TestSessionsAndEgressSeams(t *testing.T) {
 	eg := &stubEgress{}
 	ss := &stubSessions{dir: t.TempDir()}
 	f.deps.Egress, f.deps.Sessions = eg, ss
-	f.cfg.Profile = "workflow"
+	f.cfg.Profile, f.cfg.Runtime = "workflow", "runsc"
 	run := f.enqueue(`
 version: 1
 name: seams
@@ -875,6 +875,9 @@ steps:
 	}
 	if plain.Spec.Labels[LabelSession] != "sess-"+run.ID {
 		t.Fatal("session label")
+	}
+	if plain.Spec.HostConfig.Runtime != "runsc" || repo.Spec.HostConfig.Runtime != "runsc" {
+		t.Fatalf("steps run on the run profile's runtime: %q %q", plain.Spec.HostConfig.Runtime, repo.Spec.HostConfig.Runtime)
 	}
 	// Events: run running/terminal and step transitions were published.
 	seen := map[string]bool{}

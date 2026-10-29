@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -92,6 +93,21 @@ func (e *Engine) Close() error { return e.cli.Close() }
 func (e *Engine) Ping(ctx context.Context) error {
 	_, err := e.cli.Ping(ctx, client.PingOptions{})
 	return err
+}
+
+// Runtimes lists the OCI runtimes the engine has registered (runc, and
+// runsc once gVisor is installed), sorted.
+func (e *Engine) Runtimes(ctx context.Context) ([]string, error) {
+	res, err := e.cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(res.Info.Runtimes))
+	for name := range res.Info.Runtimes {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (e *Engine) EnsureImage(ctx context.Context, ref string) error {
