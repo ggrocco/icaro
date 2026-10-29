@@ -446,6 +446,17 @@ func TestSessionChecks(t *testing.T) {
 
 	cs := SessionChecks(a.Cfg, a.Store, a.Docker)
 	findCheck(t, cs, "egress networks") // behaviour: container.TestEgressNetworkCheck
+	if r := run(t, findCheck(t, cs, "container runtimes")); r.Severity != doctor.OK {
+		t.Errorf("no profile sets a runtime: %+v", r) // behaviour: container.TestRuntimeCheck
+	}
+	shell := a.Cfg.Profiles["shell"]
+	gv := shell
+	gv.Runtime = "runsc"
+	a.Cfg.Profiles["shell"] = gv
+	if got := profileRuntimes(a.Cfg); len(got) != 1 || got["shell"] != "runsc" {
+		t.Errorf("profile runtimes: %v", got)
+	}
+	a.Cfg.Profiles["shell"] = shell
 	orphans := findCheck(t, cs, "orphaned sessions")
 	if r := run(t, orphans); r.Severity != doctor.OK {
 		t.Errorf("no orphans: %+v", r)

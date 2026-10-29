@@ -83,8 +83,6 @@ type DatabaseConfig struct {
 // DockerConfig points at the engine.
 type DockerConfig struct {
 	Host string `yaml:"host"` // empty => DOCKER_HOST / default socket
-	// StrictRuntime is an optional OCI runtime (e.g. runsc) for untrusted profiles.
-	StrictRuntime string `yaml:"strict_runtime"`
 	// HelperImage contains /icaro and runs Ícaro's helper containers (the
 	// egress proxy). Empty: on Linux, built from the running binary.
 	HelperImage string `yaml:"helper_image"`

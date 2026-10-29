@@ -66,7 +66,7 @@ Open spikes:
 
 - S1: macOS file propagation.
 - S4: every agent CLI authenticates from the seeded home alone, and accepts the placeholder key and base URL of an `inject` profile ([ADR 0028](adr/0028-credential-injection.md)) without prompting or calling paths outside the allowlist. This needs real logins.
-- S5: microVM isolation (optional).
+- S5: microVM isolation on macOS (Apple Containerization). Linux passed with gVisor ([ADR 0029](adr/0029-gvisor-runtime.md)).
 - S7: `.test` resolution with VPNs.
 - S8: manifests against the live APIs.
 - S9: Wails v3. The app is built; the clean-install run on a Mac is open.

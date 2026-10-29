@@ -13,17 +13,18 @@ import (
 // blueprint/docs/03-security.md to the check that covers it. A new row
 // without an entry here fails TestDoctorCoversSecurityTable.
 var doctorTableChecks = map[string]string{ //nolint:gosec // doctor check names, not credentials
-	"Docker missing/inactive":             "docker",
-	"Orphaned lock/socket/PID":            "daemon lock/socket/pid",
-	"Orphaned sessions":                   "orphaned sessions",
-	"Insecure permissions on `~/.icaro`":  "permissions on ",
-	"Pending or failed migrations":        "database migrations",
-	"Unverified image":                    "pinned images",
-	"Proxy without a dedicated network":   "preview proxy network",
-	"Local DNS for `.test` misconfigured": "preview DNS",
-	"Missing webhook secret":              "webhook secrets",
-	"Dangerous compose":                   "preview compose lint",
-	"Injected credential unusable":        "credential injection",
+	"Docker missing/inactive":                          "docker",
+	"Orphaned lock/socket/PID":                         "daemon lock/socket/pid",
+	"Orphaned sessions":                                "orphaned sessions",
+	"Insecure permissions on `~/.icaro`":               "permissions on ",
+	"Pending or failed migrations":                     "database migrations",
+	"Unverified image":                                 "pinned images",
+	"Proxy without a dedicated network":                "preview proxy network",
+	"Local DNS for `.test` misconfigured":              "preview DNS",
+	"Missing webhook secret":                           "webhook secrets",
+	"Dangerous compose":                                "preview compose lint",
+	"Injected credential unusable":                     "credential injection",
+	"A profile's `runtime` not registered with Docker": "container runtimes",
 }
 
 func TestDoctorCoversSecurityTable(t *testing.T) {

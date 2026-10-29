@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -37,6 +38,8 @@ type State struct {
 	ExitCode  int
 	OOMKilled bool
 	Labels    map[string]string
+	// IPs maps each network the container is on to its IPv4 address.
+	IPs map[string]string
 }
 
 // Client is the engine API surface used by the runner.
@@ -92,6 +95,21 @@ func (e *Engine) Close() error { return e.cli.Close() }
 func (e *Engine) Ping(ctx context.Context) error {
 	_, err := e.cli.Ping(ctx, client.PingOptions{})
 	return err
+}
+
+// Runtimes lists the OCI runtimes the engine has registered (runc, and
+// runsc once gVisor is installed), sorted.
+func (e *Engine) Runtimes(ctx context.Context) ([]string, error) {
+	res, err := e.cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(res.Info.Runtimes))
+	for name := range res.Info.Runtimes {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (e *Engine) EnsureImage(ctx context.Context, ref string) error {
@@ -199,6 +217,16 @@ func (e *Engine) Inspect(ctx context.Context, id string) (State, error) {
 		st.Running = res.Container.State.Running
 		st.ExitCode = res.Container.State.ExitCode
 		st.OOMKilled = res.Container.State.OOMKilled
+	}
+	if res.Container.NetworkSettings != nil {
+		for name, ep := range res.Container.NetworkSettings.Networks {
+			if ep != nil && ep.IPAddress.IsValid() {
+				if st.IPs == nil {
+					st.IPs = map[string]string{}
+				}
+				st.IPs[name] = ep.IPAddress.String()
+			}
+		}
 	}
 	return st, nil
 }

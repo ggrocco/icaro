@@ -15,6 +15,12 @@ type Attachment struct {
 	// (http://icaro-egress:3129), set only when the profile injects
 	// credentials (ADR 0028).
 	Inject string `json:"Inject,omitempty"`
+	// Hosts maps the proxy's name to its address on Network (host:ip, for
+	// /etc/hosts). Docker's DNS answers through iptables rules in the
+	// container's network namespace, which gVisor's network stack does not
+	// go through, so containers on a runtime other than Docker's default
+	// find the proxy here (ADR 0029).
+	Hosts []string `json:"Hosts,omitempty"`
 }
 
 // Egress provisions the per-profile egress confinement (ADR 0005).

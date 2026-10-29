@@ -118,7 +118,7 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 		return res
 	}))
 	if eng != nil {
-		checks = append(checks, container.EgressNetworkCheck(eng))
+		checks = append(checks, container.EgressNetworkCheck(eng), container.RuntimeCheck(eng, profileRuntimes(cfg)))
 		imgs := &container.Images{Engine: eng, Pins: st}
 		checks = append(checks, doctor.Func("pinned images", func(ctx context.Context) doctor.Result {
 			if err := eng.Ping(ctx); err != nil {
@@ -151,4 +151,15 @@ func SessionChecks(cfg *config.Config, st *store.Store, eng *docker.Engine) []do
 func fileExists(p string) bool {
 	_, err := os.Lstat(p)
 	return err == nil
+}
+
+// profileRuntimes maps each profile that sets an OCI runtime to it.
+func profileRuntimes(cfg *config.Config) map[string]string {
+	out := map[string]string{}
+	for name, p := range cfg.Profiles {
+		if p.Runtime != "" {
+			out[name] = p.Runtime
+		}
+	}
+	return out
 }

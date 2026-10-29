@@ -62,13 +62,14 @@ func TestHostConfigStandard(t *testing.T) {
 	}
 }
 
-func TestHostConfigStrict(t *testing.T) {
-	hc, err := HostConfig(Options{Profile: Strict, Network: NetworkNone, WorkspaceVolume: "ws", IOVolume: "io", StrictRuntime: "runsc"})
+func TestHostConfigRuntime(t *testing.T) {
+	hc, err := HostConfig(Options{Network: NetworkNone, WorkspaceVolume: "ws", IOVolume: "io", Runtime: "runsc"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(hc.NetworkMode) != "none" || *hc.PidsLimit != 64 || hc.Runtime != "runsc" {
-		t.Fatalf("strict: %+v", hc)
+	// A stronger runtime adds to the hardening; it replaces none of it.
+	if string(hc.NetworkMode) != "none" || hc.Runtime != "runsc" || !hc.ReadonlyRootfs || hc.CapDrop[0] != "ALL" || *hc.PidsLimit != 256 {
+		t.Fatalf("%+v", hc)
 	}
 }
 

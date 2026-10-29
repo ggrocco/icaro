@@ -66,6 +66,7 @@ func wireWorkflows(_ context.Context, a *App) error {
 		},
 		Profile: profile,
 		Allow:   p.Egress,
+		Runtime: p.Runtime,
 		User:    stepUser(a),
 		LogsDir: a.Layout.Logs(),
 		RunsDir: a.Layout.Runs(),

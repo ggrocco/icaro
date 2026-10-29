@@ -274,7 +274,7 @@ func (rx *runExec) createContainer(ctx context.Context, st *workflow.StepSpec, r
 		return fmt.Errorf("create io volume: %w", err)
 	}
 	hc, err := sandbox.HostConfig(sandbox.Options{
-		Profile: sandbox.Standard, Network: sandbox.NetworkNone, Limits: e.cfg.Limits,
+		Network: sandbox.NetworkNone, Limits: e.cfg.Limits, Runtime: e.cfg.Runtime,
 		WorkspaceVolume: "workspace", IOVolume: ioVol,
 	})
 	if err != nil {
@@ -288,6 +288,11 @@ func (rx *runExec) createContainer(ctx context.Context, st *workflow.StepSpec, r
 	}
 	if rx.attach.Network != "" {
 		hc.NetworkMode = container.NetworkMode(rx.attach.Network)
+		if e.cfg.Runtime != "" {
+			// Another runtime (gVisor) cannot use Docker's DNS: name the
+			// proxy in /etc/hosts.
+			hc.ExtraHosts = rx.attach.Hosts
+		}
 	}
 	spec := docker.Spec{
 		Name: containerName(rx.run.ID, st.ID, attempt), Image: st.Image, Env: r.env, WorkingDir: sandbox.WorkspacePath,

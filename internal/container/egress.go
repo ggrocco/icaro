@@ -146,10 +146,18 @@ func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []strin
 		}
 		_ = e.Engine.RemoveContainer(ctx, id)
 	}
-	if reuse == "" {
-		if err := e.startProxy(ctx, profile, image, hash, sorted, injectDir); err != nil {
+	proxyID := reuse
+	if proxyID == "" {
+		if proxyID, err = e.startProxy(ctx, profile, image, hash, sorted, injectDir); err != nil {
 			return Attachment{}, err
 		}
+	}
+	st, err := e.Engine.Inspect(ctx, proxyID)
+	if err != nil {
+		return Attachment{}, fmt.Errorf("inspect egress proxy: %w", err)
+	}
+	if ip := st.IPs[netName]; ip != "" {
+		att.Hosts = []string{ProxyAlias + ":" + ip}
 	}
 	noProxy := "localhost,127.0.0.1"
 	if injectDir != "" {
@@ -169,7 +177,7 @@ func (e *DockerEgress) Ensure(ctx context.Context, profile string, allow []strin
 // also relays InjectPort to the daemon's socket in that directory; with an
 // empty allowlist it then sits on the internal network only, since it
 // forwards nothing outside.
-func (e *DockerEgress) startProxy(ctx context.Context, profile, image, hash string, allow []string, injectDir string) error {
+func (e *DockerEgress) startProxy(ctx context.Context, profile, image, hash string, allow []string, injectDir string) (string, error) {
 	outside := e.OutsideNetwork
 	if outside == "" {
 		outside = "bridge"
@@ -208,22 +216,22 @@ func (e *DockerEgress) startProxy(ctx context.Context, profile, image, hash stri
 	}
 	id, err := e.Engine.CreateContainerOn(ctx, spec, ns)
 	if err != nil {
-		return fmt.Errorf("create egress proxy: %w", err)
+		return "", fmt.Errorf("create egress proxy: %w", err)
 	}
 	if len(allow) > 0 {
 		if err := e.Engine.ConnectNetwork(ctx, e.network(profile), id, []string{ProxyAlias}); err != nil {
 			_ = e.Engine.RemoveContainer(ctx, id)
-			return fmt.Errorf("attach egress proxy: %w", err)
+			return "", fmt.Errorf("attach egress proxy: %w", err)
 		}
 	}
 	if err := e.Engine.StartContainer(ctx, id); err != nil {
 		_ = e.Engine.RemoveContainer(ctx, id)
-		return fmt.Errorf("start egress proxy: %w", err)
+		return "", fmt.Errorf("start egress proxy: %w", err)
 	}
 	if e.Log != nil {
 		e.Log.Info("egress proxy started", "profile", profile, "allow", strings.Join(allow, ","), "inject", injectDir != "")
 	}
-	return nil
+	return id, nil
 }
 
 // helperImage returns the image that contains /icaro.

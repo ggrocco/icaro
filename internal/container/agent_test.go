@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -20,9 +21,16 @@ func TestAgentSpecBuild(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(git, "config"), nil, 0o600)
 	spec, ns := AgentSpec{
 		Name: "s", Image: "img@sha256:x", User: "1:2", Workspace: "/w", GitDir: git, Home: HomeMount{Volume: "v"},
-		IcaroDir: "/i", Egress: Attachment{Network: "n", Env: []string{"HTTPS_PROXY=p"}},
+		IcaroDir: "/i", Egress: Attachment{Network: "n", Env: []string{"HTTPS_PROXY=p"}, Hosts: []string{"icaro-egress:10.0.0.2"}},
 		Extra: []Mount{{Source: "/h", Target: "/home/host", Masks: []Mask{{Target: "/home/host/.ssh"}, {Target: "/home/host/.netrc", File: true}}}},
 	}.Build()
+	if len(spec.HostConfig.ExtraHosts) != 0 {
+		t.Fatalf("Docker's default runtime resolves the proxy through Docker's DNS: %v", spec.HostConfig.ExtraHosts)
+	}
+	gv, _ := AgentSpec{Name: "s", Image: "i", Runtime: "runsc", Egress: Attachment{Network: "n", Hosts: []string{"icaro-egress:10.0.0.2"}}}.Build()
+	if gv.HostConfig.Runtime != "runsc" || strings.Join(gv.HostConfig.ExtraHosts, " ") != "icaro-egress:10.0.0.2" {
+		t.Fatalf("gVisor names the proxy in /etc/hosts: %+v", gv.HostConfig)
+	}
 	if ns.Network != "n" || string(spec.HostConfig.NetworkMode) != "n" || spec.WorkingDir != WorkspacePath || spec.User != "1:2" {
 		t.Fatalf("%+v %+v", spec, ns)
 	}
@@ -95,6 +103,7 @@ type fakeEngine struct {
 	images     map[string]string
 	pulled     []string
 	imported   int
+	ips        int
 }
 
 func newFake() *fakeEngine {
@@ -130,15 +139,28 @@ func (f *fakeEngine) CreateNetwork(_ context.Context, name string, internal bool
 	f.networks[name] = internal
 	return nil
 }
-func (f *fakeEngine) ConnectNetwork(_ context.Context, network, _ string, aliases []string) error {
+func (f *fakeEngine) ConnectNetwork(_ context.Context, network, id string, aliases []string) error {
 	f.connected = append(f.connected, network+"="+strings.Join(aliases, ","))
+	f.addIP(id, network)
 	return nil
 }
-func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, _ docker.NetSpec) (string, error) {
+func (f *fakeEngine) CreateContainerOn(_ context.Context, spec docker.Spec, ns docker.NetSpec) (string, error) {
 	f.created = append(f.created, spec)
 	id := spec.Name
 	f.containers[id] = docker.State{Exists: true, Labels: spec.Labels}
+	f.addIP(id, ns.Network)
 	return id, nil
+}
+
+// addIP gives container id the next address on network.
+func (f *fakeEngine) addIP(id, network string) {
+	st := f.containers[id]
+	if st.IPs == nil {
+		st.IPs = map[string]string{}
+	}
+	f.ips++
+	st.IPs[network] = fmt.Sprintf("10.0.0.%d", f.ips)
+	f.containers[id] = st
 }
 func (f *fakeEngine) StartContainer(_ context.Context, id string) error {
 	st := f.containers[id]
@@ -186,6 +208,9 @@ func TestDockerEgress(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(att.Env, " "), "HTTPS_PROXY=http://icaro-egress:3128") {
 		t.Fatal(att.Env)
+	}
+	if strings.Join(att.Hosts, " ") != "icaro-egress:10.0.0.2" {
+		t.Fatalf("the proxy's address on the profile network: %v", att.Hosts)
 	}
 	// Same allowlist: reuse. New allowlist: replace.
 	if _, err := eg.Ensure(ctx, "claude", []string{"api.anthropic.com"}); err != nil || len(f.created) != 1 {

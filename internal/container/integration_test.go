@@ -23,6 +23,58 @@ import (
 // testImage is a small image with sh and wget.
 const testImage = "mirror.gcr.io/library/busybox:1.36"
 
+// testRuntime is the OCI runtime the agent containers of these tests run
+// on: ICARO_TEST_RUNTIME (runsc in CI's gvisor job), else Docker's
+// default. Helper containers (the egress proxy) stay on the default.
+var testRuntime = os.Getenv("ICARO_TEST_RUNTIME")
+
+// runtimeArgs are the `docker run` flags for testRuntime and egress
+// attachment att, as AgentSpec.Build sets them: on another runtime the
+// proxy is named in /etc/hosts.
+func runtimeArgs(att Attachment) []string {
+	if testRuntime == "" {
+		return nil
+	}
+	args := []string{"--runtime", testRuntime}
+	for _, h := range att.Hosts {
+		args = append(args, "--add-host", h)
+	}
+	return args
+}
+
+// testPids is the pids limit of a test agent container. gVisor's kernel
+// and gofer run as host threads in the container's cgroup, so under
+// another runtime the limit also budgets those: keep Ícaro's default.
+func testPids() int64 {
+	if testRuntime != "" {
+		return 0
+	}
+	return 64
+}
+
+// checkRuntime asserts that container id runs on testRuntime: Docker
+// recorded it, and under gVisor the container sees gVisor's kernel.
+func checkRuntime(t *testing.T, id string) {
+	t.Helper()
+	if testRuntime == "" {
+		return
+	}
+	out, err := run(t, "inspect", "-f", "{{.HostConfig.Runtime}}", id)
+	if err != nil || strings.TrimSpace(out) != testRuntime {
+		t.Fatalf("runtime %q, want %q: %v", strings.TrimSpace(out), testRuntime, err)
+	}
+	if testRuntime == "runsc" {
+		// gVisor's sentry logs "Starting gVisor..." at boot and reports
+		// kernel release 4.4.0; the host's kernel does neither.
+		out, _ := run(t, "exec", id, "sh", "-c", "dmesg 2>/dev/null; uname -r")
+		if !strings.Contains(out, "gVisor") && !strings.Contains(out, "4.4.0") {
+			state, _ := run(t, "inspect", "-f", "{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}", id)
+			logs, _ := run(t, "logs", id)
+			t.Fatalf("not running under gVisor: %q\nstate: %s\nlogs: %s", out, state, logs)
+		}
+	}
+}
+
 func engine(t *testing.T) *docker.Engine {
 	t.Helper()
 	eng, err := docker.New("")
@@ -106,7 +158,7 @@ func TestEgressConfinement(t *testing.T) {
 	time.Sleep(time.Second)
 
 	client := func(script string) (string, error) {
-		args := []string{"run", "--rm", "--network", att.Network}
+		args := append([]string{"run", "--rm", "--network", att.Network}, runtimeArgs(att)...)
 		for _, e := range att.Env {
 			args = append(args, "-e", e)
 		}
@@ -176,7 +228,7 @@ func TestAgentContainerBaseline(t *testing.T) {
 	spec, ns := AgentSpec{
 		Name: net + "-c", Image: testImage, User: "1234:1234", Workspace: ws, Home: HomeMount{Dir: home},
 		Labels: map[string]string{LabelSession: "it"}, Egress: Attachment{Network: net},
-		Limits: sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64},
+		Limits: sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64}, Runtime: testRuntime,
 	}.Build()
 	id, err := eng.CreateContainerOn(ctx, spec, ns)
 	if err != nil {
@@ -186,6 +238,7 @@ func TestAgentContainerBaseline(t *testing.T) {
 	if err := eng.StartContainer(ctx, id); err != nil {
 		t.Fatal(err)
 	}
+	checkRuntime(t, id)
 	script := `id -u; pwd; touch /workspace/ok && echo ws-ok; touch /home/icaro/h && echo home-ok; (touch /rootfs 2>/dev/null && echo ROOT-WRITABLE) || echo ro-ok`
 	out, err := run(t, ExecArgs(ExecOptions{Container: id, User: "1234:1234", Cmd: []string{"sh", "-c", script}})...)
 	if err != nil {
@@ -277,8 +330,9 @@ func TestAgentGitProtection(t *testing.T) {
 	spec, ns := AgentSpec{
 		Name: "icaro-it-git-" + time.Now().Format("150405"), Image: testImage, User: user,
 		Workspace: ws, GitDir: g, Labels: map[string]string{LabelSession: "it"},
-		Extra:  []Mount{{Source: hh, Target: "/h", Masks: []Mask{{Target: "/h/.ssh"}, {Target: "/h/.netrc", File: true}}}},
-		Limits: sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64},
+		Extra:   []Mount{{Source: hh, Target: "/h", Masks: []Mask{{Target: "/h/.ssh"}, {Target: "/h/.netrc", File: true}}}},
+		Limits:  sandbox.Limits{MemoryBytes: 256 << 20, Pids: testPids()},
+		Runtime: testRuntime,
 	}.Build()
 	id, err := eng.CreateContainerOn(ctx, spec, ns)
 	if err != nil {
@@ -288,6 +342,7 @@ func TestAgentGitProtection(t *testing.T) {
 	if err := eng.StartContainer(ctx, id); err != nil {
 		t.Fatal(err)
 	}
+	checkRuntime(t, id)
 	denied := []string{
 		"echo x >> " + g + "/config", "touch " + g + "/hooks/pre-commit", "mv " + g + "/hooks " + g + "/h2",
 		"echo x >> " + a + "/commondir", "echo x >> " + a + "/gitdir", "echo x >> " + a + "/config.worktree",

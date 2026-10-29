@@ -66,6 +66,8 @@ func newHarness(t *testing.T) *harness {
 	port := freePort(t)
 	h := &harness{t: t, bin: bin, home: home, repo: repo,
 		env: append(os.Environ(), "ICARO_HOME="+home, "ICARO_PASSWORD=e2e-password", "ICARO_CONFIG=")}
+	// ICARO_TEST_RUNTIME runs the session on another OCI runtime (runsc
+	// in CI's gvisor job); empty is Docker's default.
 	writeFile(t, filepath.Join(home, "config", "icaro.yaml"), fmt.Sprintf(`version: 1
 sessions:
   default_profile: shell
@@ -73,10 +75,11 @@ profiles:
   shell:
     image: %s
     egress: []
+    runtime: %q
 previews:
   http_port: %d
   traefik_image: mirror.gcr.io/library/traefik:v3.1
-`, busybox, port))
+`, busybox, os.Getenv("ICARO_TEST_RUNTIME"), port))
 	t.Cleanup(func() {
 		h.icaro(context.Background(), "session", "list") // keep output on failure
 		if pid, err := os.ReadFile(filepath.Join(home, "run", "icaro.pid")); err == nil {
@@ -164,9 +167,19 @@ func TestSessionSpine(t *testing.T) {
 
 	// The agent edits code inside its own container (non-root, read-only
 	// root filesystem, /workspace = the session worktree).
-	out := h.icaro(ctx, "sh", s.ID, "--", "sh", "-c", `id -u; echo '<h1>v2 from agent</h1>' > /workspace/site/index.html; touch /etc/x 2>&1 || true`)
-	if strings.HasPrefix(strings.TrimSpace(out), "0") || !strings.Contains(out, "Read-only") {
+	out := h.icaro(ctx, "sh", s.ID, "--", "sh", "-c", `id -u; echo '<h1>v2 from agent</h1>' > /workspace/site/index.html; touch /etc/x 2>&1 || true; test -e /etc/x && echo ROOT-WRITTEN || true`)
+	rt := os.Getenv("ICARO_TEST_RUNTIME")
+	// The write to the root filesystem fails as read-only; gVisor checks
+	// the permission first, so as a non-root user it is refused that way.
+	refused := strings.Contains(out, "Read-only") || (rt != "" && strings.Contains(out, "Permission denied"))
+	if strings.HasPrefix(strings.TrimSpace(out), "0") || !refused || strings.Contains(out, "ROOT-WRITTEN") {
 		t.Fatalf("agent container is not confined: %s", out)
+	}
+	if rt != "" {
+		got, err := command("docker", "inspect", "-f", "{{.HostConfig.Runtime}} {{.HostConfig.ReadonlyRootfs}}", "icaro-session-"+strings.ToLower(s.ID)).Output()
+		if err != nil || strings.TrimSpace(string(got)) != rt+" true" {
+			t.Fatalf("session runtime and read-only root %q, want %q: %v", got, rt+" true", err)
+		}
 	}
 	waitFor(t, "preview shows the agent's edit", func() bool { return strings.Contains(get(host, port), "v2 from agent") })
 

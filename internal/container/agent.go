@@ -105,6 +105,11 @@ func (a AgentSpec) Build() (docker.Spec, docker.NetSpec) {
 		Limits: a.Limits, Mounts: mounts, NetworkMode: a.Egress.Network,
 		TmpfsHome: a.Home.Volume == "" && a.Home.Dir == "", Runtime: a.Runtime,
 	})
+	if a.Runtime != "" {
+		// Another runtime (gVisor) cannot use Docker's DNS: name the
+		// proxy in /etc/hosts (Attachment.Hosts).
+		hc.ExtraHosts = a.Egress.Hosts
+	}
 	cmd := a.Command
 	if len(cmd) == 0 {
 		cmd = KeepAlive
