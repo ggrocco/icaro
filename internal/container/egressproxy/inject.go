@@ -51,6 +51,11 @@ func NewForwarder(socket string, log *slog.Logger) http.Handler {
 		}
 		for _, p := range InjectPrefixes {
 			if strings.HasPrefix(r.URL.Path, p) {
+				// The transport still reads the request body (to see it
+				// end) when the daemon's first bytes come back; without
+				// full duplex, flushing them would close the body under it
+				// and the transport would drop the stream.
+				_ = http.NewResponseController(w).EnableFullDuplex()
 				rp.ServeHTTP(w, r)
 				return
 			}
