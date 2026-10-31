@@ -8,19 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/container/docker"
 	"icaro/internal/paths"
+	"icaro/internal/serial"
 	"icaro/internal/store"
 )
 
 // fakeCompose records calls; Config returns the raw file (ParseCompose
 // reads YAML and JSON alike).
 type fakeCompose struct {
-	mu      sync.Mutex
+	ops     serial.Queue
 	ups     map[string]int
 	downs   map[string]int
 	running map[string]int
@@ -29,44 +29,42 @@ type fakeCompose struct {
 }
 
 func newFakeCompose() *fakeCompose {
-	return &fakeCompose{ups: map[string]int{}, downs: map[string]int{}, running: map[string]int{}, files: map[string][]string{}}
+	return &fakeCompose{ops: serial.New(), ups: map[string]int{}, downs: map[string]int{}, running: map[string]int{}, files: map[string][]string{}}
 }
 
 // filesFor returns the compose files the last up of project got.
-func (c *fakeCompose) filesFor(project string) []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]string(nil), c.files[project]...)
+func (f *fakeCompose) filesFor(project string) (files []string) {
+	f.ops.Do(func() { files = append([]string(nil), f.files[project]...) })
+	return files
 }
 
 func (f *fakeCompose) Config(_ context.Context, _, _ string, files []string) ([]byte, error) {
 	return os.ReadFile(files[0])
 }
 
-func (f *fakeCompose) Up(_ context.Context, project, _ string, files []string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.upErr != nil {
-		return f.upErr
-	}
-	f.ups[project]++
-	f.running[project] = 1
-	f.files[project] = files
-	return nil
+func (f *fakeCompose) Up(_ context.Context, project, _ string, files []string) (err error) {
+	f.ops.Do(func() {
+		if err = f.upErr; err != nil {
+			return
+		}
+		f.ups[project]++
+		f.running[project] = 1
+		f.files[project] = files
+	})
+	return err
 }
 
 func (f *fakeCompose) Down(_ context.Context, project string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.downs[project]++
-	f.running[project] = 0
+	f.ops.Do(func() {
+		f.downs[project]++
+		f.running[project] = 0
+	})
 	return nil
 }
 
-func (f *fakeCompose) Running(_ context.Context, project string) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.running[project], nil
+func (f *fakeCompose) Running(_ context.Context, project string) (n int, _ error) {
+	f.ops.Do(func() { n = f.running[project] })
+	return n, nil
 }
 
 func (f *fakeCompose) Logs(_ context.Context, project string, _ int, w io.Writer) error {
@@ -74,74 +72,65 @@ func (f *fakeCompose) Logs(_ context.Context, project string, _ int, w io.Writer
 	return err
 }
 
-func (f *fakeCompose) count(m map[string]int, k string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return m[k]
+func (f *fakeCompose) count(m map[string]int, k string) (n int) {
+	f.ops.Do(func() { n = m[k] })
+	return n
 }
 
 type fakeEngine struct {
-	mu       sync.Mutex
+	ops      serial.Queue
 	networks map[string]bool
 	proxy    *docker.State
 	creates  int
 	restarts int
 }
 
-func newFakeEngine() *fakeEngine { return &fakeEngine{networks: map[string]bool{}} }
+func newFakeEngine() *fakeEngine { return &fakeEngine{ops: serial.New(), networks: map[string]bool{}} }
 
-// snapshot reads the counters under the lock: the manager's proxy loop
+// snapshot reads the counters on the queue: the manager's proxy loop
 // writes them from its own goroutine.
 func (e *fakeEngine) snapshot() (network bool, creates, restarts int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.networks[Network], e.creates, e.restarts
+	e.ops.Do(func() { network, creates, restarts = e.networks[Network], e.creates, e.restarts })
+	return network, creates, restarts
 }
 
 func (e *fakeEngine) EnsureImage(context.Context, string) error { return nil }
-func (e *fakeEngine) EnsureNetwork(_ context.Context, n string, _ map[string]string) (bool, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	created := !e.networks[n]
-	e.networks[n] = true
+func (e *fakeEngine) EnsureNetwork(_ context.Context, n string, _ map[string]string) (created bool, _ error) {
+	e.ops.Do(func() {
+		created = !e.networks[n]
+		e.networks[n] = true
+	})
 	return created, nil
 }
-func (e *fakeEngine) NetworkExists(_ context.Context, n string) (bool, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.networks[n], nil
+func (e *fakeEngine) NetworkExists(_ context.Context, n string) (exists bool, _ error) {
+	e.ops.Do(func() { exists = e.networks[n] })
+	return exists, nil
 }
 func (e *fakeEngine) CreateProxy(_ context.Context, s docker.ProxySpec) (string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.creates++
-	e.proxy = &docker.State{Exists: true, Labels: s.Labels}
+	e.ops.Do(func() {
+		e.creates++
+		e.proxy = &docker.State{Exists: true, Labels: s.Labels}
+	})
 	return s.Name, nil
 }
 func (e *fakeEngine) StartContainer(context.Context, string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.proxy.Running = true
+	e.ops.Do(func() { e.proxy.Running = true })
 	return nil
 }
-func (e *fakeEngine) Inspect(context.Context, string) (docker.State, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.proxy == nil {
-		return docker.State{}, nil
-	}
-	return *e.proxy, nil
+func (e *fakeEngine) Inspect(context.Context, string) (st docker.State, _ error) {
+	e.ops.Do(func() {
+		if e.proxy != nil {
+			st = *e.proxy
+		}
+	})
+	return st, nil
 }
 func (e *fakeEngine) RemoveContainer(context.Context, string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.proxy = nil
+	e.ops.Do(func() { e.proxy = nil })
 	return nil
 }
 func (e *fakeEngine) Restart(context.Context, string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.restarts++
+	e.ops.Do(func() { e.restarts++ })
 	return nil
 }
 

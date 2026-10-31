@@ -10,11 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/daemon"
+	"icaro/internal/serial"
 	"icaro/internal/update"
 )
 
@@ -290,10 +290,10 @@ func TestServeRemoteListen(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Daemon.Listen, cfg.Daemon.AllowRemote = "0.0.0.0:0", true
-	var logs syncBuffer
+	logs := newSyncBuffer()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runDaemon(ctx, cfg, slog.New(slog.NewTextHandler(&logs, nil))) }()
+	go func() { done <- runDaemon(ctx, cfg, slog.New(slog.NewTextHandler(logs, nil))) }()
 	waitDaemon(t, cfg, done)
 	cancel()
 	if err := <-done; err != nil {
@@ -455,18 +455,18 @@ func TestRunWaitExitCode(t *testing.T) {
 
 // syncBuffer is a bytes.Buffer safe for a logger in another goroutine.
 type syncBuffer struct {
-	mu  sync.Mutex
+	ops serial.Queue
 	buf bytes.Buffer
 }
 
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
+func newSyncBuffer() *syncBuffer { return &syncBuffer{ops: serial.New()} }
+
+func (b *syncBuffer) Write(p []byte) (n int, err error) {
+	b.ops.Do(func() { n, err = b.buf.Write(p) })
+	return n, err
 }
 
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
+func (b *syncBuffer) String() (s string) {
+	b.ops.Do(func() { s = b.buf.String() })
+	return s
 }

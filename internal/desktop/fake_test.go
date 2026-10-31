@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/apiclient"
 	"icaro/internal/apiclient/rest"
 	"icaro/internal/paths"
+	"icaro/internal/serial"
 	"icaro/internal/service"
 	"icaro/internal/store"
 	"icaro/internal/usage"
@@ -21,7 +21,7 @@ import (
 
 // fakeAPI is the slice of the daemon API the app uses.
 type fakeAPI struct {
-	mu        sync.Mutex
+	ops       serial.Queue
 	down      bool
 	runs      map[string][]*service.RunInfo // by status
 	previews  []apiclient.Preview
@@ -34,27 +34,24 @@ type fakeAPI struct {
 
 func newFakeAPI(t *testing.T) (*fakeAPI, *httptest.Server) {
 	t.Helper()
-	f := &fakeAPI{runs: map[string][]*service.RunInfo{}, fail: map[string]int{}, usage: usage.Report{Timezone: "UTC"}}
+	f := &fakeAPI{ops: serial.New(), runs: map[string][]*service.RunInfo{}, fail: map[string]int{}, usage: usage.Report{Timezone: "UTC"}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return f, srv
 }
 
-func (f *fakeAPI) set(fn func(f *fakeAPI)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	fn(f)
-}
+func (f *fakeAPI) set(fn func(f *fakeAPI)) { f.ops.Do(func() { fn(f) }) }
 
-func (f *fakeAPI) called() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.calls...)
+func (f *fakeAPI) called() (calls []string) {
+	f.ops.Do(func() { calls = append([]string(nil), f.calls...) })
+	return calls
 }
 
 func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.ops.Do(func() { f.serve(w, r) })
+}
+
+func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
 	if f.down {
 		http.Error(w, "down", http.StatusServiceUnavailable)
@@ -98,47 +95,49 @@ func remoteDaemon(srv *httptest.Server) *Daemon {
 // localDaemon reaches the fake as the local daemon, with its health
 // check and start replaced.
 type starter struct {
-	mu    sync.Mutex
+	ops   serial.Queue
 	calls [][]string
 	err   error
 	up    func() // brings the fake daemon up
 }
 
-func (s *starter) start(_ context.Context, _ paths.Layout, exe string, args []string, _ time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls = append(s.calls, append([]string{exe}, args...))
-	if s.err == nil && s.up != nil {
-		s.up()
-	}
-	return s.err
+func newStarter() *starter { return &starter{ops: serial.New()} }
+
+func (s *starter) start(_ context.Context, _ paths.Layout, exe string, args []string, _ time.Duration) (err error) {
+	s.ops.Do(func() {
+		s.calls = append(s.calls, append([]string{exe}, args...))
+		if s.err == nil && s.up != nil {
+			s.up()
+		}
+		err = s.err
+	})
+	return err
 }
 
-func (s *starter) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.calls)
+func (s *starter) count() (n int) {
+	s.ops.Do(func() { n = len(s.calls) })
+	return n
 }
 
 func localDaemon(f *fakeAPI, srv *httptest.Server, st *starter) *Daemon {
 	return &Daemon{
 		Client: rest.New(srv.URL, ""), icaro: "/opt/icaro/bin/icaro", args: []string{"--home", "/h"},
 		start: st.start,
-		ping: func(context.Context, paths.Layout) error {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			f.pings++
-			if f.down {
-				return errors.New("dial unix icaro.sock: connect: no such file or directory")
-			}
-			return nil
+		ping: func(context.Context, paths.Layout) (err error) {
+			f.ops.Do(func() {
+				f.pings++
+				if f.down {
+					err = errors.New("dial unix icaro.sock: connect: no such file or directory")
+				}
+			})
+			return err
 		},
 	}
 }
 
 // fakeUI records what the controller asks of the shell.
 type fakeUI struct {
-	mu      sync.Mutex
+	ops     serial.Queue
 	menus   [][]Item
 	titles  []string
 	notes   []Notification
@@ -147,51 +146,37 @@ type fakeUI struct {
 	quit    int
 }
 
+func newFakeUI() *fakeUI { return &fakeUI{ops: serial.New()} }
+
 func (u *fakeUI) SetMenu(items []Item, title string) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.menus, u.titles = append(u.menus, items), append(u.titles, title)
+	u.ops.Do(func() { u.menus, u.titles = append(u.menus, items), append(u.titles, title) })
 }
 
-func (u *fakeUI) Notify(n Notification) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.notes = append(u.notes, n)
+func (u *fakeUI) Notify(n Notification) { u.ops.Do(func() { u.notes = append(u.notes, n) }) }
+
+func (u *fakeUI) OpenWindow(url string) { u.ops.Do(func() { u.windows = append(u.windows, url) }) }
+
+func (u *fakeUI) OpenBrowser(url string) { u.ops.Do(func() { u.browser = append(u.browser, url) }) }
+
+func (u *fakeUI) Quit() { u.ops.Do(func() { u.quit++ }) }
+
+// snapshot is a copy of what was recorded, to read without the queue.
+func (u *fakeUI) snapshot() (s fakeUI) {
+	u.ops.Do(func() {
+		s = fakeUI{menus: append([][]Item(nil), u.menus...), titles: append([]string(nil), u.titles...),
+			notes: append([]Notification(nil), u.notes...), windows: append([]string(nil), u.windows...),
+			browser: append([]string(nil), u.browser...), quit: u.quit}
+	})
+	return s
 }
 
-func (u *fakeUI) OpenWindow(url string) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.windows = append(u.windows, url)
-}
-
-func (u *fakeUI) OpenBrowser(url string) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.browser = append(u.browser, url)
-}
-
-func (u *fakeUI) Quit() {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.quit++
-}
-
-func (u *fakeUI) snapshot() fakeUI {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return fakeUI{menus: append([][]Item(nil), u.menus...), titles: append([]string(nil), u.titles...),
-		notes: append([]Notification(nil), u.notes...), windows: append([]string(nil), u.windows...),
-		browser: append([]string(nil), u.browser...), quit: u.quit}
-}
-
-func (u *fakeUI) lastMenu() []Item {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if len(u.menus) == 0 {
-		return nil
-	}
-	return u.menus[len(u.menus)-1]
+func (u *fakeUI) lastMenu() (items []Item) {
+	u.ops.Do(func() {
+		if len(u.menus) > 0 {
+			items = u.menus[len(u.menus)-1]
+		}
+	})
+	return items
 }
 
 // labels flattens a menu for assertions.

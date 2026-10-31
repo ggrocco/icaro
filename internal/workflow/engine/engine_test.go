@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
 	"icaro/internal/expr"
+	"icaro/internal/serial"
 	"icaro/internal/session"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
@@ -244,12 +244,14 @@ func TestDataFlowAndIOContract(t *testing.T) {
 
 func TestIndependentStepsRunInParallel(t *testing.T) {
 	f := newFixture(t)
-	var mu sync.Mutex
-	starts := map[string]time.Time{}
+	// The start times live in a one-slot channel; a receiver owns them
+	// until it sends them back.
+	startsCh := make(chan map[string]time.Time, 1)
+	startsCh <- map[string]time.Time{}
 	f.docker.OnStart = func(c *docker.FakeContainer) docker.Behavior {
-		mu.Lock()
+		starts := <-startsCh
 		starts[c.Spec.Labels[LabelStep]] = time.Now()
-		mu.Unlock()
+		startsCh <- starts
 		return docker.Behavior{Duration: 400 * time.Millisecond}
 	}
 	run := f.enqueue(`
@@ -264,8 +266,7 @@ steps:
 	_, stop := f.start()
 	defer stop()
 	f.wait(run.ID, store.RunSucceeded)
-	mu.Lock()
-	defer mu.Unlock()
+	starts := <-startsCh
 	gap := starts["left"].Sub(starts["right"]).Abs()
 	if gap > 200*time.Millisecond {
 		t.Fatalf("independent steps did not overlap: started %s apart", gap)
@@ -278,21 +279,19 @@ steps:
 func TestRunParallelismCap(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.RunParallelism = 1
-	var mu sync.Mutex
-	starts := map[string]time.Time{}
+	startsCh := make(chan map[string]time.Time, 1)
+	startsCh <- map[string]time.Time{}
 	f.docker.OnStart = func(c *docker.FakeContainer) docker.Behavior {
-		mu.Lock()
+		starts := <-startsCh
 		starts[c.Spec.Labels[LabelStep]] = time.Now()
-		mu.Unlock()
+		startsCh <- starts
 		return docker.Behavior{Duration: 200 * time.Millisecond}
 	}
 	run := f.enqueue("version: 1\nname: serial\nsteps:\n  - { id: s1, image: img }\n  - { id: s2, image: img }\n", nil)
 	_, stop := f.start()
 	defer stop()
 	f.wait(run.ID, store.RunSucceeded)
-	mu.Lock()
-	defer mu.Unlock()
-	if starts["s1"].Sub(starts["s2"]).Abs() < 150*time.Millisecond {
+	if starts := <-startsCh; starts["s1"].Sub(starts["s2"]).Abs() < 150*time.Millisecond {
 		t.Fatal("run parallelism 1 must serialize steps")
 	}
 }
@@ -369,11 +368,11 @@ func TestWhenErrorFailsStep(t *testing.T) {
 
 func TestRetryAndTimeout(t *testing.T) {
 	f := newFixture(t)
-	var mu sync.Mutex
-	attempts := map[string]int{}
+	attemptsCh := make(chan map[string]int, 1)
+	attemptsCh <- map[string]int{}
 	f.docker.OnStart = func(c *docker.FakeContainer) docker.Behavior {
-		mu.Lock()
-		defer mu.Unlock()
+		attempts := <-attemptsCh
+		defer func() { attemptsCh <- attempts }()
 		step := c.Spec.Labels[LabelStep]
 		attempts[step]++
 		switch {
@@ -570,24 +569,28 @@ func TestRestartWithNeverStartedContainer(t *testing.T) {
 }
 
 type fakeActions struct {
-	mu    sync.Mutex
+	ops   serial.Queue
 	calls []map[string]any
 	fail  bool
 }
 
-func (a *fakeActions) Execute(_ context.Context, ref string, input map[string]any) (map[string]any, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.calls = append(a.calls, input)
-	if a.fail {
-		return nil, errors.New("slack said no")
-	}
-	return map[string]any{"ts": "123.45", "ref": ref}, nil
+func newFakeActions() *fakeActions { return &fakeActions{ops: serial.New()} }
+
+func (a *fakeActions) Execute(_ context.Context, ref string, input map[string]any) (out map[string]any, err error) {
+	a.ops.Do(func() {
+		a.calls = append(a.calls, input)
+		if a.fail {
+			err = errors.New("slack said no")
+			return
+		}
+		out = map[string]any{"ts": "123.45", "ref": ref}
+	})
+	return out, err
 }
 
 func TestUsesSteps(t *testing.T) {
 	f := newFixture(t)
-	acts := &fakeActions{}
+	acts := newFakeActions()
 	f.deps.Actions = acts
 	run := f.enqueue(`
 version: 1
@@ -800,7 +803,7 @@ func (s *stubEgress) Ensure(_ context.Context, profile string, allow []string) (
 }
 
 type stubSessions struct {
-	mu       sync.Mutex
+	ops      serial.Queue
 	dir      string
 	started  []string
 	finished []string
@@ -808,39 +811,33 @@ type stubSessions struct {
 	repos    []string
 }
 
+func newStubSessions(dir string) *stubSessions { return &stubSessions{ops: serial.New(), dir: dir} }
+
 func (s *stubSessions) StartRun(_ context.Context, runID, profile string) (session.RunWorkspace, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.started = append(s.started, runID+"/"+profile)
+	s.ops.Do(func() { s.started = append(s.started, runID+"/"+profile) })
 	return session.RunWorkspace{SessionID: "sess-" + runID, Dir: s.dir}, nil
 }
 
 func (s *stubSessions) RepoWorktree(_ context.Context, sid, ref, rev string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.repos = append(s.repos, ref+"@"+rev)
+	s.ops.Do(func() { s.repos = append(s.repos, ref+"@"+rev) })
 	d := filepath.Join(s.dir, "repo")
 	return d, os.MkdirAll(d, 0o700)
 }
 
 func (s *stubSessions) SetContainer(_ context.Context, _, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctrs = append(s.ctrs, id)
+	s.ops.Do(func() { s.ctrs = append(s.ctrs, id) })
 	return nil
 }
 
 func (s *stubSessions) FinishRun(_ context.Context, sid string, keep bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.finished = append(s.finished, sid)
+	s.ops.Do(func() { s.finished = append(s.finished, sid) })
 	return nil
 }
 
 func TestSessionsAndEgressSeams(t *testing.T) {
 	f := newFixture(t)
 	eg := &stubEgress{}
-	ss := &stubSessions{dir: t.TempDir()}
+	ss := newStubSessions(t.TempDir())
 	f.deps.Egress, f.deps.Sessions = eg, ss
 	f.cfg.Profile, f.cfg.Runtime = "workflow", "runsc"
 	run := f.enqueue(`
@@ -923,7 +920,7 @@ steps:
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFixture(t)
-			ss := &stubSessions{dir: t.TempDir()}
+			ss := newStubSessions(t.TempDir())
 			f.deps.Sessions = ss
 			f.deps.Secrets = fakeSecrets{"tok": "s3cr3t-value"}
 			run := f.enqueue(yaml, c.trigger)

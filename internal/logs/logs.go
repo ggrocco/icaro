@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"sync"
 )
 
 // Redacted replaces secret values in logs.
@@ -22,15 +21,17 @@ const minSecretLen = 6
 // buffered so a secret split across two writes is still caught when it
 // lands within one line.
 type Scrubber struct {
-	mu      sync.Mutex
 	w       io.Writer
 	secrets [][]byte
-	buf     bytes.Buffer
+	// pending holds the partial line not yet written. A call takes it out
+	// and puts it back when done, so concurrent writes take turns.
+	pending chan *bytes.Buffer
 }
 
 // NewScrubber wraps w; secrets shorter than minSecretLen are ignored.
 func NewScrubber(w io.Writer, secrets []string) *Scrubber {
-	s := &Scrubber{w: w}
+	s := &Scrubber{w: w, pending: make(chan *bytes.Buffer, 1)}
+	s.pending <- new(bytes.Buffer)
 	for _, sec := range secrets {
 		if len(sec) >= minSecretLen {
 			s.secrets = append(s.secrets, []byte(sec))
@@ -42,17 +43,17 @@ func NewScrubber(w io.Writer, secrets []string) *Scrubber {
 }
 
 func (s *Scrubber) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.buf.Write(p)
+	buf := <-s.pending
+	defer func() { s.pending <- buf }()
+	buf.Write(p)
 	for {
-		i := bytes.IndexByte(s.buf.Bytes(), '\n')
+		i := bytes.IndexByte(buf.Bytes(), '\n')
 		if i < 0 {
 			break
 		}
 		line := make([]byte, i+1)
-		copy(line, s.buf.Bytes()[:i+1])
-		s.buf.Next(i + 1)
+		copy(line, buf.Bytes()[:i+1])
+		buf.Next(i + 1)
 		if _, err := s.w.Write(s.scrub(line)); err != nil {
 			return 0, err
 		}
@@ -62,13 +63,13 @@ func (s *Scrubber) Write(p []byte) (int, error) {
 
 // Flush writes any trailing partial line.
 func (s *Scrubber) Flush() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.buf.Len() == 0 {
+	buf := <-s.pending
+	defer func() { s.pending <- buf }()
+	if buf.Len() == 0 {
 		return nil
 	}
-	rest := s.scrub(append([]byte(nil), s.buf.Bytes()...))
-	s.buf.Reset()
+	rest := s.scrub(append([]byte(nil), buf.Bytes()...))
+	buf.Reset()
 	_, err := s.w.Write(rest)
 	return err
 }

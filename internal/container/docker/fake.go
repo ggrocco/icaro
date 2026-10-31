@@ -9,7 +9,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -47,7 +46,9 @@ type FakeContainer struct {
 // Fake is an in-memory Client for tests. OnStart decides a container's
 // behavior from its spec and copied-in files.
 type Fake struct {
-	mu         sync.Mutex
+	// turn is a one-slot token: holding it is exclusive access to the
+	// fake's state, so the goroutines of a test take turns.
+	turn       chan struct{}
 	seq        int
 	Containers map[string]*FakeContainer
 	Volumes    map[string]bool
@@ -58,14 +59,17 @@ type Fake struct {
 
 // NewFake returns an empty fake engine.
 func NewFake() *Fake {
-	return &Fake{Containers: map[string]*FakeContainer{}, Volumes: map[string]bool{}, Images: map[string]bool{}}
+	return &Fake{turn: make(chan struct{}, 1), Containers: map[string]*FakeContainer{}, Volumes: map[string]bool{}, Images: map[string]bool{}}
 }
+
+func (f *Fake) acquire() { f.turn <- struct{}{} }
+func (f *Fake) release() { <-f.turn }
 
 func (f *Fake) Ping(context.Context) error { return nil }
 
 func (f *Fake) EnsureImage(_ context.Context, ref string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	if f.PullErr != nil && !f.Images[ref] {
 		return f.PullErr
 	}
@@ -74,22 +78,22 @@ func (f *Fake) EnsureImage(_ context.Context, ref string) error {
 }
 
 func (f *Fake) CreateVolume(_ context.Context, name string, _ map[string]string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	f.Volumes[name] = true
 	return nil
 }
 
 func (f *Fake) RemoveVolume(_ context.Context, name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	delete(f.Volumes, name)
 	return nil
 }
 
 func (f *Fake) CreateContainer(_ context.Context, spec Spec) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	f.seq++
 	id := fmt.Sprintf("ctr%03d", f.seq)
 	f.Containers[id] = &FakeContainer{ID: id, Spec: spec, Files: map[string][]byte{}, done: make(chan struct{})}
@@ -98,8 +102,8 @@ func (f *Fake) CreateContainer(_ context.Context, spec Spec) (string, error) {
 
 // AddContainer registers a pre-existing container (reconcile tests).
 func (f *Fake) AddContainer(id string, spec Spec, b Behavior, started bool) *FakeContainer {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	c := &FakeContainer{ID: id, Spec: spec, Files: map[string][]byte{}, Behavior: b, done: make(chan struct{})}
 	f.Containers[id] = c
 	if started {
@@ -110,17 +114,17 @@ func (f *Fake) AddContainer(id string, spec Spec, b Behavior, started bool) *Fak
 }
 
 func (f *Fake) StartContainer(_ context.Context, id string) error {
-	f.mu.Lock()
+	f.acquire()
 	c, ok := f.Containers[id]
 	if !ok {
-		f.mu.Unlock()
+		f.release()
 		return ErrNotFound
 	}
 	if f.OnStart != nil {
 		c.Behavior = f.OnStart(c)
 	}
 	c.Started = true
-	f.mu.Unlock()
+	f.release()
 	go f.finish(c)
 	return nil
 }
@@ -134,8 +138,8 @@ func (f *Fake) finish(c *FakeContainer) {
 			return
 		}
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	select {
 	case <-c.done:
 	default:
@@ -145,9 +149,9 @@ func (f *Fake) finish(c *FakeContainer) {
 }
 
 func (f *Fake) CopyIn(_ context.Context, id, destDir string, r io.Reader) error {
-	f.mu.Lock()
+	f.acquire()
 	c, ok := f.Containers[id]
-	f.mu.Unlock()
+	f.release()
 	if !ok {
 		return ErrNotFound
 	}
@@ -164,16 +168,16 @@ func (f *Fake) CopyIn(_ context.Context, id, destDir string, r io.Reader) error 
 		if err != nil {
 			return err
 		}
-		f.mu.Lock()
+		f.acquire()
 		c.Files[strings.TrimSuffix(destDir, "/")+"/"+h.Name] = b
-		f.mu.Unlock()
+		f.release()
 	}
 }
 
 func (f *Fake) CopyOut(_ context.Context, id, path string) (io.ReadCloser, error) {
-	f.mu.Lock()
+	f.acquire()
 	c, ok := f.Containers[id]
-	f.mu.Unlock()
+	f.release()
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -195,9 +199,9 @@ func (f *Fake) CopyOut(_ context.Context, id, path string) (io.ReadCloser, error
 }
 
 func (f *Fake) Logs(ctx context.Context, id string, follow bool) (io.ReadCloser, error) {
-	f.mu.Lock()
+	f.acquire()
 	c, ok := f.Containers[id]
-	f.mu.Unlock()
+	f.release()
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -212,9 +216,9 @@ func (f *Fake) Logs(ctx context.Context, id string, follow bool) (io.ReadCloser,
 				return
 			}
 		}
-		f.mu.Lock()
+		f.acquire()
 		out, errOut := c.Behavior.Stdout, c.Behavior.Stderr
-		f.mu.Unlock()
+		f.release()
 		if out != "" {
 			_, _ = pw.Write(muxFrame(1, []byte(out)))
 		}
@@ -227,16 +231,16 @@ func (f *Fake) Logs(ctx context.Context, id string, follow bool) (io.ReadCloser,
 }
 
 func (f *Fake) Wait(ctx context.Context, id string) (int, error) {
-	f.mu.Lock()
+	f.acquire()
 	c, ok := f.Containers[id]
-	f.mu.Unlock()
+	f.release()
 	if !ok {
 		return -1, ErrNotFound
 	}
 	select {
 	case <-c.done:
-		f.mu.Lock()
-		defer f.mu.Unlock()
+		f.acquire()
+		defer f.release()
 		return c.exit, nil
 	case <-ctx.Done():
 		return -1, ctx.Err()
@@ -244,8 +248,8 @@ func (f *Fake) Wait(ctx context.Context, id string) (int, error) {
 }
 
 func (f *Fake) Inspect(_ context.Context, id string) (State, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	c, ok := f.Containers[id]
 	if !ok || c.Removed {
 		return State{}, nil
@@ -261,8 +265,8 @@ func (f *Fake) Inspect(_ context.Context, id string) (State, error) {
 }
 
 func (f *Fake) Kill(_ context.Context, id string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	c, ok := f.Containers[id]
 	if !ok {
 		return nil
@@ -278,8 +282,8 @@ func (f *Fake) Kill(_ context.Context, id string) error {
 }
 
 func (f *Fake) RemoveContainer(_ context.Context, id string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	if c, ok := f.Containers[id]; ok {
 		c.Removed = true
 	}
@@ -287,8 +291,8 @@ func (f *Fake) RemoveContainer(_ context.Context, id string) error {
 }
 
 func (f *Fake) ListByLabel(_ context.Context, labels map[string]string) ([]string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	var ids []string
 	for id, c := range f.Containers {
 		if c.Removed {
@@ -311,16 +315,16 @@ func (f *Fake) ListByLabel(_ context.Context, labels map[string]string) ([]strin
 
 // IsStarted reports whether a container has been started (lock-safe for tests).
 func (f *Fake) IsStarted(id string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	c, ok := f.Containers[id]
 	return ok && c.Started
 }
 
 // Container returns a snapshot of a fake container.
 func (f *Fake) Container(id string) *FakeContainer {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	return f.Containers[id]
 }
 
