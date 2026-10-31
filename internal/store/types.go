@@ -11,8 +11,11 @@ const (
 
 // Run statuses.
 const (
-	RunQueued    = "queued"
-	RunRunning   = "running"
+	RunQueued  = "queued"
+	RunRunning = "running"
+	// RunWaiting is a run parked on approval or wait steps (ADR 0030): it
+	// holds no engine slot until it is due (WakeAt) or decided.
+	RunWaiting   = "waiting"
 	RunSucceeded = "succeeded"
 	RunFailed    = "failed"
 	RunCancelled = "cancelled"
@@ -20,8 +23,10 @@ const (
 
 // Step statuses.
 const (
-	StepPending   = "pending"
-	StepRunning   = "running"
+	StepPending = "pending"
+	StepRunning = "running"
+	// StepWaiting is an approval or wait step that has started waiting.
+	StepWaiting   = "waiting"
 	StepSucceeded = "succeeded"
 	StepFailed    = "failed"
 	StepSkipped   = "skipped"
@@ -88,6 +93,9 @@ type Run struct {
 	SessionID   string
 	DeliveryID  string
 	Actor       string
+	// WakeAt is when the engine next looks at a waiting run; nil waits for
+	// a decision only.
+	WakeAt *time.Time
 }
 
 // StepRun is the persisted state of one step of a run, keyed by step id.
@@ -138,4 +146,24 @@ type RunFilter struct {
 	WorkflowID string
 	Status     string
 	Limit      int
+}
+
+// Approval decisions (ADR 0030).
+const (
+	ApprovalApproved = "approved"
+	ApprovalRejected = "rejected"
+	ApprovalExpired  = "expired" // the step's deadline passed undecided
+)
+
+// Approval is the state of one approval step of a run: the message the
+// approver sees and, once made, the decision.
+type Approval struct {
+	RunID     string
+	StepID    string
+	Message   string
+	Decision  string // "" while pending
+	Actor     string
+	Comment   string
+	CreatedAt time.Time
+	DecidedAt *time.Time
 }

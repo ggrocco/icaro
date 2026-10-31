@@ -114,6 +114,24 @@ func TestClosedDatabase(t *testing.T) {
 	f := MemoryFilter{ProjectID: "p"}
 	calls := map[string]func() error{
 		"Migrate": func() error { return s.Migrate(ctx) },
+		"ClaimDueRun": func() error {
+			_, err := s.ClaimDueRun(ctx, "daemon")
+			return err
+		},
+		"ParkRun": func() error { return s.ParkRun(ctx, "r", nil) },
+		"WakeRun": func() error { return s.WakeRun(ctx, "r") },
+		"OpenApproval": func() error {
+			_, err := s.OpenApproval(ctx, "r", "s", "m")
+			return err
+		},
+		"ListApprovals": func() error {
+			_, err := s.ListApprovals(ctx, "r")
+			return err
+		},
+		"DecideApproval": func() error {
+			_, err := s.DecideApproval(ctx, "r", "s", ApprovalApproved, "a", "")
+			return err
+		},
 		"PendingMigrations": func() error {
 			_, err := s.PendingMigrations(ctx)
 			return err

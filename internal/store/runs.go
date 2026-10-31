@@ -6,18 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
-const runCols = `id, workflow_id, workflow_name, workflow_version, status, trigger_kind, input_json, root_run_id, parent_run_id, depth, rerun_of, library_hash, claimed_by, claimed_at, heartbeat_at, started_at, finished_at, cancel_requested_at, error, created_at, idempotency_key, concurrency, session_id, delivery_id, actor`
+const runCols = `id, workflow_id, workflow_name, workflow_version, status, trigger_kind, input_json, root_run_id, parent_run_id, depth, rerun_of, library_hash, claimed_by, claimed_at, heartbeat_at, started_at, finished_at, cancel_requested_at, error, created_at, idempotency_key, concurrency, session_id, delivery_id, actor, wake_at`
 
 func scanRun(sc interface{ Scan(...any) error }) (*Run, error) {
 	var r Run
 	var parent, rerun, lib, claimedBy, idem, session, delivery sql.NullString
-	var claimedAt, heartbeat, started, finished, cancel sql.NullString
+	var claimedAt, heartbeat, started, finished, cancel, wake sql.NullString
 	var created string
 	err := sc.Scan(&r.ID, &r.WorkflowID, &r.WorkflowName, &r.WorkflowVersion, &r.Status, &r.TriggerKind, &r.TriggerJSON, &r.RootRunID,
 		&parent, &r.Depth, &rerun, &lib, &claimedBy, &claimedAt, &heartbeat, &started, &finished, &cancel, &r.Error, &created,
-		&idem, &r.Concurrency, &session, &delivery, &r.Actor)
+		&idem, &r.Concurrency, &session, &delivery, &r.Actor, &wake)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -27,7 +28,7 @@ func scanRun(sc interface{ Scan(...any) error }) (*Run, error) {
 	r.ParentRunID, r.RerunOf, r.LibraryHash, r.ClaimedBy = parent.String, rerun.String, lib.String, claimedBy.String
 	r.IdempotencyKey, r.SessionID, r.DeliveryID = idem.String, session.String, delivery.String
 	r.ClaimedAt, r.HeartbeatAt, r.StartedAt = parseTSPtr(claimedAt), parseTSPtr(heartbeat), parseTSPtr(started)
-	r.FinishedAt, r.CancelRequestedAt = parseTSPtr(finished), parseTSPtr(cancel)
+	r.FinishedAt, r.CancelRequestedAt, r.WakeAt = parseTSPtr(finished), parseTSPtr(cancel), parseTSPtr(wake)
 	r.CreatedAt = parseTS(created)
 	return &r, nil
 }
@@ -106,8 +107,8 @@ func (s *Store) EnqueueRun(ctx context.Context, r *Run, steps []StepInit) (Polic
 }
 
 func (s *Store) activeRunsTx(ctx context.Context, tx *sql.Tx, workflowID string) ([]*Run, error) {
-	rows, err := tx.QueryContext(ctx, s.rebind(`SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?) ORDER BY created_at, id`),
-		workflowID, RunQueued, RunRunning)
+	rows, err := tx.QueryContext(ctx, s.rebind(`SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?, ?) ORDER BY created_at, id`),
+		workflowID, RunQueued, RunRunning, RunWaiting)
 	if err != nil {
 		return nil, err
 	}
@@ -145,11 +146,11 @@ func (s *Store) fillRun(r *Run) {
 }
 
 func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, r *Run, steps []StepInit) error {
-	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		r.ID, r.WorkflowID, r.WorkflowName, r.WorkflowVersion, r.Status, r.TriggerKind, r.TriggerJSON, r.RootRunID,
 		nullStr(r.ParentRunID), r.Depth, nullStr(r.RerunOf), nullStr(r.LibraryHash), nullStr(r.ClaimedBy),
 		tsPtr(r.ClaimedAt), tsPtr(r.HeartbeatAt), tsPtr(r.StartedAt), tsPtr(r.FinishedAt), tsPtr(r.CancelRequestedAt),
-		r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor); err != nil {
+		r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor, tsPtr(r.WakeAt)); err != nil {
 		return err
 	}
 	for _, st := range steps {
@@ -217,17 +218,18 @@ func (s *Store) ListRunsByStatus(ctx context.Context, status string) ([]*Run, er
 	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE status = ? ORDER BY created_at, id`, status)
 }
 
-// ActiveRuns returns a workflow's queued and running runs, oldest first.
+// ActiveRuns returns a workflow's queued, running and waiting runs,
+// oldest first.
 func (s *Store) ActiveRuns(ctx context.Context, workflowID string) ([]*Run, error) {
-	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?) ORDER BY created_at, id`,
-		workflowID, RunQueued, RunRunning)
+	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?, ?) ORDER BY created_at, id`,
+		workflowID, RunQueued, RunRunning, RunWaiting)
 }
 
 // ClaimRun atomically takes the oldest claimable queued run. A run whose
 // policy is "queue" or "replace" waits while another run of the same
-// workflow is running: for replace, that is the run it cancelled, whose
-// containers are still being killed. It returns ErrNotFound when nothing
-// is claimable.
+// workflow is running or waiting: for replace, that is the run it
+// cancelled, whose containers are still being killed. It returns
+// ErrNotFound when nothing is claimable.
 func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 	now := ts(Now())
 	var id string
@@ -236,10 +238,10 @@ func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 			SELECT r.id FROM runs r
 			WHERE r.status = ?
 			  AND NOT (r.concurrency IN ('queue', 'replace') AND EXISTS (
-			      SELECT 1 FROM runs o WHERE o.workflow_id = r.workflow_id AND o.status = ?))
+			      SELECT 1 FROM runs o WHERE o.workflow_id = r.workflow_id AND o.status IN (?, ?)))
 			ORDER BY r.created_at, r.id LIMIT 1)
 		AND status = ?
-		RETURNING id`, RunRunning, runnerID, now, now, now, RunQueued, RunRunning, RunQueued).Scan(&id)
+		RETURNING id`, RunRunning, runnerID, now, now, now, RunQueued, RunRunning, RunWaiting, RunQueued).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -247,6 +249,46 @@ func (s *Store) ClaimRun(ctx context.Context, runnerID string) (*Run, error) {
 		return nil, err
 	}
 	return s.GetRun(ctx, id)
+}
+
+// ClaimDueRun atomically takes the waiting run that has been due the
+// longest: its wake time has passed, or someone asked to cancel it. The
+// run keeps its start time and run session; the engine resumes it.
+// It returns ErrNotFound when no waiting run is due.
+func (s *Store) ClaimDueRun(ctx context.Context, runnerID string) (*Run, error) {
+	now := ts(Now())
+	var id string
+	err := s.queryRow(ctx, `UPDATE runs SET status = ?, claimed_by = ?, claimed_at = ?, heartbeat_at = ?, wake_at = NULL
+		WHERE id = (
+			SELECT id FROM runs
+			WHERE status = ? AND ((wake_at IS NOT NULL AND wake_at <= ?) OR cancel_requested_at IS NOT NULL)
+			ORDER BY COALESCE(wake_at, cancel_requested_at), id LIMIT 1)
+		AND status = ?
+		RETURNING id`, RunRunning, runnerID, now, now, RunWaiting, now, RunWaiting).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetRun(ctx, id)
+}
+
+// ParkRun parks a running run until wakeAt (nil: until a decision or a
+// cancel request), giving its engine slot back (ADR 0030).
+func (s *Store) ParkRun(ctx context.Context, runID string, wakeAt *time.Time) error {
+	res, err := s.exec(ctx, `UPDATE runs SET status = ?, wake_at = ? WHERE id = ? AND status = ?`,
+		RunWaiting, tsPtr(wakeAt), runID, RunRunning)
+	if err != nil {
+		return err
+	}
+	return affected(res)
+}
+
+// WakeRun makes a waiting run due now.
+func (s *Store) WakeRun(ctx context.Context, runID string) error {
+	_, err := s.exec(ctx, `UPDATE runs SET wake_at = ? WHERE id = ? AND status = ?`, ts(Now()), runID, RunWaiting)
+	return err
 }
 
 // SetRunSession records the run session backing a run (ADR 0010).
@@ -294,7 +336,11 @@ func (s *Store) requestCancelTx(ctx context.Context, tx *sql.Tx, runID string) e
 			StepCancelled, now, "run cancelled", runID, StepPending)
 		return err
 	}
-	res, err = tx.ExecContext(ctx, s.rebind(`UPDATE runs SET cancel_requested_at = ? WHERE id = ? AND status = ? AND cancel_requested_at IS NULL`), now, runID, RunRunning)
+	// A running run is flagged for the engine to stop; a waiting one is
+	// also woken, so the engine claims it and cancels it the same way.
+	res, err = tx.ExecContext(ctx, s.rebind(`UPDATE runs SET cancel_requested_at = ?,
+		wake_at = CASE WHEN status = ? THEN ? ELSE wake_at END
+		WHERE id = ? AND status IN (?, ?) AND cancel_requested_at IS NULL`), now, RunWaiting, now, runID, RunRunning, RunWaiting)
 	if err != nil {
 		return err
 	}

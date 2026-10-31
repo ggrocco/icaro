@@ -69,7 +69,7 @@ func diffJSON(t *testing.T, path string, want, got any) {
 // spec types must be annotated (propertySchema panics otherwise).
 func TestAnnotationsCoverFields(t *testing.T) {
 	fields := map[string]bool{}
-	for _, typ := range []reflect.Type{typeSpec, typeTrigger, typeStep, typeRepository} {
+	for _, typ := range []reflect.Type{typeSpec, typeTrigger, typeStep, typeRepository, typeApproval} {
 		for i := 0; i < typ.NumField(); i++ {
 			fields[typ.Name()+"."+jsonName(typ.Field(i))] = true
 		}
