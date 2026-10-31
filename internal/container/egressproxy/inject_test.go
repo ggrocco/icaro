@@ -37,6 +37,11 @@ func fakeDaemon(t *testing.T, h http.Handler) string {
 func TestForwarderRelaysToTheDaemon(t *testing.T) {
 	release := make(chan struct{})
 	sock := fakeDaemon(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Like the daemon, which forwards the request to the provider,
+		// read it before answering. An upstream that answers and closes
+		// first makes the relay's late body write fail, and the transport
+		// then drops the response it was still reading.
+		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("X-Seen-Path", r.URL.RequestURI())
 		w.Header().Set("X-Seen-Key", r.Header.Get("X-Api-Key"))
