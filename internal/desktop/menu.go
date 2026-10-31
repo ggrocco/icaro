@@ -87,7 +87,7 @@ func Menu(s State, p Prefs) []Item {
 
 func runsSection(s State) []Item {
 	var m []Item
-	active := append(append([]Run{}, s.Running...), s.Queued...)
+	active := append(append(append([]Run{}, s.Running...), s.Waiting...), s.Queued...)
 	if len(active) == 0 {
 		m = append(m, Item{Label: "No active runs", Disabled: true})
 	}
@@ -182,6 +182,8 @@ func statusMark(status string) string {
 		return "●"
 	case "queued", "pending":
 		return "○"
+	case "waiting":
+		return "◐"
 	case "failed", "error", "blocked":
 		return "✕"
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -376,7 +377,44 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(list, get, logs, cancel, rerun)
+	decide := func(approve bool) *cobra.Command {
+		var comment string
+		c := &cobra.Command{
+			Use:   "approve ID STEP",
+			Short: "Approve a run's waiting approval step",
+			Args:  cobra.ExactArgs(2),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if !approve && strings.TrimSpace(comment) == "" {
+					return errors.New("say why with --comment")
+				}
+				c, err := opts.client(cmd.Context())
+				if err != nil {
+					return err
+				}
+				run, err := c.DecideApproval(cmd.Context(), args[0], args[1], approve, comment)
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					return printJSON(cmd.OutOrStdout(), run)
+				}
+				verb := "approved"
+				if !approve {
+					verb = "rejected"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "step %s of run %s %s\n", args[1], run.ID, verb)
+				return nil
+			},
+		}
+		if approve {
+			c.Flags().StringVar(&comment, "comment", "", "a note for the steps after it (outputs.comment)")
+		} else {
+			c.Use, c.Short = "reject ID STEP --comment WHY", "Reject a run's waiting approval step; the run fails"
+			c.Flags().StringVar(&comment, "comment", "", "why it is rejected (required)")
+		}
+		return c
+	}
+	cmd.AddCommand(list, get, logs, cancel, rerun, decide(true), decide(false))
 	return cmd
 }
 

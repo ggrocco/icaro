@@ -66,12 +66,23 @@ type StepSpec struct {
 	Input      map[string]any    `json:"input,omitempty" yaml:"input,omitempty"`
 	Outputs    map[string]string `json:"outputs,omitempty" yaml:"outputs,omitempty"`
 	When       string            `json:"when,omitempty" yaml:"when,omitempty"`
+	Approval   *ApprovalSpec     `json:"approval,omitempty" yaml:"approval,omitempty"`
+	Wait       string            `json:"wait,omitempty" yaml:"wait,omitempty"`
+}
+
+// ApprovalSpec makes a step wait for a person to approve or reject the run
+// (ADR 0030). The step's timeout, when set, is the decision deadline.
+type ApprovalSpec struct {
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
 // Expression roots available to workflows (ADR 0009).
 var (
 	// RootsStep are the names a step's env/input/command/when may reference.
 	RootsStep = []string{"steps", "trigger", "env", "secrets", "run", "workflow"}
+	// RootsApproval are the names an approval message may reference: no
+	// secrets, since the message is displayed.
+	RootsApproval = []string{"steps", "trigger", "env", "run", "workflow"}
 	// RootsFilter are the names a trigger filter may reference.
 	RootsFilter = []string{"trigger"}
 )

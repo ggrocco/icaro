@@ -31,7 +31,7 @@ A workflow file cannot weaken any of this. Preview stacks run your own container
 
 **Local access.** The daemon listens on a `0600` Unix socket in a `0700` directory. TCP, whether `--listen` or the `icaro ui` loopback listener, requires a hashed, scoped API token or a browser session. Both are plain HTTP and loopback-only by default: a non-loopback `--listen` needs `--allow-remote` (`daemon.allow_remote`); put a TLS-terminating reverse proxy in front of a loopback listener instead. Cookie-authenticated requests that change something also need a CSRF header. See [Web UI](ui.md).
 
-**Agents over MCP.** No tool returns a secret value or deletes anything, and memory scope comes from the session, not from the agent's arguments.
+**Agents over MCP.** No tool returns a secret value or deletes anything, and memory scope comes from the session, not from the agent's arguments. No tool decides an [approval step](workflows.md#approvals-and-waits) either: a person does, with a `write` token or a UI session, and the decision records who. Containers reach only their session's memory endpoint, never the daemon API, so a run cannot approve itself.
 
 ## What it does not protect against
 

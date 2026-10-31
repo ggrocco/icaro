@@ -126,6 +126,8 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
         const p = (k: string) => ["steps", i, k];
         const uses = String(getIn(doc, p("uses")) ?? "");
         const isUses = doc.hasIn(p("uses"));
+        const kind = isUses ? "uses" : doc.hasIn(p("approval")) ? "approval" : doc.hasIn(p("wait")) ? "wait" : "image";
+        const pauses = kind === "approval" || kind === "wait";
         const action = actions.get(uses);
         const needs = (getIn<string[]>(doc, p("needs")) ?? []) as string[];
         return (
@@ -136,24 +138,39 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
             </Field>
             <Field label="Kind">
               <select
-                value={isUses ? "uses" : "image"}
+                value={kind}
                 onChange={(e) =>
                   mutate((d) => {
-                    if (e.target.value === "uses") {
-                      for (const k of ["image", "command", "env", "outputs"]) d.deleteIn(["steps", i, k]);
-                      d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
-                    } else {
-                      d.deleteIn(["steps", i, "uses"]);
-                      d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
-                    }
+                    // Each form has its own fields; switching drops the old ones.
+                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait"]) d.deleteIn(["steps", i, k]);
+                    if (e.target.value === "approval" || e.target.value === "wait") d.deleteIn(["steps", i, "retry"]);
+                    if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
+                    if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
+                    else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
+                    else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
+                    else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                   })
                 }
               >
                 <option value="image">image (container)</option>
                 <option value="uses">uses (integration action)</option>
+                <option value="approval">approval (a person decides)</option>
+                <option value="wait">wait (pause for a time)</option>
               </select>
             </Field>
-            {isUses ? (
+            {kind === "approval" ? (
+              <Field label="Message" hint="Shown to the approver; may use ${{ trigger.* }} and ${{ steps.*.outputs.* }}">
+                <textarea
+                  rows={2}
+                  value={String(getIn(doc, ["steps", i, "approval", "message"]) ?? "")}
+                  onChange={(e) => update(["steps", i, "approval", "message"], e.target.value || undefined)}
+                />
+              </Field>
+            ) : kind === "wait" ? (
+              <Field label="Duration" hint="e.g. 30m or 2h (at most 720h)">
+                <input value={String(getIn(doc, p("wait")) ?? "")} onChange={(e) => update(p("wait"), e.target.value)} />
+              </Field>
+            ) : isUses ? (
               <>
                 <Field label="Action">
                   <select value={uses} onChange={(e) => update(p("uses"), e.target.value)}>
@@ -216,18 +233,22 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
               <input value={String(getIn(doc, p("when")) ?? "")} onChange={(e) => update(p("when"), e.target.value)} />
             </Field>
             <div className="row">
-              <Field label="Timeout">
-                <input placeholder="10m" value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
-              </Field>
-              <Field label="Retry">
-                <input
-                  type="number"
-                  min={0}
-                  max={5}
-                  value={String(getIn(doc, p("retry")) ?? "")}
-                  onChange={(e) => update(p("retry"), e.target.value === "" ? undefined : Number(e.target.value))}
-                />
-              </Field>
+              {kind !== "wait" && (
+                <Field label={kind === "approval" ? "Deadline" : "Timeout"} hint={kind === "approval" ? "undecided after this, it fails" : undefined}>
+                  <input placeholder={kind === "approval" ? "24h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
+                </Field>
+              )}
+              {!pauses && (
+                <Field label="Retry">
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    value={String(getIn(doc, p("retry")) ?? "")}
+                    onChange={(e) => update(p("retry"), e.target.value === "" ? undefined : Number(e.target.value))}
+                  />
+                </Field>
+              )}
             </div>
             <button type="button" className="ghost danger" onClick={() => mutate((d) => d.deleteIn(["steps", i]))}>
               Remove step
