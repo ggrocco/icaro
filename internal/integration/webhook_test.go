@@ -16,53 +16,53 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/config"
 	"icaro/internal/crypto"
 	"icaro/internal/secrets"
+	"icaro/internal/serial"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 )
 
 // fakeEngine mimics the workflow service: it dedupes on the idempotency key.
 type fakeEngine struct {
-	mu   sync.Mutex
+	ops  serial.Queue
 	reqs []workflow.EnqueueRequest
 	keys map[string]string
 	fail error
 }
 
-func (f *fakeEngine) EnqueueRun(_ context.Context, r workflow.EnqueueRequest) (workflow.EnqueueResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.fail != nil {
-		return workflow.EnqueueResult{}, f.fail
-	}
-	if f.keys == nil {
-		f.keys = map[string]string{}
-	}
-	if id, ok := f.keys[r.IdempotencyKey]; ok {
-		return workflow.EnqueueResult{RunID: id, Deduplicated: true}, nil
-	}
-	f.reqs = append(f.reqs, r)
-	id := fmt.Sprintf("run-%d", len(f.reqs))
-	f.keys[r.IdempotencyKey] = id
-	return workflow.EnqueueResult{RunID: id}, nil
+func newFakeEngine() *fakeEngine { return &fakeEngine{ops: serial.New(), keys: map[string]string{}} }
+
+func (f *fakeEngine) EnqueueRun(_ context.Context, r workflow.EnqueueRequest) (res workflow.EnqueueResult, err error) {
+	f.ops.Do(func() {
+		if f.fail != nil {
+			err = f.fail
+			return
+		}
+		if id, ok := f.keys[r.IdempotencyKey]; ok {
+			res = workflow.EnqueueResult{RunID: id, Deduplicated: true}
+			return
+		}
+		f.reqs = append(f.reqs, r)
+		id := fmt.Sprintf("run-%d", len(f.reqs))
+		f.keys[r.IdempotencyKey] = id
+		res = workflow.EnqueueResult{RunID: id}
+	})
+	return res, err
 }
 
-func (f *fakeEngine) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.reqs)
+func (f *fakeEngine) count() (n int) {
+	f.ops.Do(func() { n = len(f.reqs) })
+	return n
 }
 
-func (f *fakeEngine) last() workflow.EnqueueRequest {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.reqs[len(f.reqs)-1]
+func (f *fakeEngine) last() (r workflow.EnqueueRequest) {
+	f.ops.Do(func() { r = f.reqs[len(f.reqs)-1] })
+	return r
 }
 
 type fakeSpecs []*workflow.Spec
@@ -92,7 +92,7 @@ func newHookFixture(t *testing.T, specs fakeSpecs, wh config.WebhooksConfig) *ho
 	}
 	key, _ := crypto.NewKey()
 	sec := secrets.New(db, key)
-	f := &hookFixture{t: t, engine: &fakeEngine{}, secrets: sec, store: db, now: time.Unix(1760954400, 0)}
+	f := &hookFixture{t: t, engine: newFakeEngine(), secrets: sec, store: db, now: time.Unix(1760954400, 0)}
 	f.hub = NewHub(HubOptions{Dir: t.TempDir(), Store: db, Secrets: sec, Webhooks: wh, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return f.now }})
 	f.hub.SetEnqueuer(f.engine)
 	f.hub.SetSpecSource(specs)

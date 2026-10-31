@@ -51,10 +51,10 @@ func TestDefaultsAndRunLoopSurvivesFailedPasses(t *testing.T) {
 
 func TestRunWaitsUntilTheNextFire(t *testing.T) {
 	st := openStore(t)
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 59, 59, 999_000_000, time.UTC)}
+	clk := newFakeClock(time.Date(2026, 1, 1, 0, 59, 59, 999_000_000, time.UTC))
 	s := New(Options{Store: st, Clock: clk, MaxSleep: time.Hour, Log: quiet})
 	s.SetSpecSource(hourly)
-	s.SetEnqueuer(&engine{})
+	s.SetEnqueuer(newEngine())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
 	go func() { done <- s.Run(ctx) }()
@@ -76,7 +76,7 @@ func (f *failingEngine) EnqueueRun(context.Context, workflow.EnqueueRequest) (wo
 func TestEnqueueFailureRetriesWithoutAdvancing(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)}
+	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
 	s := New(Options{Store: st, Clock: clk, MaxSleep: time.Minute, Log: quiet})
 	s.SetSpecSource(hourly)
 	fe := &failingEngine{}
@@ -97,7 +97,7 @@ func TestEnqueueFailureRetriesWithoutAdvancing(t *testing.T) {
 	if len(cs) != 1 || !cs[0].NextAt.Equal(time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)) || cs[0].LastFiredAt != nil {
 		t.Fatalf("a failed fire must not advance the schedule: %+v", cs)
 	}
-	e := &engine{}
+	e := newEngine()
 	s.SetEnqueuer(e)
 	if _, err := s.Tick(ctx); err != nil || e.n() != 1 {
 		t.Fatalf("retry: %v %d", err, e.n())
@@ -118,7 +118,7 @@ func TestStoreErrorsAreReported(t *testing.T) {
 
 	t.Run("list", func(t *testing.T) {
 		st := openStore(t)
-		s := New(Options{Store: st, Clock: &fakeClock{now: time.Now()}, Log: quiet})
+		s := New(Options{Store: st, Clock: newFakeClock(time.Now()), Log: quiet})
 		s.SetSpecSource(hourly)
 		_ = st.Close()
 		if _, err := s.Tick(ctx); err == nil {
@@ -128,7 +128,7 @@ func TestStoreErrorsAreReported(t *testing.T) {
 
 	t.Run("register and forget", func(t *testing.T) {
 		st := openStore(t)
-		clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)}
+		clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
 		s := New(Options{Store: st, Clock: clk, Log: quiet})
 		s.SetSpecSource(specs{{Version: 1, Name: "old", Triggers: []workflow.TriggerSpec{{Type: "cron", Cron: "0 * * * *"}}}})
 		if _, err := s.Tick(ctx); err != nil {
@@ -150,7 +150,7 @@ func TestStoreErrorsAreReported(t *testing.T) {
 
 	t.Run("advance after fire", func(t *testing.T) {
 		st := openStore(t)
-		clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)}
+		clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
 		s := New(Options{Store: st, Clock: clk, Log: quiet})
 		s.SetSpecSource(hourly)
 		if _, err := s.Tick(ctx); err != nil {

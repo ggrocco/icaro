@@ -132,9 +132,7 @@ func TestOverrideIsLintedAndRun(t *testing.T) {
 	if p.Status != store.PreviewRunning || p.Service != "web" || p.Port != 8000 {
 		t.Fatalf("%+v", p)
 	}
-	e.compose.fakeCompose.mu.Lock()
-	files := e.compose.files[p.ComposeProject] // guarded by fakeCompose.mu (failCompose has its own mu)
-	e.compose.fakeCompose.mu.Unlock()
+	files := e.compose.filesFor(p.ComposeProject)
 	if len(files) != 3 || files[0] != filepath.Join(norm(dir), "compose.yaml") || files[1] != filepath.Join(norm(dir), "compose.override.yaml") {
 		t.Fatalf("up must get the compose file, its override and ours: %v", files)
 	}

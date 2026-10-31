@@ -10,13 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/container/docker"
 	"icaro/internal/doctor"
 	"icaro/internal/paths"
+	"icaro/internal/serial"
 	"icaro/internal/store"
 )
 
@@ -25,20 +25,15 @@ var errBoom = errors.New("boom")
 // failStore is the real store with an error injected per method name.
 type failStore struct {
 	*store.Store
-	mu   sync.Mutex
+	ops  serial.Queue
 	fail map[string]error
 }
 
-func (s *failStore) set(method string, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.fail[method] = err
-}
+func (s *failStore) set(method string, err error) { s.ops.Do(func() { s.fail[method] = err }) }
 
-func (s *failStore) err(method string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.fail[method]
+func (s *failStore) err(method string) (err error) {
+	s.ops.Do(func() { err = s.fail[method] })
+	return err
 }
 
 func (s *failStore) CreatePreview(ctx context.Context, p *store.PreviewInstance) error {
@@ -84,33 +79,28 @@ func (s *failStore) ClearPreviewAllowances(ctx context.Context, path string) err
 	return s.Store.ClearPreviewAllowances(ctx, path)
 }
 
-// failCompose is fakeCompose with injectable Config/Running errors.
+// failCompose is fakeCompose with injectable Config/Running errors. Its
+// own state goes through the fakeCompose's queue too.
 type failCompose struct {
 	*fakeCompose
-	mu        sync.Mutex
 	configErr error
 }
 
-func (c *failCompose) setConfigErr(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.configErr = err
-}
+func (c *failCompose) setConfigErr(err error) { c.ops.Do(func() { c.configErr = err }) }
 
 func (c *failCompose) Config(ctx context.Context, project, dir string, files []string) ([]byte, error) {
-	c.mu.Lock()
-	err := c.configErr
-	c.mu.Unlock()
+	var err error
+	c.ops.Do(func() { err = c.configErr })
 	if err != nil {
 		return nil, err
 	}
 	return c.fakeCompose.Config(ctx, project, dir, files)
 }
 
-// failEngine is fakeEngine with an error injected per method name.
+// failEngine is fakeEngine with an error injected per method name. Its
+// own state goes through the fakeEngine's queue too.
 type failEngine struct {
 	*fakeEngine
-	mu   sync.Mutex
 	fail map[string]error
 }
 
@@ -118,16 +108,11 @@ func newFailEngine() *failEngine {
 	return &failEngine{fakeEngine: newFakeEngine(), fail: map[string]error{}}
 }
 
-func (e *failEngine) set(method string, err error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.fail[method] = err
-}
+func (e *failEngine) set(method string, err error) { e.ops.Do(func() { e.fail[method] = err }) }
 
-func (e *failEngine) err(method string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.fail[method]
+func (e *failEngine) err(method string) (err error) {
+	e.ops.Do(func() { err = e.fail[method] })
+	return err
 }
 
 func (e *failEngine) EnsureImage(ctx context.Context, ref string) error {
@@ -201,7 +186,7 @@ func newFailEnv(t *testing.T) *failEnv {
 	if err := l.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	e := &failEnv{t: t, ctx: ctx, st: &failStore{Store: st, fail: map[string]error{}},
+	e := &failEnv{t: t, ctx: ctx, st: &failStore{Store: st, ops: serial.New(), fail: map[string]error{}},
 		compose: &failCompose{fakeCompose: newFakeCompose()}, engine: newFailEngine(), layout: l}
 	e.m = New(Options{Layout: l, HTTPPort: 18780, Debounce: 20 * time.Millisecond}, e.st, e.compose, e.engine,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))

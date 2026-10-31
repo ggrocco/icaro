@@ -205,7 +205,7 @@ func TestUsesStepFailures(t *testing.T) {
 	t.Run("input", func(t *testing.T) {
 		t.Parallel()
 		f := newFixture(t)
-		f.deps.Actions = &fakeActions{}
+		f.deps.Actions = newFakeActions()
 		run := f.enqueue("version: 1\nname: uses-input\nsteps:\n  - { id: post, uses: slack.post-message, input: { text: \"${{ trigger.missing }}\" } }\n", nil)
 		_, stop := f.start()
 		defer stop()
@@ -233,7 +233,7 @@ func TestUsesStepFailures(t *testing.T) {
 	t.Run("logs dir", func(t *testing.T) {
 		t.Parallel()
 		f := newFixture(t)
-		f.deps.Actions = &fakeActions{}
+		f.deps.Actions = newFakeActions()
 		p := filepath.Join(t.TempDir(), "file")
 		_ = os.WriteFile(p, nil, 0o600)
 		f.cfg.LogsDir = p
@@ -264,7 +264,7 @@ func TestLogStreamErrorAndMissingOutputFile(t *testing.T) {
 }
 
 type flakySessions struct {
-	stubSessions
+	*stubSessions
 }
 
 func (s *flakySessions) SetContainer(context.Context, string, string) error {
@@ -280,7 +280,7 @@ func (s *flakySessions) FinishRun(context.Context, string, bool) error {
 // created; step env and input keys reach the container.
 func TestStepContainerDetails(t *testing.T) {
 	f := newFixture(t)
-	f.deps.Sessions = &flakySessions{stubSessions{dir: t.TempDir()}}
+	f.deps.Sessions = &flakySessions{newStubSessions(t.TempDir())}
 	run := f.enqueue(`
 version: 1
 name: details
@@ -466,7 +466,7 @@ func TestReattachEdgeCases(t *testing.T) {
 	t.Run("uses step is retried, not resumed", func(t *testing.T) {
 		for _, retry := range []string{"0", "1"} {
 			f := newFixture(t)
-			acts := &fakeActions{}
+			acts := newFakeActions()
 			f.deps.Actions = acts
 			run := f.enqueue("version: 1\nname: uses-restart\nsteps:\n  - { id: s1, uses: slack.post-message, retry: "+retry+" }\n", nil)
 			f.claimRunning(run, 1, "")

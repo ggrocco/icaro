@@ -7,31 +7,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"icaro/internal/paths"
+	"icaro/internal/serial"
 	"icaro/internal/service"
 	"icaro/internal/store"
 )
 
 type fakeLogin struct {
-	mu  sync.Mutex
+	ops serial.Queue
 	on  bool
 	err error
 }
 
-func (l *fakeLogin) Enabled() (bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.on, l.err
+func (l *fakeLogin) Enabled() (on bool, err error) {
+	l.ops.Do(func() { on, err = l.on, l.err })
+	return on, err
 }
 
 func (l *fakeLogin) SetEnabled(on bool) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.on = on
+	l.ops.Do(func() { l.on = on })
 	return nil
 }
 
@@ -47,7 +44,7 @@ type rig struct {
 func newRig(t *testing.T, configure func(r *rig)) *rig {
 	t.Helper()
 	f, srv := newFakeAPI(t)
-	r := &rig{api: f, st: &starter{}, ui: &fakeUI{}}
+	r := &rig{api: f, st: newStarter(), ui: newFakeUI()}
 	r.ctrl = &Controller{
 		Daemon: localDaemon(f, srv, r.st), UI: r.ui, PrefsPath: filepath.Join(t.TempDir(), "desktop.json"),
 		Interval: 5 * time.Millisecond, UsageInterval: time.Hour,
@@ -74,10 +71,9 @@ func (r *rig) run(t *testing.T) {
 // polls waits for n more health checks: n more polls of the daemon.
 func (r *rig) polls(t *testing.T, n int) {
 	t.Helper()
-	count := func() int {
-		r.api.mu.Lock()
-		defer r.api.mu.Unlock()
-		return r.api.pings
+	count := func() (n int) {
+		r.api.ops.Do(func() { n = r.api.pings })
+		return n
 	}
 	start := count()
 	waitFor(t, "polls", func() bool { return count() >= start+n })
@@ -209,7 +205,7 @@ func TestControllerPrefsUnreadable(t *testing.T) {
 
 func TestControllerActions(t *testing.T) {
 	ctx := context.Background()
-	login := &fakeLogin{}
+	login := &fakeLogin{ops: serial.New()}
 	r := newRig(t, func(r *rig) { r.ctrl.Login = login })
 	r.ctrl.init()
 	c, ui := r.ctrl, r.ui
@@ -314,7 +310,7 @@ func TestControllerActions(t *testing.T) {
 // opens its sign-in page.
 func TestControllerRemoteUI(t *testing.T) {
 	_, srv := newFakeAPI(t)
-	ui := &fakeUI{}
+	ui := newFakeUI()
 	c := &Controller{Daemon: remoteDaemon(srv), UI: ui}
 	if err := c.Do(context.Background(), Action{Kind: ActOpenUI, Arg: "usage"}); err != nil {
 		t.Fatal(err)

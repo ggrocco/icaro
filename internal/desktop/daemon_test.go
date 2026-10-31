@@ -56,7 +56,7 @@ func TestOpenResolvesLikeTheCLI(t *testing.T) {
 // not start a second one.
 func TestEnsureAttachesBeforeStarting(t *testing.T) {
 	f, srv := newFakeAPI(t)
-	st := &starter{}
+	st := newStarter()
 	d := localDaemon(f, srv, st)
 	if err := d.Ensure(context.Background()); err != nil || st.count() != 0 {
 		t.Fatalf("a running daemon is attached, not started: %v %d", err, st.count())

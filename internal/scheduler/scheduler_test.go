@@ -6,23 +6,30 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
+	"icaro/internal/serial"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
 )
 
+// fakeClock keeps the time in a one-slot channel: whoever has received
+// it owns it until sending it back.
 type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	now chan time.Time
+}
+
+func newFakeClock(t time.Time) *fakeClock {
+	c := &fakeClock{now: make(chan time.Time, 1)}
+	c.now <- t
+	return c
 }
 
 func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
+	t := <-c.now
+	c.now <- t
+	return t
 }
 
 func (c *fakeClock) After(time.Duration) <-chan time.Time {
@@ -31,35 +38,34 @@ func (c *fakeClock) After(time.Duration) <-chan time.Time {
 }
 
 func (c *fakeClock) set(t time.Time) {
-	c.mu.Lock()
-	c.now = t
-	c.mu.Unlock()
+	<-c.now
+	c.now <- t
 }
 
 type engine struct {
-	mu   sync.Mutex
+	ops  serial.Queue
 	keys map[string]bool
 	reqs []workflow.EnqueueRequest
 }
 
-func (e *engine) EnqueueRun(_ context.Context, r workflow.EnqueueRequest) (workflow.EnqueueResult, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.keys == nil {
-		e.keys = map[string]bool{}
-	}
-	if e.keys[r.IdempotencyKey] {
-		return workflow.EnqueueResult{Deduplicated: true}, nil
-	}
-	e.keys[r.IdempotencyKey] = true
-	e.reqs = append(e.reqs, r)
-	return workflow.EnqueueResult{RunID: fmt.Sprint(len(e.reqs))}, nil
+func newEngine() *engine { return &engine{ops: serial.New(), keys: map[string]bool{}} }
+
+func (e *engine) EnqueueRun(_ context.Context, r workflow.EnqueueRequest) (res workflow.EnqueueResult, err error) {
+	e.ops.Do(func() {
+		if e.keys[r.IdempotencyKey] {
+			res = workflow.EnqueueResult{Deduplicated: true}
+			return
+		}
+		e.keys[r.IdempotencyKey] = true
+		e.reqs = append(e.reqs, r)
+		res = workflow.EnqueueResult{RunID: fmt.Sprint(len(e.reqs))}
+	})
+	return res, err
 }
 
-func (e *engine) n() int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return len(e.reqs)
+func (e *engine) n() (n int) {
+	e.ops.Do(func() { n = len(e.reqs) })
+	return n
 }
 
 type specs []*workflow.Spec
@@ -92,8 +98,8 @@ var hourly = specs{{Version: 1, Name: "nightly", Triggers: []workflow.TriggerSpe
 func TestMissedFireDuringRestartRunsExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	clk := &fakeClock{now: time.Date(2026, 10, 20, 10, 30, 0, 0, time.UTC)}
-	e := &engine{}
+	clk := newFakeClock(time.Date(2026, 10, 20, 10, 30, 0, 0, time.UTC))
+	e := newEngine()
 
 	s := newSched(st, clk, e, hourly)
 	next, err := s.Tick(ctx)
@@ -137,8 +143,8 @@ func TestMissedFireDuringRestartRunsExactlyOnce(t *testing.T) {
 func TestChangedAndRemovedTriggers(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)}
-	e := &engine{}
+	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
+	e := newEngine()
 	s := newSched(st, clk, e, hourly)
 	_, _ = s.Tick(ctx)
 	changed := specs{{Version: 1, Name: "nightly", Triggers: []workflow.TriggerSpec{{Type: "manual"}, {Type: "cron", Cron: "*/5 * * * *"}}}}
@@ -160,8 +166,8 @@ func TestChangedAndRemovedTriggers(t *testing.T) {
 
 func TestRunLoopAndWake(t *testing.T) {
 	st := openStore(t)
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)}
-	e := &engine{}
+	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
+	e := newEngine()
 	s := newSched(st, clk, e, hourly)
 	if _, err := s.Tick(context.Background()); err != nil { // register before time moves
 		t.Fatal(err)
@@ -190,7 +196,7 @@ func TestRunLoopAndWake(t *testing.T) {
 func TestNoEngineDoesNotAdvance(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)}
+	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
 	s := New(Options{Store: st, Clock: clk, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if next, err := s.Tick(ctx); err != nil || !next.IsZero() {
 		t.Fatal("no spec source: idle")
@@ -201,7 +207,7 @@ func TestNoEngineDoesNotAdvance(t *testing.T) {
 	if _, err := s.Tick(ctx); err == nil {
 		t.Fatal("must report the missing engine")
 	}
-	e := &engine{}
+	e := newEngine()
 	s.SetEnqueuer(e)
 	if _, err := s.Tick(ctx); err != nil || e.n() != 1 {
 		t.Fatal("the pending fire must happen once the engine is wired")
