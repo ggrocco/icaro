@@ -28,8 +28,8 @@ func (e *Engine) ContainerStarted(ctx context.Context, id string) (exists, start
 
 // ContainerStarted implements the same probe for the fake engine.
 func (f *Fake) ContainerStarted(_ context.Context, id string) (exists, started bool, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.acquire()
+	defer f.release()
 	c, ok := f.Containers[id]
 	if !ok || c.Removed {
 		return false, false, nil

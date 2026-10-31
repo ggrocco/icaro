@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -22,7 +21,8 @@ type shell struct {
 	notes *notifications.NotificationService
 	act   func(desktop.Action)
 
-	mu     sync.Mutex
+	// window is only touched on the main thread, which runs the
+	// InvokeAsync callbacks one at a time.
 	window *application.WebviewWindow
 }
 
@@ -82,8 +82,6 @@ func (s *shell) Notify(n desktop.Notification) {
 func (s *shell) OpenWindow(url string) {
 	slog.Debug("open window")
 	application.InvokeAsync(func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
 		if s.window == nil {
 			s.window = s.app.Window.NewWithOptions(application.WebviewWindowOptions{
 				Name: "main", Title: "Ícaro", Width: 1280, Height: 860, URL: url,
