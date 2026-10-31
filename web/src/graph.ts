@@ -2,7 +2,7 @@
 export interface GraphStep {
   id: string;
   needs?: string[];
-  kind: "image" | "uses";
+  kind: "image" | "uses" | "approval" | "wait";
   label: string;
 }
 
@@ -20,8 +20,8 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
     .map((s, i) => ({
       id: typeof s.id === "string" && s.id ? s.id : `step-${i + 1}`,
       needs: Array.isArray(s.needs) ? s.needs.filter((n): n is string => typeof n === "string") : [],
-      kind: s.uses ? "uses" : "image",
-      label: String(s.uses ?? s.image ?? ""),
+      kind: s.uses ? "uses" : s.approval !== undefined ? "approval" : s.wait !== undefined ? "wait" : "image",
+      label: s.approval !== undefined ? "approval" : s.wait !== undefined ? `wait ${String(s.wait)}` : String(s.uses ?? s.image ?? ""),
     }));
 }
 

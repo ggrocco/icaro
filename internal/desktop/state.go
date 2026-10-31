@@ -16,6 +16,7 @@ import (
 const (
 	runRunning     = "running"
 	runQueued      = "queued"
+	runWaiting     = "waiting"
 	runFailed      = "failed"
 	workflowActive = "active"
 )
@@ -73,6 +74,7 @@ type State struct {
 	// Remote is a TCP daemon (daemon.url), which the app does not start.
 	Remote    bool
 	Running   []Run
+	Waiting   []Run // parked on an approval or a wait step
 	Queued    []Run
 	Failed    []Run // the most recent first
 	Previews  []Preview
@@ -139,6 +141,8 @@ func Fetch(ctx context.Context, d *Daemon) State {
 	}
 	var err error
 	st.Running, err = runs(ctx, c, runRunning, listLimit)
+	keep(err)
+	st.Waiting, err = runs(ctx, c, runWaiting, listLimit)
 	keep(err)
 	st.Queued, err = runs(ctx, c, runQueued, listLimit)
 	keep(err)

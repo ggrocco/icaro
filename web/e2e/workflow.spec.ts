@@ -79,6 +79,37 @@ test("cancel a running workflow", async ({ page }) => {
   await expect(page.locator("h1 .badge")).toHaveText("cancelled", { timeout: 60_000 });
 });
 
+test("approve a waiting step from the run page; its comment reaches the next step", async ({ page }) => {
+  await login(page);
+  const yaml = [
+    "version: 1",
+    "name: e2e-gated",
+    "steps:",
+    "  - id: gate",
+    "    approval:",
+    '      message: "Ship it?"',
+    "  - id: after",
+    "    needs: [gate]",
+    "    image: mirror.gcr.io/library/alpine:3.24",
+    "    command: 'echo \"approved by ${{ steps.gate.outputs.approved_by }}: ${{ steps.gate.outputs.comment }}\"'",
+    "",
+  ].join("\n");
+  const created = await apiCall(page, "POST", "/api/v1/workflows", yaml);
+  expect([200, 201]).toContain(created.status);
+  await page.goto("/ui/#/workflows/e2e-gated");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(page.locator("h1 .badge")).toHaveText("waiting", { timeout: 60_000 });
+  const request = page.getByRole("region", { name: /Waiting for approval/ });
+  await expect(request).toContainText("Ship it?");
+  // A rejection needs a reason.
+  await expect(request.getByRole("button", { name: "Reject" })).toBeDisabled();
+  await request.getByLabel("Comment").fill("looks good");
+  await request.getByRole("button", { name: "Approve" }).click();
+  await expect(page.locator("h1 .badge")).toHaveText("succeeded", { timeout: 90_000 });
+  await page.getByRole("button", { name: /after/ }).first().click();
+  await expect(page.getByLabel("Logs for after")).toContainText("approved by token:e2e: looks good", { timeout: 15_000 });
+});
+
 test("a manifest edit commits to the local pack; an invalid edit is rejected", async ({ page }) => {
   await login(page);
   await page.goto("/ui/#/integrations/webhook");

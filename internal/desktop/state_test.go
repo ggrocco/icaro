@@ -21,6 +21,7 @@ func TestFetch(t *testing.T) {
 	f.set(func(f *fakeAPI) {
 		f.runs[store.RunRunning] = []*service.RunInfo{{ID: "r1", Workflow: "fix-ci", Status: store.RunRunning}}
 		f.runs[store.RunQueued] = []*service.RunInfo{{ID: "r2", Workflow: "triage", Status: store.RunQueued}}
+		f.runs[store.RunWaiting] = []*service.RunInfo{{ID: "r3", Workflow: "ship", Status: store.RunWaiting}}
 		f.runs[store.RunFailed] = []*service.RunInfo{{ID: "r0", Workflow: "deploy", Status: store.RunFailed, Error: "exit 1"}}
 		f.previews = []apiclient.Preview{{PreviewInstance: store.PreviewInstance{ID: "p1", WorktreePath: "/w/feat-x", Status: store.PreviewRunning, URL: "http://feat-x.localhost"}}}
 		f.workflows = []*service.WorkflowInfo{
@@ -33,7 +34,7 @@ func TestFetch(t *testing.T) {
 	if !st.Reachable || st.Err != "" || !st.Remote {
 		t.Fatalf("%+v", st)
 	}
-	if len(st.Running) != 1 || st.Running[0].Workflow != "fix-ci" || len(st.Queued) != 1 || st.Failed[0].Error != "exit 1" {
+	if len(st.Running) != 1 || st.Running[0].Workflow != "fix-ci" || len(st.Queued) != 1 || len(st.Waiting) != 1 || st.Failed[0].Error != "exit 1" {
 		t.Fatalf("runs: %+v", st)
 	}
 	if len(st.Previews) != 1 || st.Previews[0].Name != "feat-x" || st.Previews[0].URL == "" {
@@ -116,7 +117,7 @@ func asWire(t *testing.T, rep *usage.Report) *usageReport {
 // The tray names states without importing store, which would link the
 // database drivers into the app.
 func TestStatesMatchTheStore(t *testing.T) {
-	for got, want := range map[string]string{runRunning: store.RunRunning, runQueued: store.RunQueued, runFailed: store.RunFailed, workflowActive: store.WorkflowActive} {
+	for got, want := range map[string]string{runRunning: store.RunRunning, runQueued: store.RunQueued, runWaiting: store.RunWaiting, runFailed: store.RunFailed, workflowActive: store.WorkflowActive} {
 		if got != want {
 			t.Errorf("%q != store's %q", got, want)
 		}

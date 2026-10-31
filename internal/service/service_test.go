@@ -17,10 +17,24 @@ import (
 	"icaro/internal/workflow/events"
 )
 
-type fakeRunner struct{ woke, cancelled int }
+// fakeRunner counts calls. Concurrent enqueues call it from many
+// goroutines; tests read the counts once those are done.
+type fakeRunner struct {
+	mu              sync.Mutex
+	woke, cancelled int
+}
 
-func (f *fakeRunner) Wake()         { f.woke++ }
-func (f *fakeRunner) Cancel(string) { f.cancelled++ }
+func (f *fakeRunner) Wake() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.woke++
+}
+
+func (f *fakeRunner) Cancel(string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelled++
+}
 
 type fakeSecrets map[string]string
 

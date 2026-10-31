@@ -150,8 +150,22 @@ func prompt(in io.Reader, out io.Writer, fields []string, trigger map[string]any
 // it ends, then returns its final state.
 func followRun(ctx context.Context, c *apiclient.Client, runID, step string, w io.Writer) (*service.RunInfo, error) {
 	var final *service.RunInfo
+	hinted := map[string]bool{}
 	err := c.Events(ctx, runID, true, func(ev apiclient.Event) bool {
 		switch ev.Name {
+		case "snapshot":
+			// Say once what a run waits for, and how to decide it.
+			var run service.RunInfo
+			if json.Unmarshal(ev.Data, &run) != nil {
+				break
+			}
+			for _, st := range run.Steps {
+				if a := st.Approval; a != nil && a.Decision == "" && st.Status == "waiting" && !hinted[st.ID] && (step == "" || st.ID == step) {
+					hinted[st.ID] = true
+					fmt.Fprintf(w, "[%s] waiting for approval: %s\n[%s] decide with: icaro runs approve %s %s (or reject ... --comment WHY)\n",
+						st.ID, a.Message, st.ID, run.ID, st.ID)
+				}
+			}
 		case "log":
 			var le struct {
 				Step string `json:"step"`

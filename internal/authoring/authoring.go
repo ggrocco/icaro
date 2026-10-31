@@ -335,6 +335,11 @@ func Register(s *mcp.Server, d Deps) {
 				if st.Error != "" {
 					entry["error"] = st.Error
 				}
+				// A person decides an approval (icaro runs approve, or the
+				// web UI); no tool can, so the agent can only relay it.
+				if a := st.Approval; a != nil {
+					entry["approval"] = map[string]any{"message": a.Message, "decision": a.Decision, "decide_with": "icaro runs approve " + run.ID + " " + st.ID}
+				}
 				if tail > 0 && st.LogSize > 0 && (in.OnlyStep == "" || in.OnlyStep == st.ID) {
 					if page, err := d.Workflows.StepLogs(ctx, run.ID, st.ID, 0, 0, tail); err == nil {
 						entry["log_tail"] = string(page.Data)

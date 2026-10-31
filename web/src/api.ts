@@ -93,6 +93,18 @@ export interface StepInfo {
   log_size: number;
   started_at?: string;
   finished_at?: string;
+  approval?: ApprovalInfo;
+}
+
+// The request and decision of an approval step. decision is empty while it
+// waits; deadline is when an undecided approval expires.
+export interface ApprovalInfo {
+  message: string;
+  decision?: "approved" | "rejected" | "expired";
+  actor?: string;
+  comment?: string;
+  decided_at?: string;
+  deadline?: string;
 }
 
 export interface RunInfo {
@@ -222,6 +234,9 @@ export const api = {
   // A re-run starts the same workflow with the same trigger payload.
   // The same workflow version and trigger the run had (POST .../rerun).
   rerun: (run: RunInfo) => request<RunInfo>("POST", `/api/v1/runs/${encodeURIComponent(run.id)}/rerun`),
+  // Approve or reject a waiting approval step; the caller is the approver.
+  decide: (id: string, step: string, approve: boolean, comment: string) =>
+    request<RunInfo>("POST", `/api/v1/runs/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/${approve ? "approve" : "reject"}`, { comment }),
   stepLogs: (id: string, step: string) => request<string>("GET", `/api/v1/runs/${id}/steps/${encodeURIComponent(step)}/logs`, undefined, true),
 
   integrations: () => request<{ integrations: IntegrationInfo[] }>("GET", "/api/v1/integrations").then((r) => r.integrations ?? []),

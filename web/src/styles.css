@@ -204,6 +204,13 @@ th {
 .badge.queued {
   color: var(--run);
 }
+.badge.waiting,
+.badge.expired {
+  color: var(--warn);
+}
+.badge.approved {
+  color: var(--ok);
+}
 .badge.cancelled,
 .badge.skipped,
 .badge.disabled,
@@ -223,6 +230,12 @@ th {
 }
 .notice.warn {
   border-color: var(--warn);
+}
+.approval {
+  margin: 12px 0;
+}
+.approval .approval-message {
+  white-space: pre-wrap;
 }
 .tiles {
   display: grid;

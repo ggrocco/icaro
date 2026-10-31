@@ -532,7 +532,19 @@ Inspect runs
       --json   print JSON
 ```
 
-Subcommands: `cancel` `get` `list` `logs` `rerun`
+Subcommands: `approve` `cancel` `get` `list` `logs` `reject` `rerun`
+
+## `icaro runs approve`
+
+Approve a run's waiting approval step
+
+```text
+icaro runs approve ID STEP [flags]
+```
+
+```text
+      --comment string   a note for the steps after it (outputs.comment)
+```
 
 ## `icaro runs cancel`
 
@@ -576,6 +588,18 @@ icaro runs logs ID [STEP] [flags]
       --attempt int   attempt number (default: latest)
   -f, --follow        stream until the run ends
       --tail int      only the last N bytes
+```
+
+## `icaro runs reject`
+
+Reject a run's waiting approval step; the run fails
+
+```text
+icaro runs reject ID STEP --comment WHY [flags]
+```
+
+```text
+      --comment string   why it is rejected (required)
 ```
 
 ## `icaro runs rerun`
