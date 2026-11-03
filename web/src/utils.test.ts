@@ -46,6 +46,14 @@ describe("graph", () => {
       ["b", 1],
     ]);
   });
+  it("labels approval and wait steps", () => {
+    const steps = stepsFromSpec({ steps: [{ id: "gate", approval: {} }, { id: "soak", needs: ["gate"], wait: "1h" }, { id: "run", image: "a/b:1" }] });
+    expect(steps.map((s) => [s.kind, s.label])).toEqual([
+      ["approval", "approval"],
+      ["wait", "wait 1h"],
+      ["image", "a/b:1"],
+    ]);
+  });
   it("survives cycles", () => {
     const placed = layout([
       { id: "a", needs: ["b"], kind: "image", label: "" },

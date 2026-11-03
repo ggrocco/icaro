@@ -5,9 +5,10 @@ description: Author, validate, run and debug Ícaro workflows through the icaro 
 
 # Authoring Ícaro workflows
 
-Ícaro workflows are YAML DAGs of steps. Each step is either an `image`
-step (a container) or a `uses` step (an integration action the daemon
-runs over HTTP). You work through the `icaro` MCP server's tools; the
+Ícaro workflows are YAML DAGs of steps. Each step is an `image` step (a
+container), a `uses` step (an integration action the daemon runs over
+HTTP), an `approval` step (a person approves or rejects) or a `wait` step
+(a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
 schema and the validator are the source of truth, not your memory.
 
 ## The loop
@@ -75,9 +76,16 @@ steps:
 
 ## Rules the validator enforces
 
-- A step has exactly one of `image` or `uses`. `command`, `env` and
-  `outputs` are for image steps only; a `uses` step's outputs come from
-  the action.
+- A step has exactly one of `image`, `uses`, `approval` or `wait`.
+  `command`, `env` and `outputs` are for image steps only; a `uses` step's
+  outputs come from the action.
+- `approval: {message: "..."}` outputs `approved_by` and `comment`; its
+  `timeout` is the decision deadline, and the message cannot read secrets.
+  A rejection or an expired deadline fails the step. `wait` takes a
+  duration up to `720h` and has no outputs. Neither takes `retry`.
+- **You cannot approve.** No tool decides an approval: that is the point
+  of the step. When `get_run` shows a step `waiting` with an `approval`,
+  tell the human its message and the `decide_with` command.
 - `${{ steps.<id>.outputs.<key> }}` may reference only steps listed
   (transitively) in `needs`, and only declared outputs.
 - `when` and `filter` are boolean expressions: `== != < <= > >= && || !`,

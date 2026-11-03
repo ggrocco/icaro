@@ -34,6 +34,7 @@ func TestMenuRunsPreviewsUsage(t *testing.T) {
 	s := State{
 		Reachable: true,
 		Running:   []Run{{ID: "r1", Workflow: "fix-ci", Status: "running"}},
+		Waiting:   []Run{{ID: "r3", Workflow: "ship", Status: "waiting"}},
 		Queued:    []Run{{ID: "r2", Workflow: "triage", Status: "queued"}},
 		Failed:    []Run{{ID: "r/0", Workflow: "deploy", Status: "failed", Error: "step build: exit status 1"}, {ID: "r9", Workflow: "lint", Status: "failed"}},
 		Previews: []Preview{
@@ -49,7 +50,7 @@ func TestMenuRunsPreviewsUsage(t *testing.T) {
 	for _, want := range []string{
 		"Ícaro is running; Open Ícaro; ---",
 		"● fix-ci · running{Open run; Cancel run}",
-		"○ triage · queued{Open run; Cancel run}",
+		"◐ ship · waiting{Open run; Cancel run}; ○ triage · queued{Open run; Cancel run}",
 		"Recent failures{✕ deploy — step build: exit status 1; ✕ lint}",
 		"Run workflow{fix-ci; triage…}",
 		"Previews; ● feat-x · running; ✕ feat-y · blocked — privileged: true; ○ feat-z · pending",

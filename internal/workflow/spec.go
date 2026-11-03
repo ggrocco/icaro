@@ -4,22 +4,46 @@
 // internal/workflow/engine.
 package workflow
 
+import "time"
+
 // Step kinds.
 const (
-	KindImage = "image"
-	KindUses  = "uses"
+	KindImage    = "image"
+	KindUses     = "uses"
+	KindApproval = "approval"
+	KindWait     = "wait"
 )
 
-// Kind returns the step form, or "" when neither or both are set.
+// Kind returns the step form, or "" when none or more than one is set.
 func (s *StepSpec) Kind() string {
-	switch {
-	case s.Image != "" && s.Uses == "":
-		return KindImage
-	case s.Uses != "" && s.Image == "":
-		return KindUses
+	kind, n := "", 0
+	for _, f := range []struct {
+		set  bool
+		kind string
+	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}} {
+		if f.set {
+			kind, n = f.kind, n+1
+		}
 	}
-	return ""
+	if n != 1 {
+		return ""
+	}
+	return kind
 }
+
+// Pauses reports whether the step runs no container or action: it waits
+// for a person (approval) or for time to pass (wait), and its run is
+// parked meanwhile (ADR 0030).
+func (s *StepSpec) Pauses() bool {
+	k := s.Kind()
+	return k == KindApproval || k == KindWait
+}
+
+// ApprovalOutputs are the outputs an approval step produces.
+var ApprovalOutputs = []string{"approved_by", "comment"}
+
+// MaxWait caps a wait step.
+const MaxWait = 30 * 24 * time.Hour
 
 // Step returns the step with id, or nil.
 func (s *Spec) Step(id string) *StepSpec {

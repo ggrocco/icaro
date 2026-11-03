@@ -53,10 +53,18 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 	go e.heartbeat(ctx, cancel, run.ID, hbDone)
 	defer close(hbDone)
 
+	if run.CancelRequestedAt != nil {
+		// A waiting run woken by a cancel request (ADR 0030).
+		cancel(errCancelled)
+	}
 	e.publish(events.Event{Type: events.TypeRun, RunID: run.ID, Status: store.RunRunning})
 	status, errMsg, keep := e.runToEnd(ctx, run, resumed)
 	if status == "" {
 		log.Info("leaving run for re-attach after restart")
+		return
+	}
+	if status == store.RunWaiting {
+		log.Info("run parked on approval or wait steps")
 		return
 	}
 	fctx, fcancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -338,8 +346,14 @@ func (rx *runExec) schedule(ctx context.Context) (string, string, bool) {
 		}
 	}
 
+	var due *time.Time // the earliest time a waiting step is due
 	for {
 		if ctx.Err() == nil {
+			// Approval and wait steps whose condition holds settle first,
+			// which may make more steps ready (ADR 0030).
+			var settled bool
+			settled, due = rx.checkPauses(ctx)
+			started := false
 			for _, id := range rx.plan.Order {
 				if e.cfg.RunParallelism > 0 && running >= e.cfg.RunParallelism {
 					break
@@ -352,19 +366,50 @@ func (rx *runExec) schedule(ctx context.Context) (string, string, bool) {
 				switch {
 				case blockedBy != "":
 					rx.settle(ctx, row, store.StepSkipped, notRunPrefix+blockedBy)
+					settled = true
 				case ready:
-					if rx.gate(ctx, id) {
+					if !rx.gate(ctx, id) {
+						settled = true
+					} else if st := rx.spec.Step(id); st.Pauses() {
+						rx.startPause(ctx, st)
+						started = true
+					} else {
 						launch(id, false)
 					}
 				}
 			}
+			if settled || started {
+				continue // look again before waiting on anything
+			}
 		}
 		if running == 0 {
+			if ctx.Err() == nil && rx.anyWaiting() {
+				// Only approvals and waits are left: park the run.
+				if err := rx.park(context.WithoutCancel(ctx), due); err != nil {
+					return store.RunFailed, err.Error(), rx.e.cfg.KeepWorkspaceOnFailure
+				}
+				return store.RunWaiting, "", false
+			}
 			break
 		}
 		// Step goroutines return promptly once ctx ends, so this never
-		// outlives a cancel or shutdown for long.
-		res := <-results
+		// outlives a cancel or shutdown for long. While steps wait, look at
+		// them again when one is due, and at least every poll interval
+		// for decisions.
+		var tick <-chan time.Time
+		if ctx.Err() == nil && rx.anyWaiting() {
+			wait := e.cfg.PollInterval
+			if due != nil && time.Until(*due) < wait {
+				wait = max(time.Until(*due), 0)
+			}
+			tick = time.After(wait)
+		}
+		var res stepResult
+		select {
+		case res = <-results:
+		case <-tick:
+			continue
+		}
 		running--
 		if res.shutdown {
 			shutdown = true
@@ -385,7 +430,7 @@ func (rx *runExec) schedule(ctx context.Context) (string, string, bool) {
 	} else if cancelled(ctx) {
 		fctx := context.WithoutCancel(ctx)
 		for _, id := range rx.plan.Order {
-			if row := rx.rows[id]; row.Status == store.StepPending {
+			if row := rx.rows[id]; row.Status == store.StepPending || row.Status == store.StepWaiting {
 				rx.settle(fctx, row, store.StepCancelled, "run cancelled")
 			}
 		}

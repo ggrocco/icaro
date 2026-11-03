@@ -28,6 +28,7 @@ type env struct {
 	admin  *apiclient.Client
 	reader *apiclient.Client
 	svc    *service.Service
+	st     *store.Store
 }
 
 func newEnv(t *testing.T) *env {
@@ -56,7 +57,7 @@ func newEnv(t *testing.T) *env {
 		}
 		return apiclient.New(srv.URL, plain)
 	}
-	return &env{bus: bus, t: t, srv: srv, admin: mk("admin", store.ScopeAdmin), reader: mk("reader", store.ScopeRead), svc: svc}
+	return &env{bus: bus, t: t, srv: srv, admin: mk("admin", store.ScopeAdmin), reader: mk("reader", store.ScopeRead), svc: svc, st: st}
 }
 
 const wfYAML = `

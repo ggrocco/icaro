@@ -227,8 +227,32 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 	base := v.stepPath(i)
 	switch st.Kind() {
 	case "":
-		v.add(base, "a step must have exactly one of: image, uses")
+		v.add(base, "a step must have exactly one of: image, uses, approval, wait")
 		return
+	case KindApproval, KindWait:
+		for _, f := range []struct {
+			set  bool
+			path string
+		}{
+			{st.Command != "", "command"}, {len(st.Env) > 0, "env"}, {st.Input != nil, "input"},
+			{len(st.Outputs) > 0, "outputs"}, {st.Repository != nil, "repository"}, {st.Retry != 0, "retry"},
+		} {
+			if f.set {
+				v.add(base+"/"+f.path, fmt.Sprintf("%s is not valid on %s steps", f.path, st.Kind()), "approval and wait steps run nothing; only id, needs, when and (approval) timeout apply")
+			}
+		}
+		if st.Kind() == KindWait {
+			d, err := time.ParseDuration(st.Wait)
+			switch {
+			case err != nil || d <= 0:
+				v.add(base+"/wait", "must be a positive duration such as 30s, 10m or 24h")
+			case d > MaxWait:
+				v.add(base+"/wait", fmt.Sprintf("exceeds the maximum wait of %s", MaxWait))
+			}
+			if st.Timeout != "" {
+				v.add(base+"/timeout", "a wait step has no timeout; its duration is the wait")
+			}
+		}
 	case KindUses:
 		if st.Command != "" {
 			v.add(base+"/command", "command is only valid on image steps", "uses steps take their parameters in input")
@@ -261,11 +285,14 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 			v.add(base+"/repository/ref", "repository ref is empty")
 		}
 	}
-	if st.Timeout != "" {
+	if st.Timeout != "" && st.Kind() != KindWait {
 		d, err := time.ParseDuration(st.Timeout)
 		switch {
 		case err != nil || d <= 0:
 			v.add(base+"/timeout", "must be a positive duration such as 90s, 10m or 1h")
+		case st.Kind() == KindApproval:
+			// A decision deadline holds no container, so limits.timeout
+			// does not cap it.
 		case v.opts.MaxTimeout > 0 && d > v.opts.MaxTimeout:
 			v.add(base+"/timeout", fmt.Sprintf("exceeds the configured maximum of %s", v.opts.MaxTimeout), "lower it or raise limits.timeout in the config")
 		}
@@ -443,6 +470,9 @@ func (v *validator) checkExpressions() {
 			expr.WalkTemplates(map[string]any(st.Input), func(ptr, s string) {
 				v.checkTemplate(base+"/input"+ptr, s, RootsStep, i)
 			})
+		}
+		if st.Approval != nil && st.Approval.Message != "" {
+			v.checkTemplate(base+"/approval/message", st.Approval.Message, RootsApproval, i)
 		}
 		if strings.TrimSpace(st.When) != "" {
 			e, err := expr.ParseCondition(st.When)
@@ -622,6 +652,11 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 			return
 		}
 		declared = info.Outputs
+	case KindApproval:
+		declared = ApprovalOutputs
+	case KindWait:
+		v.add(path, fmt.Sprintf("step %s is a wait step and has no outputs", id))
+		return
 	default:
 		return
 	}
@@ -702,6 +737,9 @@ func TriggerFields(s *Spec) (required, optional []string) {
 		}
 		if st.Input != nil {
 			expr.WalkTemplates(map[string]any(st.Input), func(_, s string) { tmpl(s) })
+		}
+		if st.Approval != nil {
+			tmpl(st.Approval.Message)
 		}
 		if st.Repository != nil {
 			tmpl(st.Repository.Ref)
@@ -816,12 +854,16 @@ func oneOfIssues(e *jsonschema.ValidationError, path string, doc map[string]any)
 	obj, _ := valueAt(doc, loc).(map[string]any)
 	switch {
 	case len(loc) == 2 && loc[0] == "steps":
-		_, hasImage := obj["image"]
-		_, hasUses := obj["uses"]
-		if hasImage && hasUses {
-			return Issues{{Path: path, Message: "a step has exactly one of image or uses, not both"}}
+		var set []string
+		for _, k := range []string{"image", "uses", "approval", "wait"} {
+			if _, ok := obj[k]; ok {
+				set = append(set, k)
+			}
 		}
-		return Issues{{Path: path, Message: "a step needs exactly one of: image, uses", Hint: "image: <container image> runs a container; uses: <integration>.<action> calls an integration"}}
+		if len(set) > 1 {
+			return Issues{{Path: path, Message: "a step has exactly one of image, uses, approval or wait, not both " + strings.Join(set, " and ")}}
+		}
+		return Issues{{Path: path, Message: "a step needs exactly one of: image, uses, approval, wait", Hint: "image: <container image> runs a container; uses: <integration>.<action> calls an integration; approval: {message: ...} waits for a person; wait: 10m pauses"}}
 	case len(loc) == 2 && loc[0] == "triggers":
 		branch := 1 // integration
 		if _, ok := obj["type"]; ok {

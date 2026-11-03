@@ -17,7 +17,7 @@
 #   base   docker buildx imagetools inspect debian:trixie-slim  (the index digest)
 #   node   https://nodejs.org/dist/<version>/SHASUMS256.txt     (linux-x64 / linux-arm64 .tar.xz)
 #   agents npm view @anthropic-ai/claude-code version; npm view @openai/codex version
-FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
 
 # asdf ships one static binary per architecture; the release only publishes
 # md5 files, so the SHA-256 of each tarball is pinned here.

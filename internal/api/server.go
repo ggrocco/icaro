@@ -80,6 +80,8 @@ func (s *Server) routes() {
 	m.Handle("GET /api/v1/runs/{id}", s.auth(store.ScopeRead, s.handleGetRun))
 	m.Handle("POST /api/v1/runs/{id}/cancel", s.auth(store.ScopeWrite, s.handleCancelRun))
 	m.Handle("POST /api/v1/runs/{id}/rerun", s.auth(store.ScopeWrite, s.handleRerun))
+	m.Handle("POST /api/v1/runs/{id}/steps/{step}/approve", s.auth(store.ScopeWrite, s.handleDecide(true)))
+	m.Handle("POST /api/v1/runs/{id}/steps/{step}/reject", s.auth(store.ScopeWrite, s.handleDecide(false)))
 	m.Handle("GET /api/v1/runs/{id}/events", s.auth(store.ScopeRead, s.handleRunEvents))
 	m.Handle("GET /api/v1/runs/{id}/steps/{step}/logs", s.auth(store.ScopeRead, s.handleStepLogs))
 }
