@@ -50,19 +50,21 @@ steps:
 
 ## Steps
 
-A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of two forms.
+A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of four forms.
 
 - An **`image` step** runs a container. `command` runs as `/bin/sh -c <command>`; without it, the image's entrypoint runs. An agent step is an image step whose image is the agent base image and whose command runs the agent CLI headless.
 - A **`uses` step** calls an integration action, such as `uses: slack.post-message`, inside the daemon over HTTP. No container runs. `input` is checked against the action's typed inputs, and its outputs come from the manifest. Use `icaro integration show <name>` to list them.
+- An **`approval` step** waits until a person approves or rejects it; see [Approvals and waits](#approvals-and-waits).
+- A **`wait` step** waits for a duration, such as `wait: 2h`.
 
-Both forms take the same scheduling fields:
+Every form takes the same scheduling fields, except as noted:
 
 | Field | Meaning |
 |---|---|
 | `needs` | Step ids that must finish first. Independent steps run in parallel, within the [parallelism limits](#parallelism). |
 | `when` | A boolean expression; false records the step as `skipped`. It is evaluated once, after every need is final. |
-| `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. |
-| `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). |
+| `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. Not on approval or wait steps. |
+| `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). On an approval step it is the decision deadline instead, with no ceiling; a wait step has none. |
 | `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. Both fields may use `${{ }}` (for example `https://github.com/${{ trigger.repo }}.git`) with the same root and `needs` rules as other fields, but not `secrets`. A rendered value that is empty (ref), starts with `-`, contains whitespace or carries a secret fails the step before git runs. |
 | `env` | Image steps only. Merged over the workflow `env`. |
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
@@ -94,6 +96,42 @@ Each container runs under the hardening baseline: non-root, no capabilities, `no
 | `file:<path>` | A file under `/workspace`, trimmed, capped at 1 MiB. Escaping the workspace, including through a symlink, fails the step. |
 
 Later steps read the values as `${{ steps.<id>.outputs.<name> }}`, but only from their `needs` ancestors and only outputs the step declares. Validation enforces both.
+
+## Approvals and waits
+
+An approval step stops the run until a person decides; a wait step stops it for a time. Neither runs a container.
+
+```yaml workflow
+version: 1
+name: release
+triggers:
+  - type: manual
+steps:
+  - id: build
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    command: echo '{"tag":"v1.2.0"}' > /icaro/output.json
+    outputs: {tag: "json:tag"}
+  - id: review
+    needs: [build]
+    approval:
+      message: "Release ${{ steps.build.outputs.tag }}?"
+    timeout: 24h
+  - id: soak
+    needs: [review]
+    wait: 30m
+  - id: publish
+    needs: [soak]
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    env:
+      APPROVER: ${{ steps.review.outputs.approved_by }}
+    command: echo "publishing, approved by $APPROVER"
+```
+
+- **Deciding.** `icaro runs approve RUN STEP [--comment TEXT]` approves; `icaro runs reject RUN STEP --comment WHY` rejects and needs a reason. The run page in the web UI has the same buttons, and `icaro runs logs RUN -f` prints the request when the run reaches it. Deciding needs a `write` token. The approver is recorded as the caller (`token:<name>`, or `token:local` on the daemon's socket).
+- **Outcomes.** An approval outputs `approved_by` and `comment` to the steps after it. A rejection fails the step with `rejected by <who>: <comment>`, and the steps that need it are skipped. An approval left undecided past its `timeout` fails with `approval expired`; without a `timeout` it waits until it is decided or the run is cancelled. A decision is final.
+- **Message.** `approval.message` (at most 2000 characters) may use `trigger.*`, `env`, `run`, `workflow` and the outputs of the step's `needs` ancestors, but not `secrets`: the message is shown to whoever can read runs. The default is `Approve step <id>?`.
+- **Waits.** `wait` takes `s`, `m` or `h` units, at most `720h` (30 days). It ends on time even across a daemon restart: the step's start time is stored.
+- **Parked runs.** While a run has only approval and wait steps left, its status is `waiting` and it holds no `workflows.max_runs` slot, so other runs go ahead. It still counts as active for its workflow's [concurrency](#concurrency) policy. A decision, the end of a wait, or `icaro runs cancel` resumes it. Steps that do not depend on a pending approval keep running while it waits.
 
 ## Expressions
 
@@ -144,11 +182,11 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 ## Runs
 
 - **Manual runs.** `icaro run NAME` takes the `trigger.*` payload from `--set key=value` (numbers, booleans and JSON are parsed), `--trigger-json` or `--trigger-file`. Fields the workflow reads outside `has()` are required, unless the read sits behind a `has()` check of the same field (`has(trigger.label) && trigger.label == 'bug'`, `!has(trigger.x) || trigger.x == 1`): the CLI prompts for missing ones (unless `--no-prompt`), and the API answers 400 with the list. `icaro workflow apply` prints them as `manual runs need: --set who=...`.
-- **Watching.** `--wait` streams the logs and exits non-zero unless the run succeeds; with `--json` it prints only the final run, and the exit status is the same. `icaro workflow validate --json` likewise prints the issues and exits non-zero for an invalid file. `icaro runs get ID`, `icaro runs logs ID [STEP] [-f]` and `icaro runs cancel ID` inspect and stop runs. Cancelling kills the step containers. `icaro runs rerun ID` runs a run again on the workflow version it used, with the same trigger payload, even after the workflow has changed.
+- **Watching.** `--wait` streams the logs and exits non-zero unless the run succeeds; with `--json` it prints only the final run, and the exit status is the same. `icaro workflow validate --json` likewise prints the issues and exits non-zero for an invalid file. `icaro runs get ID`, `icaro runs logs ID [STEP] [-f]` and `icaro runs cancel ID` inspect and stop runs, and `icaro runs approve` / `reject` decide [approval steps](#approvals-and-waits). Cancelling kills the step containers. `icaro runs rerun ID` runs a run again on the workflow version it used, with the same trigger payload, even after the workflow has changed.
 - **Streaming API.** `GET /api/v1/runs/{id}/events?logs=1` is a Server-Sent Events stream with one stream per run. It sends a `snapshot` (with the log backlog), then `step` and `log` events, and finally `end`. The web UI uses it, so it never polls.
 - **Restarts.** A step's container id is recorded before the container starts. After a daemon restart, a running step re-attaches to its container. If the container is gone, the attempt fails and `retry` decides. `uses` steps are therefore at-least-once across restarts.
 - **Versions.** Every apply stores a version (`icaro workflow versions NAME [N]`), and a run always executes the version it was started with.
-- **Deleting.** `icaro workflow delete NAME` cancels the workflow's queued and running runs. Its runs are kept, and so are the versions they executed, so their history stays readable.
+- **Deleting.** `icaro workflow delete NAME` cancels the workflow's queued, running and waiting runs. Its runs are kept, and so are the versions they executed, so their history stays readable.
 
 ## Concurrency
 

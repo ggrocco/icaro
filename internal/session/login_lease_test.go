@@ -72,6 +72,11 @@ func TestLoginLeaseRules(t *testing.T) {
 
 	// A refused login (sessions use the seed) leaves no lease behind.
 	o := newEnv(t, 1, func(o *Options) { o.Homes = &creds.Homes{Layout: o.Config.Layout(), Mode: creds.ModeOverlay} })
+	// Wait out the manager's startup reconcile: it would orphan the
+	// running row below, whose worktree does not exist.
+	if err := o.m.requestStart(ctx); err != nil {
+		t.Fatal(err)
+	}
 	proj, err := o.st.UpsertProject(ctx, &store.Project{Name: "p", RootPath: o.repo})
 	if err != nil {
 		t.Fatal(err)

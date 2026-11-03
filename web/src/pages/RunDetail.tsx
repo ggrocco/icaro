@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, subscribeRun, terminal, type RunInfo } from "../api";
+import { api, subscribeRun, terminal, type RunInfo, type StepInfo } from "../api";
 import { RunGraph } from "../components/lazy";
 import { ErrorBox, Loading, Status, When } from "../components/common";
 import { go, href } from "../router";
@@ -45,6 +45,8 @@ export function RunDetail({ id }: { id: string }) {
         } else if (e.type === "step") {
           if (finalRef.current) return;
           setRun((r) => r && { ...r, steps: r.steps?.map((s) => (s.id === e.step ? { ...s, status: e.status, attempt: e.attempt || s.attempt } : s)) });
+          // A step event carries no approval; load it to show the request.
+          if (e.status === "waiting") api.getRun(id).then((r) => apply(r)).catch(setError);
         } else {
           setLogs((l) => ({ ...l, [e.step]: (l[e.step] ?? "") + e.line + "\n" }));
         }
@@ -110,6 +112,11 @@ export function RunDetail({ id }: { id: string }) {
         </span>
       </p>
       {run.error && <div className="notice error">{run.error}</div>}
+      {(run.steps ?? [])
+        .filter((s) => s.status === "waiting" && s.approval && !s.approval.decision)
+        .map((s) => (
+          <ApprovalRequest key={s.id} runId={run.id} step={s} onDecided={(r) => apply(r)} />
+        ))}
       {spec ? <RunGraph spec={spec} steps={run.steps} selected={selected} onSelect={setSelected} /> : <Loading what="graph" />}
       <div className="split">
         <div className="pane">
@@ -133,6 +140,7 @@ export function RunDetail({ id }: { id: string }) {
                 {step.id} <Status status={step.status} />
               </h2>
               {step.error && <div className="notice error">{step.error}</div>}
+              {step.approval && <ApprovalFacts approval={step.approval} />}
               <dl className="kv">
                 <dt>Attempts</dt>
                 <dd>{step.attempt}</dd>
@@ -154,5 +162,81 @@ export function RunDetail({ id }: { id: string }) {
         </div>
       </div>
     </section>
+  );
+}
+
+// ApprovalRequest asks for a decision on a waiting approval step. A
+// rejection needs a reason; it becomes the step's error.
+function ApprovalRequest({ runId, step, onDecided }: { runId: string; step: StepInfo; onDecided: (r: RunInfo) => void }) {
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | undefined>();
+  const a = step.approval!;
+  const decide = (approve: boolean) => {
+    setBusy(true);
+    setError(undefined);
+    api
+      .decide(runId, step.id, approve, comment.trim())
+      .then(onDecided)
+      .catch(setError)
+      .finally(() => setBusy(false));
+  };
+  const label = `approval-${step.id}`;
+  return (
+    <div className="notice warn approval" role="region" aria-labelledby={label}>
+      <h2 className="h3" id={label}>
+        Waiting for approval: <code>{step.id}</code>
+      </h2>
+      <p className="approval-message">{a.message}</p>
+      {a.deadline && (
+        <p className="muted small">
+          Fails if undecided by <When ts={a.deadline} />
+        </p>
+      )}
+      <label className="field">
+        <span className="label">Comment</span>
+        <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Passed to later steps; required to reject" />
+      </label>
+      {error && <ErrorBox error={error} />}
+      <div className="actions">
+        <button className="primary" disabled={busy} onClick={() => decide(true)}>
+          Approve
+        </button>
+        <button className="danger" disabled={busy || !comment.trim()} onClick={() => decide(false)} title={comment.trim() ? undefined : "Say why in the comment"}>
+          Reject
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalFacts({ approval: a }: { approval: NonNullable<StepInfo["approval"]> }) {
+  return (
+    <dl className="kv">
+      <dt>Request</dt>
+      <dd>{a.message}</dd>
+      <dt>Decision</dt>
+      <dd>{a.decision ? <Status status={a.decision} /> : "pending"}</dd>
+      {a.actor && (
+        <>
+          <dt>By</dt>
+          <dd>{a.actor}</dd>
+        </>
+      )}
+      {a.comment && (
+        <>
+          <dt>Comment</dt>
+          <dd>{a.comment}</dd>
+        </>
+      )}
+      {a.decided_at && (
+        <>
+          <dt>Decided</dt>
+          <dd>
+            <When ts={a.decided_at} />
+          </dd>
+        </>
+      )}
+    </dl>
   );
 }

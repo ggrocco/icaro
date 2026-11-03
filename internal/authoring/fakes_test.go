@@ -255,6 +255,7 @@ func TestGetRunView(t *testing.T) {
 			{ID: "b", Status: "failed", ExitCode: &exit, Error: "exit 2", LogSize: 99999},
 			{ID: "c", Status: "skipped"},
 			{ID: "d", Status: "failed", LogSize: 5},
+			{ID: "e", Status: "waiting", Approval: &service.ApprovalInfo{Message: "ship?"}},
 		}},
 		logs: map[string]*service.LogPage{
 			"a": {Data: []byte("all of a")},
@@ -268,7 +269,7 @@ func TestGetRunView(t *testing.T) {
 		Steps []map[string]any `json:"steps"`
 	}
 	e.callJSON(ToolGetRun, map[string]any{"id": "r1", "log_tail_bytes": 1 << 20}, &got)
-	if got.Error != "step b failed" || len(got.Steps) != 4 {
+	if got.Error != "step b failed" || len(got.Steps) != 5 {
 		t.Fatalf("run: %+v", got)
 	}
 	a, b, c, d := got.Steps[0], got.Steps[1], got.Steps[2], got.Steps[3]
@@ -283,6 +284,9 @@ func TestGetRunView(t *testing.T) {
 	}
 	if _, ok := d["log_tail"]; ok {
 		t.Fatalf("an unreadable log is left out, not an error: %+v", d)
+	}
+	if ap, _ := got.Steps[4]["approval"].(map[string]any); ap["message"] != "ship?" || ap["decide_with"] != "icaro runs approve r1 e" {
+		t.Fatalf("e: %+v", got.Steps[4])
 	}
 	for _, tail := range w.logTails {
 		if tail != maxTail {

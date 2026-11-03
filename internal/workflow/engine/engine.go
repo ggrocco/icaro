@@ -207,6 +207,12 @@ func (e *Engine) Run(ctx context.Context) error {
 	for {
 		for len(active) < e.cfg.MaxRuns && ctx.Err() == nil {
 			run, err := e.d.Store.ClaimRun(ctx, RunnerID)
+			resumed := false
+			if errors.Is(err, store.ErrNotFound) {
+				// A parked run that is due resumes where it stopped.
+				run, err = e.d.Store.ClaimDueRun(ctx, RunnerID)
+				resumed = true
+			}
 			if errors.Is(err, store.ErrNotFound) {
 				break
 			}
@@ -216,7 +222,7 @@ func (e *Engine) Run(ctx context.Context) error {
 				}
 				break
 			}
-			start(run, false)
+			start(run, resumed)
 		}
 		select {
 		case <-ctx.Done():

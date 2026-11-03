@@ -171,6 +171,18 @@ func (c *Client) CancelRun(ctx context.Context, id string) (*service.RunInfo, er
 	return &out, err
 }
 
+// DecideApproval approves or rejects a run's waiting approval step.
+func (c *Client) DecideApproval(ctx context.Context, id, step string, approve bool, comment string) (*service.RunInfo, error) {
+	verb := "reject"
+	if approve {
+		verb = "approve"
+	}
+	var out service.RunInfo
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(id)+"/steps/"+url.PathEscape(step)+"/"+verb,
+		map[string]string{"comment": comment}, &out)
+	return &out, err
+}
+
 // StepLogs fetches a step's log: attempt 0 is the latest; tailBytes > 0
 // returns only the end.
 func (c *Client) StepLogs(ctx context.Context, id, step string, attempt, tailBytes int) ([]byte, error) {

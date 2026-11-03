@@ -188,6 +188,26 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+// handleDecide approves or rejects a waiting approval step, recording the
+// caller as the approver. The body is optional: {"comment": "..."}.
+func (s *Server) handleDecide(approve bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Comment string `json:"comment"`
+		}
+		if err := readJSON(r, &in); err != nil {
+			s.writeError(w, err)
+			return
+		}
+		run, err := s.svc.DecideApproval(r.Context(), r.PathValue("id"), r.PathValue("step"), approve, actor(r), in.Comment)
+		if err != nil {
+			s.writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, run)
+	}
+}
+
 // handleStepLogs serves a step attempt's log as text: ?attempt= (default
 // latest), ?offset= to continue from a byte offset, ?tail= for the last N
 // bytes. X-Icaro-Log-Offset / X-Icaro-Log-Size describe the slice.

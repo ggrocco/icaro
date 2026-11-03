@@ -51,6 +51,19 @@ type StepInfo struct {
 	LogSize    int64           `json:"log_size"`
 	StartedAt  *string         `json:"started_at,omitempty"`
 	FinishedAt *string         `json:"finished_at,omitempty"`
+	Approval   *ApprovalInfo   `json:"approval,omitempty"`
+}
+
+// ApprovalInfo is the API view of an approval step's request and decision.
+// Decision is empty while it waits; Deadline is when an undecided
+// approval expires (none: it waits until decided or cancelled).
+type ApprovalInfo struct {
+	Message   string  `json:"message"`
+	Decision  string  `json:"decision,omitempty"`
+	Actor     string  `json:"actor,omitempty"`
+	Comment   string  `json:"comment,omitempty"`
+	DecidedAt *string `json:"decided_at,omitempty"`
+	Deadline  *string `json:"deadline,omitempty"`
 }
 
 // Terminal reports whether a run status is final.
@@ -142,13 +155,7 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 	}
 	for _, old := range out.Replaced {
 		s.log.Info("run replaced", "run", old.ID, "workflow", w.Name, "by", run.ID)
-		if old.Status == store.RunRunning {
-			if s.runner != nil {
-				s.runner.Cancel(old.ID)
-			}
-		} else {
-			s.events.Publish(events.Event{Type: events.TypeRun, RunID: old.ID, Status: store.RunCancelled})
-		}
+		s.stopActive(old)
 	}
 	if s.runner != nil {
 		s.runner.Wake()
@@ -241,22 +248,97 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 		return nil, err
 	}
 	needs := map[string][]string{}
+	timeouts := map[string]string{}
 	if v, err := s.store.GetWorkflowVersion(ctx, r.WorkflowID, r.WorkflowVersion); err == nil {
 		if spec, _, err := workflow.Parse([]byte(v.SpecYAML), workflow.Options{}); err == nil && spec != nil {
 			for _, st := range spec.Steps {
-				needs[st.ID] = st.Needs
+				needs[st.ID], timeouts[st.ID] = st.Needs, st.Timeout
 			}
 		}
 	}
+	approvals, err := s.store.ListApprovals(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	byStep := map[string]*store.Approval{}
+	for _, a := range approvals {
+		byStep[a.StepID] = a
+	}
 	info := runInfo(r)
 	for _, st := range steps {
-		info.Steps = append(info.Steps, StepInfo{
+		si := StepInfo{
 			ID: st.StepID, Kind: st.Kind, Needs: orEmpty(needs[st.StepID]), Status: st.Status, Attempt: st.Attempt, ExitCode: st.ExitCode,
 			Outputs: json.RawMessage(orJSON(st.OutputsJSON)), Error: st.Error, LogSize: st.LogSize,
 			StartedAt: tsp(st.StartedAt), FinishedAt: tsp(st.FinishedAt),
-		})
+		}
+		if a := byStep[st.StepID]; a != nil {
+			si.Approval = &ApprovalInfo{Message: a.Message, Decision: a.Decision, Actor: a.Actor, Comment: a.Comment, DecidedAt: tsp(a.DecidedAt)}
+			if d, err := time.ParseDuration(timeouts[st.StepID]); err == nil && st.StartedAt != nil && a.Decision == "" {
+				si.Approval.Deadline = tsp(new(st.StartedAt.Add(d)))
+			}
+		}
+		info.Steps = append(info.Steps, si)
 	}
 	return info, nil
+}
+
+// DecideApproval approves or rejects an approval step that is waiting.
+// A rejection fails the step, and the steps that need it are skipped.
+func (s *Service) DecideApproval(ctx context.Context, runID, stepID string, approve bool, actor, comment string) (*RunInfo, error) {
+	if len(comment) > maxApprovalComment {
+		return nil, badRequest("comment is longer than %d bytes", maxApprovalComment)
+	}
+	st, err := s.store.GetStepRun(ctx, runID, stepID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if st.Kind != workflow.KindApproval {
+		return nil, badRequest("step %s is not an approval step", stepID)
+	}
+	if st.Status != store.StepWaiting {
+		return nil, &Conflict{Msg: fmt.Sprintf("step %s is %s, not waiting for approval", stepID, st.Status)}
+	}
+	decision := store.ApprovalRejected
+	if approve {
+		decision = store.ApprovalApproved
+	}
+	if _, err := s.store.DecideApproval(ctx, runID, stepID, decision, actor, comment); errors.Is(err, store.ErrNotFound) {
+		return nil, &Conflict{Msg: fmt.Sprintf("step %s is not waiting for approval yet", stepID)}
+	} else if errors.Is(err, store.ErrConflict) {
+		return nil, &Conflict{Msg: fmt.Sprintf("step %s was already decided", stepID)}
+	} else if err != nil {
+		return nil, err
+	}
+	s.log.Info("approval decided", "run", runID, "step", stepID, "decision", decision, "actor", actor)
+	if s.runner != nil {
+		s.runner.Wake()
+	}
+	return s.GetRun(ctx, runID)
+}
+
+// maxApprovalComment bounds the comment a decision carries; it becomes
+// the step's comment output.
+const maxApprovalComment = 2000
+
+// stopActive acts on a cancel request the store just recorded: a running
+// run is stopped by its engine, a parked one is woken to cancel its
+// waiting steps, and a queued one was cancelled outright.
+func (s *Service) stopActive(r *store.Run) {
+	switch r.Status {
+	case store.RunRunning:
+		if s.runner != nil {
+			s.runner.Cancel(r.ID)
+		}
+	case store.RunWaiting:
+		if s.runner != nil {
+			s.runner.Wake()
+		}
+	default:
+		s.events.Publish(events.Event{Type: events.TypeRun, RunID: r.ID, Status: store.RunCancelled})
+	}
 }
 
 // ListRuns returns run summaries (no steps).
@@ -289,10 +371,10 @@ func (s *Service) CancelRun(ctx context.Context, id string) (*RunInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.Status == store.RunRunning && s.runner != nil {
-		s.runner.Cancel(id)
-	}
-	if r.Status == store.RunCancelled {
+	switch r.Status {
+	case store.RunRunning, store.RunWaiting:
+		s.stopActive(r)
+	case store.RunCancelled:
 		s.events.Publish(events.Event{Type: events.TypeRun, RunID: id, Status: store.RunCancelled})
 	}
 	return s.GetRun(ctx, id)

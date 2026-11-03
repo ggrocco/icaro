@@ -1,5 +1,17 @@
 {
   "$defs": {
+    "approval": {
+      "additionalProperties": false,
+      "description": "A human approval gate (ADR 0030).",
+      "properties": {
+        "message": {
+          "description": "What the approver is asked, shown in the UI and the CLI. Supports interpolation over steps, trigger, env, run and workflow; secrets are not allowed, since the text is displayed.",
+          "maxLength": 2000,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "builtinTrigger": {
       "additionalProperties": false,
       "properties": {
@@ -66,7 +78,7 @@
     },
     "step": {
       "additionalProperties": false,
-      "description": "A step takes exactly one of two forms (ADR 0007): `image` runs a container image — the general compute primitive (an agent, a shell command, a JS runtime are all just images); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container. Both forms are full DAG citizens: needs, when, retry, timeout, and outputs behave identically. Conditional execution is expressed with `when` rather than a dedicated step type.",
+      "description": "A step takes exactly one of four forms. `image` runs a container image — the general compute primitive (an agent, a shell command, a JS runtime are all just images); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container (ADR 0007). `approval` waits for a person to approve or reject the run, and `wait` pauses it for a duration; neither runs anything, and the run is parked while they wait (ADR 0030). All forms are full DAG citizens of needs and when; retry, command, env, input and outputs apply to image and uses steps only. Conditional execution is expressed with `when` rather than a dedicated step type.",
       "oneOf": [
         {
           "required": [
@@ -77,9 +89,23 @@
           "required": [
             "uses"
           ]
+        },
+        {
+          "required": [
+            "approval"
+          ]
+        },
+        {
+          "required": [
+            "wait"
+          ]
         }
       ],
       "properties": {
+        "approval": {
+          "$ref": "#/$defs/approval",
+          "description": "Waits for a person to approve or reject the run (ADR 0030). Approving succeeds the step with outputs approved_by and comment; rejecting fails it, so steps that need it are skipped. The step's timeout, when set, is the decision deadline; without one the step waits until someone decides or cancels the run."
+        },
         "command": {
           "description": "Command run inside the image (image steps only; semantic validation rejects it on uses steps). For an agent image this is the agent CLI invocation.",
           "maxLength": 20000,
@@ -135,6 +161,11 @@
         "uses": {
           "description": "Integration action reference as <integration>.<action> (e.g. slack.post-message), resolved against installed manifest packs. Executed in-process by the daemon's HTTP action executor with host-bound credentials. Mutually exclusive with `image`.",
           "pattern": "^[a-z][a-z0-9-]{1,62}\\.[a-z][a-z0-9-]{1,62}$",
+          "type": "string"
+        },
+        "wait": {
+          "description": "Pauses the run for this long (e.g. 10m, 24h; at most 720h) before steps that need this one start (ADR 0030).",
+          "pattern": "^[0-9]+(s|m|h)$",
           "type": "string"
         },
         "when": {

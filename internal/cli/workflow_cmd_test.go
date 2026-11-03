@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	"icaro/internal/paths"
+	"icaro/internal/store"
 )
 
 const helloYAML = `version: 1
@@ -135,4 +140,55 @@ func TestRunAndRunsCommands(t *testing.T) {
 	// Following a finished run returns at once with its final state.
 	mustCLI(t, "runs", "logs", id, "--follow")
 	mustCLI(t, "runs", "logs", id, "greet", "--follow")
+}
+
+// Without Docker the engine never starts the run, so the test parks it
+// where the engine would: its approval step waiting, its run parked.
+func TestApproveAndRejectCommands(t *testing.T) {
+	home := startDaemon(t)
+	dir := t.TempDir()
+	mustCLI(t, "workflow", "apply", writeFile(t, dir, "gated.yaml", "version: 1\nname: gated\nsteps:\n  - {id: gate, approval: {message: \"ship it?\"}}\n"))
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.SQLite, paths.Layout{Root: home}.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	park := func() string {
+		id := strings.Fields(mustCLI(t, "run", "gated"))[1]
+		failCLI(t, "not waiting for approval", "runs", "approve", id, "gate")
+		if _, err := st.ClaimRun(ctx, "daemon"); err != nil {
+			t.Fatal(err)
+		}
+		row, _ := st.GetStepRun(ctx, id, "gate")
+		now := store.Now()
+		row.Status, row.Attempt, row.StartedAt = store.StepWaiting, 1, &now
+		if err := st.UpdateStepRun(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.OpenApproval(ctx, id, "gate", "ship it?"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.ParkRun(ctx, id, nil); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	id := park()
+	// Following a waiting run says what it waits for and how to decide.
+	ctxF, cancel := context.WithTimeout(ctx, 3*time.Second)
+	out, _ := runCLICtx(ctxF, "runs", "logs", id, "--follow")
+	cancel()
+	if !strings.Contains(out, "[gate] waiting for approval: ship it?") || !strings.Contains(out, "icaro runs approve "+id+" gate") {
+		t.Fatalf("follow: %q", out)
+	}
+	wantCLI(t, []string{"runs", "approve", id, "gate", "--comment", "lgtm"}, "step gate of run "+id+" approved")
+	failCLI(t, "already decided", "runs", "reject", id, "gate", "--comment", "late")
+	wantCLI(t, []string{"runs", "get", "--json", id}, `"decision": "approved"`, `"comment": "lgtm"`)
+
+	id = park()
+	failCLI(t, "--comment", "runs", "reject", id, "gate")
+	wantCLI(t, []string{"runs", "reject", "--json", id, "gate", "--comment", "not today"}, `"decision": "rejected"`)
+	failCLI(t, "", "runs", "approve", "run_nope", "gate")
 }

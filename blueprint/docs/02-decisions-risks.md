@@ -25,6 +25,7 @@
 | Coverage gate | 95% statements per `internal/*` package in the unit run; listed exceptions need a floor and a reason, and the Docker adapter is gated in the integration job ([ADR 0025](adr/0025-coverage-target-and-exceptions.md)) | The target holds without review effort; exceptions are decisions, not drift | Statement coverage is a floor; decision coverage still needs review |
 | Hardening budget | Load/chaos tests hold a measured budget; pprof on the Unix socket only; license gate and govulncheck in CI ([ADR 0024](adr/0024-hardening-budget.md)) | Regressions fail tests instead of surfacing in production | Numbers are from one reference machine; macOS is unmeasured |
 | Expressions | One `${{ }}` language for workflows and manifests ([ADR 0009](adr/0009-expression-language.md)) | Parsed at validation, missing key is an error, allow-listed functions | Function additions need an ADR |
+| Approval and wait steps | `approval` and `wait` step forms run by the engine; a run with only them left is parked (`waiting`, no engine slot) until a decision, a due time or a cancel; only people decide, over the API, CLI or UI ([ADR 0030](adr/0030-approval-wait-steps.md)) | Workflows can stop for a person or a soak without holding `max_runs` slots | Any `write` token can approve; waiting for an event stays deferred |
 | Execution semantics | Output capture forms, needs/skip propagation, retry backoff, restart re-attach and at-least-once `uses` steps, concurrency default `allow` ([ADR 0013](adr/0013-workflow-execution-semantics.md)) | Every step ends in a recorded terminal state with a reason | Actions can repeat after a restart; gate or make them idempotent |
 | Run sessions | A workflow run is backed by one run session; image steps are containers in it ([ADR 0010](adr/0010-run-sessions.md)) | One lifecycle and reconciliation path for agents and runs | Profile is operator-chosen, not per workflow |
 | Mount policy | Credential directories are never mounted; a shared home masks them; `.git/hooks` and `.git/config` are read-only ([ADR 0011](adr/0011-mount-policy.md)) | Closes O4 without a click-through warning | Mount allowlist is opt-in per directory |
@@ -50,7 +51,7 @@
 5. No advanced visual editor before the JSON Schema and executor are stable.
 6. Previews cover **compose-based projects with a declared port** only; host-run dev servers (Vite/Next on the host) are out of MVP scope.
 7. The native macOS app is **deferred until the session spine works end-to-end**; the web UI served by the daemon is the MVP surface.
-8. Workflows orchestrate sessions only: a step is a container image or a declarative integration action, and conditions are `when` expressions — not a general-purpose CI step library.
+8. Workflows orchestrate sessions only: a step is a container image or a declarative integration action, and conditions are `when` expressions — not a general-purpose CI step library. [ADR 0030](adr/0030-approval-wait-steps.md) adds two forms the engine runs itself: `approval` (a person decides) and `wait` (a duration).
 9. Integration manifests v1 exclude OAuth flows (token/PAT first), pagination, polling triggers, and scripting hooks; inbound webhooks assume a reachable daemon, and laptop users fall back to manual/cron.
 
 ## Open items
@@ -91,7 +92,7 @@ Each design below is compatible with the product but blocked by an MVP cut or AD
 | Workflow library: shared scripts and step presets, mounted read-only at `/icaro/lib` | Cut 8 (adds `script:`/`preset:` step forms) | Materialize content-addressed and pin the snapshot per run, so every step of a run sees the same version |
 | `call_workflow` sub-workflow step and in-container MCP access (`none`/`read`/`invoke`/`author`) | Cut 8 | Workflows authored by an agent inside a step land as **inert drafts** until a human approves them, because agent steps process untrusted payloads. Recursion needs brakes: run lineage (`root_run_id`/`parent_run_id`, already in the code's schema), a depth cap, a per-root budget of descendant runs, and cycle rejection |
 | `agent` step type with a harness catalog and declared params | Cut 8 (an agent is an `image` step) | Pin harness images by digest; declared params make each harness's knobs validatable |
-| `wait` / `approval` steps | Cut 8 | — |
+| Waiting for an event: a step that resumes when a matching integration event arrives | Cut 8 ([ADR 0030](adr/0030-approval-wait-steps.md) lifted `approval` and `wait: <duration>` only) | Needs a correlation key from the event to the run, and a rule for stray or late events; it can park the run like the other pause steps |
 | GitHub App mode: App Manifest setup flow, one endpoint for all installations, installation tokens minted for steps | Cut 9 and [ADR 0007](adr/0007-integration-manifests.md) (token/PAT first; manifests execute no code) | Trigger and API access would come from one install, with no personal tokens |
 | Multi-runner scale-out | Cut 2 and [ADR 0001](adr/0001-single-daemon.md) | The DB claim can move to `FOR UPDATE SKIP LOCKED` on Postgres behind the same interface |
 
