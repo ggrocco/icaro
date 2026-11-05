@@ -14,7 +14,7 @@ These pages describe how to use what is built. The design (architecture, decisio
 - [Integrations](integrations.md): built-in integrations, credentials, webhooks and deliveries, actions, packs
 - [Previews](previews.md): per-worktree preview URLs and the compose lint
 - [Shared memory](memory.md): what agents remember and how they reach it
-- [Agents and MCP](agents.md): `icaro mcp`, the authoring tools, `icaro skill install`
+- [Agents and MCP](agents.md): a hands-on MCP and skills tutorial, client setup, workflow authoring, and troubleshooting
 - [Web UI](ui.md): `icaro ui`, sign-in, what the UI shows
 - [Desktop app](desktop.md): the menu bar app, notifications, launch at login
 - [Usage tracking](#usage-tracking)
