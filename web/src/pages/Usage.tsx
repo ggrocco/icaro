@@ -1,5 +1,6 @@
 import { api } from "../api";
-import { Empty, ErrorBox, Loading, useLoad } from "../components/common";
+import { Empty, ErrorBox, Loading, PageHeader, useLoad } from "../components/common";
+import { Icon } from "../components/icons";
 import { go } from "../router";
 import { fmtCost, fmtTokens, summarizeUsage } from "../usage";
 
@@ -19,34 +20,37 @@ export function Usage({ since }: { since?: string }) {
   const sum = data && summarizeUsage(data.records);
   return (
     <section aria-labelledby="usage-title">
-      <header className="page-head">
-        <h1 id="usage-title">Usage</h1>
-        <div className="toolbar">
-          <label className="row">
-            <span className="muted small">Window</span>
-            <select value={win} onChange={(e) => go("usage", e.target.value)}>
-              {windows.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button onClick={reload} disabled={loading}>
-            Refresh
-          </button>
-        </div>
-      </header>
-      <p className="muted">
-        Token counts parsed from the Claude Code transcripts in your profile homes. Costs are list-price <strong>estimates</strong>, never
-        billed amounts; models without a price show none.
-        {data && (
+      <PageHeader
+        id="usage-title"
+        title="Usage"
+        subtitle={
           <>
-            {" "}
-            Days follow <code>{data.timezone}</code>.
+            Token counts parsed from the Claude Code transcripts in your profile homes. Costs are list-price <strong>estimates</strong>, never
+            billed amounts; models without a price show none.
+            {data && (
+              <>
+                {" "}
+                Days follow <code>{data.timezone}</code>.
+              </>
+            )}
           </>
-        )}
-      </p>
+        }
+      >
+        <label className="row">
+          <span className="muted small">Window</span>
+          <select value={win} onChange={(e) => go("usage", e.target.value)}>
+            {windows.map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button onClick={reload} disabled={loading}>
+          <Icon name="refresh" />
+          Refresh
+        </button>
+      </PageHeader>
       {loading && !data && <Loading what="usage" />}
       {error && <ErrorBox error={error} retry={reload} />}
       {data && sum && (
@@ -67,7 +71,7 @@ export function Usage({ since }: { since?: string }) {
             </div>
           ))}
           {sum.days.length === 0 ? (
-            <Empty title="No usage in this window">
+            <Empty title="No usage in this window" icon="usage">
               <p>
                 Usage appears once an agent session writes transcripts to its profile home. To include your own <code>~/.claude</code>, run{" "}
                 <code>icaro usage --host-claude</code> in a terminal.

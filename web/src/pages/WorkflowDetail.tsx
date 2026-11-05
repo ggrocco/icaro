@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { api, type RunInfo, type VersionInfo } from "../api";
 import { Editor } from "./Editor";
 import { RunGraph } from "../components/lazy";
-import { Empty, ErrorBox, Loading, Status, When, useLoad } from "../components/common";
+import { Empty, ErrorBox, Loading, PageHeader, Status, When, useLoad } from "../components/common";
+import { Icon } from "../components/icons";
 import { diffLines } from "../diff";
 import { go, href } from "../router";
 import { parse } from "../yamldoc";
@@ -45,25 +46,28 @@ export function WorkflowDetail({ name, tab = "overview" }: { name: string; tab?:
 
   return (
     <section aria-labelledby="wfd-title">
-      <header className="page-head">
-        <h1 id="wfd-title">
-          {w.name} <span className="muted">v{w.version}</span> <Status status={w.status} />
-        </h1>
-        <div className="actions">
-          <button className="primary" onClick={runNow} disabled={busy || w.status !== "active"}>
-            Run
-          </button>
-          <button
-            onClick={async () => {
-              await api.setEnabled(name, w.status !== "active");
-              wf.reload();
-            }}
-          >
-            {w.status === "active" ? "Disable" : "Enable"}
-          </button>
-        </div>
-      </header>
-      {w.description && <p>{w.description}</p>}
+      <PageHeader
+        id="wfd-title"
+        title={
+          <>
+            {w.name} <span className="version">v{w.version}</span> <Status status={w.status} />
+          </>
+        }
+        subtitle={w.description}
+      >
+        <button
+          onClick={async () => {
+            await api.setEnabled(name, w.status !== "active");
+            wf.reload();
+          }}
+        >
+          {w.status === "active" ? "Disable" : "Enable"}
+        </button>
+        <button className="primary" onClick={runNow} disabled={busy || w.status !== "active"}>
+          <Icon name="play" />
+          Run
+        </button>
+      </PageHeader>
       {err && <ErrorBox error={err} />}
       <nav className="tabs" aria-label="Workflow sections">
         {["overview", "edit", "versions", "runs"].map((t) => (
@@ -148,8 +152,14 @@ function Versions({ name, current }: { name: string; current: number }) {
 }
 
 export function RunTable({ runs }: { runs: RunInfo[] }) {
-  if (!runs.length) return <Empty title="No runs yet" />;
+  if (!runs.length)
+    return (
+      <Empty title="No runs yet" icon="runs">
+        <p>Runs appear here when a workflow starts: by hand with Run, on its schedule, or from a webhook.</p>
+      </Empty>
+    );
   return (
+    <div className="scroll-x">
     <table>
       <thead>
         <tr>
@@ -169,18 +179,21 @@ export function RunTable({ runs }: { runs: RunInfo[] }) {
               </a>
             </td>
             <td>
-              {r.workflow} <span className="muted">v{r.version}</span>
+              <a href={href("workflows", r.workflow)}>{r.workflow}</a> <span className="version">v{r.version}</span>
             </td>
             <td>
               <Status status={r.status} />
             </td>
-            <td>{r.trigger_kind}</td>
             <td>
+              <span className="tag">{r.trigger_kind}</span>
+            </td>
+            <td className="muted">
               <When ts={r.created_at} />
             </td>
           </tr>
         ))}
       </tbody>
     </table>
+    </div>
   );
 }

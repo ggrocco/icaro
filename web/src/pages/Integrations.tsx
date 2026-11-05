@@ -1,24 +1,29 @@
 import { Fragment, useEffect, useState } from "react";
 import { api, ApiError, type Issue } from "../api";
 import { YamlEditor } from "../components/lazy";
-import { Empty, ErrorBox, Issues, Loading, Status, When, useLoad } from "../components/common";
+import { Empty, ErrorBox, Issues, Loading, PageHeader, Status, When, useLoad } from "../components/common";
+import { Icon } from "../components/icons";
 import { href } from "../router";
 
 export function Integrations() {
   const { data, error, loading, reload } = useLoad(api.integrations, []);
   return (
     <section aria-labelledby="int-title">
-      <header className="page-head">
-        <h1 id="int-title">Integrations</h1>
-      </header>
-      <p className="muted">
-        Integrations are YAML manifests in git-backed packs. Add a pack with <code>icaro integration add &lt;git-url&gt;</code>; edits made here
-        commit to your <code>local</code> pack.
-      </p>
+      <PageHeader
+        id="int-title"
+        title="Integrations"
+        subtitle={
+          <>
+            YAML manifests in git-backed packs. Add a pack with <code>icaro integration add &lt;git-url&gt;</code>; edits made here commit to your{" "}
+            <code>local</code> pack.
+          </>
+        }
+      />
       {loading && !data && <Loading what="integrations" />}
       {error && <ErrorBox error={error} retry={reload} />}
-      {data && data.length === 0 && <Empty title="No integrations loaded" />}
+      {data && data.length === 0 && <Empty title="No integrations loaded" icon="integrations" />}
       {data && data.length > 0 && (
+        <div className="scroll-x">
         <table>
           <thead>
             <tr>
@@ -37,16 +42,36 @@ export function Integrations() {
                   {i.shadows_builtin && <div className="muted small">shadows the builtin</div>}
                   {i.description && <div className="muted small">{i.description}</div>}
                 </td>
-                <td>{i.pack}</td>
-                <td className="small">{i.events.join(", ") || "—"}</td>
-                <td className="small">{i.actions.join(", ") || "—"}</td>
-                <td className="small">{i.hosts.join(", ")}</td>
+                <td>
+                  <span className="tag">{i.pack}</span>
+                </td>
+                <td>
+                  <Tags items={i.events} />
+                </td>
+                <td>
+                  <Tags items={i.actions} />
+                </td>
+                <td className="small muted">{i.hosts.join(", ")}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </section>
+  );
+}
+
+function Tags({ items }: { items: string[] }) {
+  if (!items.length) return <span className="muted">—</span>;
+  return (
+    <div className="trigger-list">
+      {items.map((x) => (
+        <span key={x} className="tag">
+          {x}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -81,33 +106,38 @@ export function ManifestEditor({ name }: { name: string }) {
   };
   return (
     <section aria-labelledby="man-title">
-      <header className="page-head">
-        <h1 id="man-title">
-          {name} <span className="muted">({info.pack})</span>
-        </h1>
-        <div className="actions">
-          <button className="primary" onClick={save}>
-            Validate & commit
+      <PageHeader
+        id="man-title"
+        title={
+          <>
+            {name} <span className="version">{info.pack}</span>
+          </>
+        }
+        subtitle={
+          info.pack !== "local" ? (
+            <>
+              This manifest lives in the read-only <code>{info.pack}</code> pack; saving writes a copy to your local pack, which shadows it.
+            </>
+          ) : undefined
+        }
+      >
+        {(info.pack === "local" || saved) && (
+          <button
+            onClick={() =>
+              api
+                .pushPack("local")
+                .then(() => setMsg("Pushed the local pack."))
+                .catch(setErr)
+            }
+          >
+            Push
           </button>
-          {(info.pack === "local" || saved) && (
-            <button
-              onClick={() =>
-                api
-                  .pushPack("local")
-                  .then(() => setMsg("Pushed the local pack."))
-                  .catch(setErr)
-              }
-            >
-              Push
-            </button>
-          )}
-        </div>
-      </header>
-      {info.pack !== "local" && (
-        <p className="muted">
-          This manifest lives in the read-only <code>{info.pack}</code> pack; saving writes a copy to your local pack, which shadows it.
-        </p>
-      )}
+        )}
+        <button className="primary" onClick={save}>
+          <Icon name="commit" />
+          Validate & commit
+        </button>
+      </PageHeader>
       {msg && (
         <div className="notice" role="status">
           {msg}
@@ -156,17 +186,26 @@ export function Deliveries() {
   const [open, setOpen] = useState<string | undefined>();
   return (
     <section aria-labelledby="del-title">
-      <header className="page-head">
-        <h1 id="del-title">Webhook deliveries</h1>
-        <button onClick={reload}>Refresh</button>
-      </header>
+      <PageHeader
+        id="del-title"
+        title="Webhook deliveries"
+        subtitle="Inbound webhooks with their verification result and the runs they started. Verified deliveries can be replayed."
+      >
+        <button onClick={reload}>
+          <Icon name="refresh" />
+          Refresh
+        </button>
+      </PageHeader>
       {loading && !data && <Loading what="deliveries" />}
       {error && <ErrorBox error={error} retry={reload} />}
       {err && <ErrorBox error={err} />}
       {data && data.length === 0 && (
-        <Empty title="No deliveries yet">Inbound webhooks appear here with their verification result and the runs they started.</Empty>
+        <Empty title="No deliveries yet" icon="deliveries">
+          <p>When an integration's webhook URL receives a request, it shows up here.</p>
+        </Empty>
       )}
       {data && data.length > 0 && (
+        <div className="scroll-x">
         <table>
           <thead>
             <tr>
@@ -244,6 +283,7 @@ export function Deliveries() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </section>
   );
