@@ -273,6 +273,16 @@ func TestUICommandPrintsLink(t *testing.T) {
 	}
 }
 
+// With daemon.ui_trust_loopback the link carries no token (ADR 0033).
+func TestUICommandTrustedLink(t *testing.T) {
+	t.Setenv("ICARO_DAEMON__UI_TRUST_LOOPBACK", "true")
+	startDaemon(t)
+	out := wantCLI(t, []string{"ui", "--print"}, "/ui/\n", "no sign-in needed")
+	if strings.Contains(out, "token=") {
+		t.Fatalf("trusted link carries a token:\n%s", out)
+	}
+}
+
 // TestServeRemoteListen: a non-loopback --listen needs --allow-remote, and
 // the daemon warns when it is given.
 func TestServeRemoteListen(t *testing.T) {

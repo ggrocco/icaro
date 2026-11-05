@@ -91,6 +91,7 @@ type ctxKey int
 const (
 	tokenKey ctxKey = iota + 1
 	localKey
+	loopbackKey
 )
 
 // LocalPrincipal is the identity of requests arriving on the daemon's Unix
@@ -127,6 +128,15 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.Handler {
 			return
 		}
 		h := r.Header.Get("Authorization")
+		if !strings.HasPrefix(h, "Bearer ") && trustedLoopback(r.Context()) {
+			// The trusted loopback UI needs no sign-in (ADR 0033).
+			if err := checkLoopbackRequest(r); err != nil {
+				s.writeError(w, err)
+				return
+			}
+			next(w, r.WithContext(context.WithValue(r.Context(), tokenKey, LoopbackPrincipal)))
+			return
+		}
 		if !strings.HasPrefix(h, "Bearer ") {
 			// The web UI authenticates with a cookie session; mutations also
 			// need the CSRF header, which a cross-site page cannot send

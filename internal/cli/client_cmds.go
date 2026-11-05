@@ -127,13 +127,26 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 		},
 	}
 
+	var allHosts bool
+	var onHost string
 	list := &cobra.Command{
 		Use:   "list",
-		Short: "List workflows",
+		Short: "List workflows, of this machine or of every signed-in host",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
+			}
+			if allHosts || onHost != "" {
+				// Every host is asked at once (icaro host).
+				l, err := c.HostWorkflows(cmd.Context(), onHost)
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					return printJSON(cmd.OutOrStdout(), l)
+				}
+				return printHostWorkflows(cmd.OutOrStdout(), l)
 			}
 			ws, err := c.ListWorkflows(cmd.Context())
 			if err != nil {
@@ -150,6 +163,9 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 			return tw.Flush()
 		},
 	}
+
+	list.Flags().BoolVar(&allHosts, "all-hosts", false, "list the workflows of this machine and every signed-in host (icaro host login)")
+	list.Flags().StringVar(&onHost, "host", "", "list the workflows of one host, by alias (local is this machine)")
 
 	var delYes bool
 	del := &cobra.Command{

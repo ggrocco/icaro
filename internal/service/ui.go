@@ -21,6 +21,9 @@ const (
 type UIPrincipal struct {
 	Name  string `json:"name"`
 	Scope string `json:"scope"`
+	// Local is set for the trusted loopback UI (ADR 0033), which has no
+	// session to sign out of.
+	Local bool `json:"local,omitempty"`
 }
 
 func randomSecret() (string, error) {

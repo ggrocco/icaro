@@ -133,6 +133,51 @@ icaro doctor [flags]
       --json   print JSON
 ```
 
+## `icaro host`
+
+The daemon can be signed in to any number of remote Ícaro daemons at once. Each
+has an alias (the short name references use, as in prod:deploy) and a label (its
+display name). This machine is always the host "local" and needs no sign-in.
+`icaro workflow list --all-hosts` lists the workflows of every host at once.
+
+```text
+      --json   print JSON
+```
+
+Subcommands: `list` `login` `logout`
+
+## `icaro host list`
+
+List this machine and every signed-in host
+
+```text
+icaro host list
+```
+
+## `icaro host login`
+
+Sign in to the Ícaro daemon at URL with an API token created there
+(`icaro token create --name NAME --scope read|write|admin`). The token is read from
+stdin or a hidden prompt, never from argv, checked against the remote daemon, sealed
+with the master key and only ever sent to URL. Signing in again with the same
+alias replaces it.
+
+```text
+icaro host login ALIAS URL [--label LABEL] [flags]
+```
+
+```text
+      --label string   display name of the host (default: the alias)
+```
+
+## `icaro host logout`
+
+Forget the token of a remote daemon
+
+```text
+icaro host logout ALIAS
+```
+
 ## `icaro init`
 
 Create ~/.icaro, the master key and the database schema
@@ -1038,10 +1083,15 @@ icaro workflow get NAME
 
 ## `icaro workflow list`
 
-List workflows
+List workflows, of this machine or of every signed-in host
 
 ```text
-icaro workflow list
+icaro workflow list [flags]
+```
+
+```text
+      --all-hosts     list the workflows of this machine and every signed-in host (icaro host login)
+      --host string   list the workflows of one host, by alias (local is this machine)
 ```
 
 ## `icaro workflow validate`

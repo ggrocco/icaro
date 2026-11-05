@@ -209,10 +209,49 @@ export interface UsageReport {
   alerts: { day: string; spent_usd_estimate: number; limit_usd: number; partial?: boolean }[];
 }
 
+// HostInfo is this machine ("local", no sign-in) or a remote Ícaro daemon
+// the local daemon is signed in to (ADR 0033).
+export interface HostInfo {
+  alias: string;
+  label: string;
+  url?: string;
+  local?: boolean;
+  principal?: string;
+  scope?: string;
+  signed_in_at?: string;
+}
+
+// HostWorkflow is a workflow with the host it lives on; ref is alias:name.
+export interface HostWorkflow extends WorkflowInfo {
+  host: string;
+  host_label: string;
+  ref: string;
+  ui_url?: string;
+}
+
+export interface HostListing {
+  workflows: HostWorkflow[];
+  hosts: (HostInfo & { workflows: number; error?: string })[];
+}
+
+// Me is who the UI acts as; local is the trusted loopback UI, which has
+// no session to sign in to or out of.
+export interface Me {
+  name: string;
+  scope: string;
+  local?: boolean;
+}
+
 export const api = {
-  me: () => request<{ name: string; scope: string }>("GET", "/api/v1/ui/me"),
-  login: (token: string) => request<{ name: string; scope: string }>("POST", "/api/v1/ui/login", { token }),
+  me: () => request<Me>("GET", "/api/v1/ui/me"),
+  login: (token: string) => request<Me>("POST", "/api/v1/ui/login", { token }),
   logout: () => request<void>("POST", "/api/v1/ui/logout"),
+
+  hosts: () => request<{ hosts: HostInfo[] }>("GET", "/api/v1/hosts").then((r) => r.hosts ?? []),
+  hostLogin: (h: { alias: string; label: string; url: string; token: string }) => request<HostInfo>("POST", "/api/v1/hosts", h),
+  hostLogout: (alias: string) => request<void>("DELETE", `/api/v1/hosts/${encodeURIComponent(alias)}`),
+  // Every host's workflows, fetched by the daemon from all hosts at once.
+  hostWorkflows: () => request<HostListing>("GET", "/api/v1/hosts/workflows"),
 
   schema: () => request<object>("GET", "/api/v1/schema/workflow"),
   workflows: () => request<{ workflows: WorkflowInfo[] }>("GET", "/api/v1/workflows").then((r) => r.workflows ?? []),
