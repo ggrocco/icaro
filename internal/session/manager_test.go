@@ -225,6 +225,11 @@ func newEnv(t *testing.T, maxActive int, mods ...func(*Options)) *env {
 	}
 	e.m = New(o)
 	go func() { _ = e.m.Run(ctx) }()
+	// Wait for Run's startup reconcile, so tests that insert rows next
+	// never race the env's own manager for them.
+	if err := e.m.requestStart(ctx); err != nil {
+		t.Fatal(err)
+	}
 	return e
 }
 

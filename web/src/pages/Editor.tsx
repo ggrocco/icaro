@@ -88,7 +88,7 @@ export function Editor({ name, initial, onSaved }: Props) {
         <div role="tablist" aria-label="Editor mode">
           {(["form", "yaml", "json"] as const).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "tab active" : "tab"} onClick={() => setTab(t)}>
-              {t === "json" ? "Canonical JSON" : t.toUpperCase()}
+              {t === "json" ? "Canonical JSON" : t === "yaml" ? "YAML" : "Form"}
             </button>
           ))}
         </div>

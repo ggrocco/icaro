@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, subscribeRun, terminal, type RunInfo, type StepInfo } from "../api";
 import { RunGraph } from "../components/lazy";
-import { ErrorBox, Loading, Status, When } from "../components/common";
+import { ErrorBox, Loading, PageHeader, Status, When } from "../components/common";
+import { Icon } from "../components/icons";
 import { go, href } from "../router";
 import { parse } from "../yamldoc";
 
@@ -76,41 +77,52 @@ export function RunDetail({ id }: { id: string }) {
 
   return (
     <section aria-labelledby="run-title">
-      <header className="page-head">
-        <h1 id="run-title">
-          Run <code>{run.id.slice(-10)}</code> <Status status={run.status} />
-        </h1>
-        <div className="actions">
-          {!terminal(run.status) && (
-            <button className="danger" onClick={() => api.cancel(run.id).then((r) => apply(r)).catch(setError)}>
-              Cancel
-            </button>
-          )}
-          {terminal(run.status) && (
-            <button onClick={() => api.rerun(run).then((r) => go("runs", r.id)).catch(setError)}>Re-run</button>
-          )}
-        </div>
-      </header>
-      <p>
-        <a href={href("workflows", run.workflow)}>{run.workflow}</a> v{run.version} · trigger {run.trigger_kind}
-        {run.rerun_of && (
+      <PageHeader
+        id="run-title"
+        title={
           <>
-            {" "}
-            · re-run of <a href={href("runs", run.rerun_of)}>{run.rerun_of.slice(-10)}</a>
+            Run <code>{run.id.slice(-10)}</code> <Status status={run.status} />
           </>
-        )}{" "}
-        · started <When ts={run.started_at} />
-        {run.finished_at && (
-          <>
-            {" "}
-            · finished <When ts={run.finished_at} />
-          </>
+        }
+      >
+        {!terminal(run.status) && (
+          <button className="danger" onClick={() => api.cancel(run.id).then((r) => apply(r)).catch(setError)}>
+            <Icon name="stop" />
+            Cancel
+          </button>
         )}
-        <span className="muted small" aria-live="polite">
-          {" "}
-          {live ? "· live" : ""}
+        {terminal(run.status) && (
+          <button onClick={() => api.rerun(run).then((r) => go("runs", r.id)).catch(setError)}>
+            <Icon name="rerun" />
+            Re-run
+          </button>
+        )}
+      </PageHeader>
+      <div className="meta">
+        <span>
+          <Icon name="workflows" />
+          <a href={href("workflows", run.workflow)}>{run.workflow}</a> <span className="version">v{run.version}</span>
         </span>
-      </p>
+        <span>
+          Trigger <strong>{run.trigger_kind}</strong>
+        </span>
+        {run.rerun_of && (
+          <span>
+            Re-run of <a href={href("runs", run.rerun_of)}>{run.rerun_of.slice(-10)}</a>
+          </span>
+        )}
+        <span>
+          Started <strong>{run.started_at ? <When ts={run.started_at} /> : "not yet"}</strong>
+        </span>
+        {run.finished_at && (
+          <span>
+            Finished <strong><When ts={run.finished_at} /></strong>
+          </span>
+        )}
+        <span aria-live="polite" className={live ? "live" : undefined}>
+          {live ? "Live" : ""}
+        </span>
+      </div>
       {run.error && <div className="notice error">{run.error}</div>}
       {(run.steps ?? [])
         .filter((s) => s.status === "waiting" && s.approval && !s.approval.decision)
@@ -133,9 +145,9 @@ export function RunDetail({ id }: { id: string }) {
           </ul>
         </div>
         <div className="pane side">
-          {!step && <p className="muted">Select a step to see its outputs and logs.</p>}
+          {!step && <p className="muted card">Select a step to see its outputs and logs.</p>}
           {step && (
-            <>
+            <div className="step-detail">
               <h2 className="h3">
                 {step.id} <Status status={step.status} />
               </h2>
@@ -157,7 +169,7 @@ export function RunDetail({ id }: { id: string }) {
               <pre className="code logs" ref={logRef} aria-live="polite" aria-label={`Logs for ${step.id}`}>
                 {logs[step.id] || (step.log_size ? "…" : "(no output)")}
               </pre>
-            </>
+            </div>
           )}
         </div>
       </div>

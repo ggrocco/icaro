@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
-import { ErrorBox, Loading, useLoad } from "./components/common";
+import { ErrorBox, Loading, PageHeader, useLoad } from "./components/common";
+import { Icon, Logo, type IconName } from "./components/icons";
 import { Editor } from "./pages/Editor";
 import { Deliveries, Integrations, ManifestEditor } from "./pages/Integrations";
 import { RunDetail } from "./pages/RunDetail";
@@ -25,42 +26,61 @@ export function App() {
 function Shell({ me }: { me: { name: string } }) {
   const route = useRoute();
   const [section, a, b] = route;
-  const nav = [
-    ["workflows", "Workflows"],
-    ["runs", "Runs"],
-    ["deliveries", "Deliveries"],
-    ["integrations", "Integrations"],
-    ["usage", "Usage"],
+  const nav: [string, string, IconName][] = [
+    ["workflows", "Workflows", "workflows"],
+    ["runs", "Runs", "runs"],
+    ["deliveries", "Deliveries", "deliveries"],
+    ["integrations", "Integrations", "integrations"],
+    ["usage", "Usage", "usage"],
   ];
   return (
-    <>
+    <div className="shell">
       <a className="skip" href="#main">
         Skip to content
       </a>
-      <header className="top">
+      <aside className="sidebar">
         <a className="brand" href={href("workflows")}>
-          <span aria-hidden="true">☀︎</span> Ícaro
+          <Logo />
+          <span className="wordmark">Ícaro</span>
         </a>
         <nav aria-label="Main">
-          {nav.map(([k, label]) => (
+          <span className="nav-label" aria-hidden="true">
+            Automation
+          </span>
+          {nav.map(([k, label, icon]) => (
             <a key={k} href={href(k)} aria-current={section === k || (k === "workflows" && section === "new") ? "page" : undefined}>
-              {label}
+              <Icon name={icon} />
+              <span>{label}</span>
             </a>
           ))}
         </nav>
-        <span className="muted small">
-          {me.name}{" "}
-          <button className="ghost" onClick={() => api.logout().then(() => window.location.reload())}>
-            Sign out
+        <div className="sidebar-foot">
+          <span className="avatar" aria-hidden="true">
+            {me.name.replace(/^[^A-Za-z0-9]+/, "").charAt(0) || "?"}
+          </span>
+          <span className="who" title={me.name}>
+            {me.name}
+          </span>
+          <button
+            className="ghost icon-btn"
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={() => api.logout().then(() => window.location.reload())}
+          >
+            <Icon name="logout" />
           </button>
-        </span>
-      </header>
+        </div>
+      </aside>
       <main id="main" tabIndex={-1}>
         {section === "workflows" && !a && <Workflows />}
         {section === "workflows" && a && <WorkflowDetail name={a} tab={b} />}
         {section === "new" && (
           <section aria-labelledby="new-title">
-            <h1 id="new-title">New workflow</h1>
+            <PageHeader
+              id="new-title"
+              title="New workflow"
+              subtitle="Edit with the form or YAML; it is validated as you type and saved only when the daemon accepts it."
+            />
             <Editor />
           </section>
         )}
@@ -72,7 +92,7 @@ function Shell({ me }: { me: { name: string } }) {
         {section === "usage" && <Usage since={a} />}
         {!["workflows", "new", "runs", "deliveries", "integrations", "usage"].includes(section) && <p>Page not found.</p>}
       </main>
-    </>
+    </div>
   );
 }
 
@@ -80,10 +100,12 @@ function AllRuns() {
   const runs = useLoad(() => api.runs(), []);
   return (
     <section aria-labelledby="runs-title">
-      <header className="page-head">
-        <h1 id="runs-title">Runs</h1>
-        <button onClick={runs.reload}>Refresh</button>
-      </header>
+      <PageHeader id="runs-title" title="Runs" subtitle="Every workflow run, newest first. Open one to follow its steps and logs live.">
+        <button onClick={runs.reload}>
+          <Icon name="refresh" />
+          Refresh
+        </button>
+      </PageHeader>
       {runs.loading && !runs.data && <Loading what="runs" />}
       {runs.error && <ErrorBox error={runs.error} retry={runs.reload} />}
       {runs.data && <RunTable runs={runs.data} />}
@@ -112,22 +134,24 @@ function Login({ onLogin }: { onLogin: (me: { name: string }) => void }) {
   }, []);
   return (
     <main className="login" id="main">
-      <h1>
-        <span aria-hidden="true">☀︎</span> Ícaro
-      </h1>
-      <form onSubmit={submit}>
-        <label className="field">
-          <span className="label">API token</span>
-          <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} autoFocus />
-          <span className="hint">
-            Run <code>icaro ui</code> for a one-time sign-in link, or paste a token from <code>icaro token create</code>.
-          </span>
-        </label>
-        <button className="primary" type="submit" disabled={!token}>
-          Sign in
-        </button>
-      </form>
-      {err && <ErrorBox error={err} />}
+      <div className="login-card">
+        <Logo />
+        <h1>Sign in to Ícaro</h1>
+        <p className="subtitle">Workflows, runs and integrations for your agents.</p>
+        <form onSubmit={submit}>
+          <label className="field">
+            <span className="label">API token</span>
+            <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} autoFocus placeholder="icaro_…" />
+            <span className="hint">
+              Run <code>icaro ui</code> for a one-time sign-in link, or paste a token from <code>icaro token create</code>.
+            </span>
+          </label>
+          <button className="primary" type="submit" disabled={!token}>
+            Sign in
+          </button>
+        </form>
+        {err && <ErrorBox error={err} />}
+      </div>
     </main>
   );
 }
