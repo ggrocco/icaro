@@ -1,0 +1,18 @@
+# First workflow for the MCP and skills tutorial: docs/agents.md.
+#   icaro workflow validate examples/mcp-hello.yaml
+#   icaro workflow apply examples/mcp-hello.yaml
+#   icaro run mcp-hello --set who=icaro --wait
+version: 1
+name: mcp-hello
+description: A first workflow authored with the icaro-workflows skill
+triggers:
+  - type: manual
+steps:
+  - id: greet
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    input:
+      who: ${{ trigger.who }}
+    command: |
+      printf 'hello %s\n' "$ICARO_INPUT_WHO"
+    outputs:
+      greeting: stdout:last-line
