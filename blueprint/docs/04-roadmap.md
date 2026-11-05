@@ -17,6 +17,7 @@ Phases 1, 5, and 6 converge on this milestone; they are facets of the spine, not
 0 ── 10   (runs alongside everything; wraps up at release)
 
 SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
+2 + 3 + ADR 0032 accepted ──> 12  (post-GA)
 ```
 
 | Phase | Track | Depends on |
@@ -33,6 +34,7 @@ SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 | [9 — Unified usage](phases/09-usage.md) | Optional | spine; not a GA gate |
 | [10 — Documentation and landing page](phases/10-docs-landing.md) | Product/docs | 0; documentation tracks the real APIs |
 | [11 — Hardening and GA](phases/11-hardening.md) | Quality | spine + 2 + 4 + 7 + 8 + 10 |
+| [12 — Await steps](phases/12-await-steps.md) | Automation (post-GA) | 2, 3; [ADR 0032](adr/0032-await-event-steps.md) accepted |
 
 ## Rules for every phase
 
@@ -61,6 +63,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [9 — Usage](phases/09-usage.md) (optional) | Done | Only Claude Code transcripts are parsed; other CLIs wait on spike S10 |
 | [10 — Docs and landing page](phases/10-docs-landing.md) | Done | — |
 | [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
+| [12 — Await steps](phases/12-await-steps.md) | Not started | Waits on [ADR 0032](adr/0032-await-event-steps.md) being accepted |
 
 Open spikes:
 
