@@ -13,6 +13,7 @@ on:
       - .github/workflows/release.yml
       - .github/workflows/release-dry-run.yml
       - install.sh
+      - hack/release.sh
       - hack/sign/**
       - internal/update/**
   workflow_dispatch:
@@ -35,6 +36,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: hack/release.sh lints and refuses a malformed tag
+        run: |
+          shellcheck hack/release.sh
+          if hack/release.sh 1.2.3; then echo "accepted a tag without the v prefix" >&2; exit 1; fi
+          if hack/release.sh v1.2; then echo "accepted a tag without a patch number" >&2; exit 1; fi
       - run: make web
       - name: an ephemeral signing key (thrown away with the runner)
         run: |

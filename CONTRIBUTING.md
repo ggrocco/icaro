@@ -41,6 +41,31 @@ The [engineering standards](blueprint/docs/05-engineering.md) are binding. In sh
 
 Maintainers tag a commit on `main` with `vX.Y.Z`; [`release.yml`](.github/workflows/release.yml) builds, signs, and publishes. See [ADR 0021](blueprint/docs/adr/0021-release-signing-and-updates.md) and [docs/upgrading.md](docs/upgrading.md).
 
+### Cutting a release
+
+```sh
+git checkout main && git pull
+make release TAG=v1.2.3 DRY_RUN=1   # only checks
+make release TAG=v1.2.3             # tags origin/main and pushes the tag
+```
+
+[`hack/release.sh`](hack/release.sh) refuses a malformed tag, a dirty tree, a `HEAD` that is not the tip of `origin/main`, an existing tag, and a version older than the latest tag. A tag with a pre-release suffix (`v1.2.3-rc.1`) is published as a GitHub pre-release and does not update the Homebrew cask. Pushing a `v*` tag by hand (`git tag -a v1.2.3 -m v1.2.3 && git push origin v1.2.3`) starts the same workflow.
+
+Once CI passes on the tagged commit, approve the `release` environment in the workflow run. The release then gets, for each of `linux_amd64`, `linux_arm64`, `darwin_amd64`, and `darwin_arm64`, a `icaro_<version>_<os>_<arch>.tar.gz` archive, plus `.deb` and `.rpm` packages for Linux, `Icaro_<version>_macos_universal.zip` (the desktop app), `install.sh`, and `checksums.txt` with its ed25519 and Sigstore signatures. Windows is not a target: the daemon depends on Unix sockets and `flock`.
+
+### One-time setup
+
+1. Generate the release key with `go run ./hack/sign keygen`. Keep the seed offline; losing it means users must reinstall to trust a new key.
+2. In Settings → Environments, create the `release` environment (see below for its protection rules) and add the secret `ICARO_SIGNING_KEY` with the printed seed.
+3. In Settings → Secrets and variables → Actions → Variables, add `ICARO_RELEASE_PUBKEY` with the printed public key. It is embedded in every binary and in `install.sh`.
+4. Optional: add `HOMEBREW_TAP_TOKEN` to the `release` environment, a fine-grained token with contents write access to `ggrocco/homebrew-tap`. Without it the release still publishes, and the cask is not pushed.
+5. Optional: the `MACOS_*` and `APPLE_*` secrets listed at the top of `release.yml`, to sign and notarize the desktop app. Without them it is signed ad hoc.
+6. The `agent-image` job pushes to `ghcr.io/icaro-dev/agent-base` (the default in `config.DefaultAgentImage`). The workflow's `GITHUB_TOKEN` can only push there if that package grants this repository write access; otherwise set the `AGENT_IMAGE` variable to an image you can push.
+
+The `release` job fails first thing, before it builds anything, when the signing key or public key is missing.
+
+### Gates
+
 The release is gated:
 
 1. `tag-on-main` refuses a tag whose commit is not on `main`.

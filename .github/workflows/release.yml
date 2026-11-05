@@ -1,7 +1,10 @@
 name: release
 
 # Builds, signs and publishes a release for every v* tag (ADR 0021).
-# Secrets: ICARO_SIGNING_KEY (base64 ed25519 seed), HOMEBREW_TAP_TOKEN.
+# Cut one with `make release TAG=vX.Y.Z` (hack/release.sh); a tag with a
+# pre-release suffix (v1.2.3-rc.1) is published as a GitHub pre-release.
+# Secrets: ICARO_SIGNING_KEY (base64 ed25519 seed), and optionally
+# HOMEBREW_TAP_TOKEN (without it the cask is not pushed to the tap).
 # Variables: ICARO_RELEASE_PUBKEY (base64 ed25519 public key).
 # The macOS app (ADR 0027) is signed and notarized when these secrets are
 # set, and signed ad hoc otherwise: MACOS_CERTIFICATE (base64 .p12 of a
@@ -57,6 +60,30 @@ jobs:
       id-token: write     # cosign keyless signing + provenance
       attestations: write # build provenance
     steps:
+      # Nothing is built or published without the signing key: install.sh
+      # and `icaro update` refuse a release whose checksums are unsigned.
+      - name: the signing key is configured
+        env:
+          HAS_KEY: ${{ secrets.ICARO_SIGNING_KEY != '' }}
+          HAS_PUBKEY: ${{ vars.ICARO_RELEASE_PUBKEY != '' }}
+          HAS_TAP: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        run: |
+          missing=0
+          if [ "$HAS_KEY" != true ]; then
+            echo "::error::secret ICARO_SIGNING_KEY is not set in the 'release' environment"
+            missing=1
+          fi
+          if [ "$HAS_PUBKEY" != true ]; then
+            echo "::error::variable ICARO_RELEASE_PUBKEY is not set"
+            missing=1
+          fi
+          if [ "$missing" = 1 ]; then
+            echo "::error::generate both with 'go run ./hack/sign keygen' (CONTRIBUTING.md#one-time-setup)"
+            exit 1
+          fi
+          if [ "$HAS_TAP" != true ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew cask is built but not pushed to ggrocco/homebrew-tap"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
