@@ -93,4 +93,4 @@ Inbound webhooks need a reachable daemon (cut 9), so on a laptop an `await` step
 - A manifest edit that removes an event or a payload field fails validation of the workflows that await it, as it already does for triggers. Steps already waiting keep their row and expire on their deadline if the event no longer arrives.
 - `await` is a new step kind for API clients and the generated schema (with a drift test against [the contract](../schemas/workflow.schema.json)), the CLI and the web UI's step views.
 - On a daemon no provider can reach, `await` steps only finish by hand or by expiring. Validation should warn, not fail, when a workflow awaits an integration event and `daemon.public_url` is not set.
-- Implementation would belong to a new phase after Phase 11, since every existing phase is closed: the schema and validation, the two tables and migrations, pipeline step 6b, the engine's start-time lookback and expiry, the manual-deliver API, CLI and UI, and docs in `docs/workflows.md`.
+- Implementation is [Phase 12](../phases/12-await-steps.md), after Phase 11, since every existing phase is closed.
