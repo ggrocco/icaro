@@ -3,7 +3,7 @@ PKG      := ./...
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X icaro/internal/cli.version=$(VERSION)
 
-.PHONY: build web web-test test test-integration lint generate fmt tidy upgrade clean
+.PHONY: build web web-test test test-integration lint generate fmt tidy upgrade clean release
 
 build:
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/icaro
@@ -67,6 +67,12 @@ upgrade:
 	go run ./hack/licenses -npm web -out web/THIRD_PARTY_LICENSES.md
 	cd desktop && go mod tidy
 	go run ./hack/licenses -dir desktop -goos darwin -pkg . -out THIRD_PARTY_LICENSES.md
+
+# Tags the tip of origin/main as $(TAG) and pushes it, which starts the
+# release workflow (CONTRIBUTING.md#releases). DRY_RUN=1 only checks.
+release:
+	@test -n "$(TAG)" || { echo "usage: make release TAG=vX.Y.Z  (DRY_RUN=1 to only check)"; git tag --list 'v*' --sort=-v:refname | head -n 1 | sed 's/^/latest tag: /'; exit 2; }
+	DRY_RUN=$(DRY_RUN) hack/release.sh $(TAG)
 
 clean:
 	rm -rf bin dist coverage.out coverage
