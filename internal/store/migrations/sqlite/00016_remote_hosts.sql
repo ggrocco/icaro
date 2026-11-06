@@ -1,5 +1,5 @@
 -- +goose Up
--- Remote Ícaro daemons this daemon is signed in to (ADR 0033). alias is
+-- Remote Ícaro daemons this daemon is signed in to (ADR 0034). alias is
 -- the short name references use (alias:workflow), label the display
 -- name. The API token is sealed with the master key and is only ever
 -- sent to url; principal and scope are what the remote reported at

@@ -1,4 +1,4 @@
-# ADR 0033 — Remote hosts, and an opt-in sign-in-free loopback UI
+# ADR 0034 — Remote hosts, and an opt-in sign-in-free loopback UI
 
 **Status:** Accepted. Amends [ADR 0023](0023-browser-access.md) (the loopback UI listener) and the auth row of the [decision index](../02-decisions-risks.md#decision-index).
 

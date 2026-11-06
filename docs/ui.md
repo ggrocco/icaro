@@ -28,7 +28,7 @@ daemon:
   ui_trust_loopback: true
 ```
 
-The UI listener then serves the browser as you, with no sign-in page, no **Sign out** and no session to expire, and `icaro ui` prints a plain `http://127.0.0.1:8787/ui/` link. A request must still name a loopback `Host` (so a DNS-rebinding page is refused), come from the same origin, and carry the CSRF header to change anything. The trust applies only to the `daemon.ui_listen` listener, never to `--listen`. Every process and every other OS user on the machine can then use the UI as you, so it is off by default ([ADR 0033](../blueprint/docs/adr/0033-remote-hosts-and-trusted-loopback.md)).
+The UI listener then serves the browser as you, with no sign-in page, no **Sign out** and no session to expire, and `icaro ui` prints a plain `http://127.0.0.1:8787/ui/` link. A request must still name a loopback `Host` (so a DNS-rebinding page is refused), come from the same origin, and carry the CSRF header to change anything. The trust applies only to the `daemon.ui_listen` listener, never to `--listen`. Every process and every other OS user on the machine can then use the UI as you, so it is off by default ([ADR 0034](../blueprint/docs/adr/0034-remote-hosts-and-trusted-loopback.md)).
 
 ## Sessions and CSRF
 

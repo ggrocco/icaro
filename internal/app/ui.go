@@ -38,7 +38,7 @@ type uiListener struct {
 	log     *App
 	reqs    chan chan uiResult
 	// connContext marks connections; api.TrustLoopbackConnContext under
-	// daemon.ui_trust_loopback (ADR 0033).
+	// daemon.ui_trust_loopback (ADR 0034).
 	connContext func(context.Context, net.Conn) context.Context
 }
 

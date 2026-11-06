@@ -1,5 +1,5 @@
 // Package hosts signs this daemon in to remote Ícaro daemons and lists
-// their workflows next to the local ones (ADR 0033).
+// their workflows next to the local ones (ADR 0034).
 //
 // A remote host has an alias (the short name a reference uses, as in
 // prod:deploy) and a label (its display name). The daemon may be signed in

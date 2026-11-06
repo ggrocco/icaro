@@ -32,7 +32,7 @@ type UIOptions struct {
 	// returns the base URL (e.g. http://127.0.0.1:8787); `icaro ui` calls
 	// it over the local socket.
 	Open func() (string, error)
-	// TrustLoopback is daemon.ui_trust_loopback (ADR 0033): the UI
+	// TrustLoopback is daemon.ui_trust_loopback (ADR 0034): the UI
 	// listener needs no sign-in, so `icaro ui` links carry no token.
 	TrustLoopback bool
 }

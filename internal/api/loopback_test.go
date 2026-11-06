@@ -12,7 +12,7 @@ import (
 )
 
 // newTrustedUI serves the UI handler with daemon.ui_trust_loopback on, as
-// the UI listener does (ADR 0033).
+// the UI listener does (ADR 0034).
 func newTrustedUI(t *testing.T) (*uiEnv, *httptest.Server) {
 	t.Helper()
 	e := newUIEnv(t)

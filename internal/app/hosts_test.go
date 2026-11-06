@@ -11,7 +11,7 @@ import (
 )
 
 // With daemon.ui_trust_loopback the UI listener serves the browser as the
-// local user, and the hosts routes are wired (ADR 0033).
+// local user, and the hosts routes are wired (ADR 0034).
 func TestTrustedLoopbackUIAndHosts(t *testing.T) {
 	for _, trust := range []bool{false, true} {
 		a := newTestApp(t, startFakeDocker(t, &fakeDocker{}), func(c *config.Config) { c.Daemon.UITrustLoopback = trust })

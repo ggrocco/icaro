@@ -129,7 +129,7 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.Handler {
 		}
 		h := r.Header.Get("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") && trustedLoopback(r.Context()) {
-			// The trusted loopback UI needs no sign-in (ADR 0033).
+			// The trusted loopback UI needs no sign-in (ADR 0034).
 			if err := checkLoopbackRequest(r); err != nil {
 				s.writeError(w, err)
 				return

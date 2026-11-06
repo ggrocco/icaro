@@ -273,7 +273,7 @@ func TestUICommandPrintsLink(t *testing.T) {
 	}
 }
 
-// With daemon.ui_trust_loopback the link carries no token (ADR 0033).
+// With daemon.ui_trust_loopback the link carries no token (ADR 0034).
 func TestUICommandTrustedLink(t *testing.T) {
 	t.Setenv("ICARO_DAEMON__UI_TRUST_LOOPBACK", "true")
 	startDaemon(t)

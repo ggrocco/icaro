@@ -12,7 +12,7 @@ import (
 	"icaro/internal/store"
 )
 
-// Trusted loopback UI (ADR 0033). With daemon.ui_trust_loopback the UI
+// Trusted loopback UI (ADR 0034). With daemon.ui_trust_loopback the UI
 // listener serves the browser without a sign-in: a request that carries no
 // bearer token acts as LoopbackPrincipal. Three checks keep that from
 // being reachable from a web page:

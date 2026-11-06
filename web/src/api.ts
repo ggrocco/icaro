@@ -210,7 +210,7 @@ export interface UsageReport {
 }
 
 // HostInfo is this machine ("local", no sign-in) or a remote Ícaro daemon
-// the local daemon is signed in to (ADR 0033).
+// the local daemon is signed in to (ADR 0034).
 export interface HostInfo {
   alias: string;
   label: string;

@@ -10,7 +10,7 @@ import (
 	"icaro/internal/store"
 )
 
-// RegisterHosts mounts the remote host routes (ADR 0033). Signing in and
+// RegisterHosts mounts the remote host routes (ADR 0034). Signing in and
 // out stores and forgets other daemons' tokens, and makes this daemon call
 // a URL of the caller's choosing, so both need admin.
 func RegisterHosts(s *Server, reg *hosts.Registry) {

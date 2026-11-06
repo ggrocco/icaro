@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// RemoteHostRow is a remote daemon this daemon is signed in to (ADR 0033).
+// RemoteHostRow is a remote daemon this daemon is signed in to (ADR 0034).
 type RemoteHostRow struct {
 	Alias     string
 	Label     string
