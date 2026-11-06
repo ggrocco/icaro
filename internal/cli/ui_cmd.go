@@ -24,11 +24,16 @@ func newUICmd(opts *rootOpts) *cobra.Command {
 			var out struct {
 				URL     string `json:"url"`
 				Expires int    `json:"expires_in_seconds"`
+				Trusted bool   `json:"trusted"`
 			}
 			if err := c.Do(cmd.Context(), http.MethodPost, "/api/v1/ui/link", nil, &out); err != nil {
 				return fmt.Errorf("%w (icaro ui talks to the local daemon socket)", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s\n(single use, valid for %ds)\n", out.URL, out.Expires)
+			if out.Trusted {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\n(no sign-in needed: daemon.ui_trust_loopback is on)\n", out.URL)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\n(single use, valid for %ds)\n", out.URL, out.Expires)
+			}
 			if !printOnly {
 				_ = openBrowser(out.URL)
 			}

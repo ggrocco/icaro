@@ -32,6 +32,9 @@ type UIOptions struct {
 	// returns the base URL (e.g. http://127.0.0.1:8787); `icaro ui` calls
 	// it over the local socket.
 	Open func() (string, error)
+	// TrustLoopback is daemon.ui_trust_loopback (ADR 0034): the UI
+	// listener needs no sign-in, so `icaro ui` links carry no token.
+	TrustLoopback bool
 }
 
 // RegisterUI mounts the web UI and its session endpoints.
@@ -45,7 +48,7 @@ func (s *Server) RegisterUI(o UIOptions) {
 	m.HandleFunc("POST /api/v1/ui/logout", s.handleUILogout)
 	m.Handle("GET /api/v1/ui/me", s.auth(store.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		t := TokenFrom(r.Context())
-		writeJSON(w, http.StatusOK, service.UIPrincipal{Name: t.Name, Scope: t.Scope})
+		writeJSON(w, http.StatusOK, service.UIPrincipal{Name: t.Name, Scope: t.Scope, Local: IsLoopbackPrincipal(r.Context())})
 	}))
 	// Minting a login link is for the local user only (the socket).
 	m.HandleFunc("POST /api/v1/ui/link", func(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +64,10 @@ func (s *Server) RegisterUI(o UIOptions) {
 				return
 			}
 			base = u
+		}
+		if o.TrustLoopback {
+			writeJSON(w, http.StatusOK, map[string]any{"url": strings.TrimRight(base, "/") + "/ui/", "base_url": base, "trusted": true})
+			return
 		}
 		code, err := s.svc.NewUILoginCode(r.Context(), "local", store.ScopeWrite)
 		if err != nil {

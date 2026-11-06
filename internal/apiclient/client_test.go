@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"icaro/internal/hosts"
 	"icaro/internal/memory"
 	"icaro/internal/session"
 )
@@ -94,6 +95,16 @@ func TestEndpoints(t *testing.T) {
 		{"WebhookTokens", func(ctx context.Context, c *Client) error { _, err := c.WebhookTokens(ctx); return err }, "GET", "/api/v1/webhook-tokens", ""},
 		{"RotateWebhookToken", func(ctx context.Context, c *Client) error { _, err := c.RotateWebhookToken(ctx, "w"); return err }, "POST", "/api/v1/webhook-tokens/w/rotate", ""},
 		{"Schedules", func(ctx context.Context, c *Client) error { _, err := c.Schedules(ctx); return err }, "GET", "/api/v1/schedules", ""},
+
+		{"Me", func(ctx context.Context, c *Client) error { _, err := c.Me(ctx); return err }, "GET", "/api/v1/ui/me", ""},
+		{"ListHosts", func(ctx context.Context, c *Client) error { _, err := c.ListHosts(ctx); return err }, "GET", "/api/v1/hosts", ""},
+		{"LoginHost", func(ctx context.Context, c *Client) error {
+			_, err := c.LoginHost(ctx, hosts.Login{Alias: "prod", Label: "P", URL: "https://x", Token: "t"})
+			return err
+		}, "POST", "/api/v1/hosts", `{"alias":"prod","label":"P","token":"t","url":"https://x"}`},
+		{"LogoutHost", func(ctx context.Context, c *Client) error { return c.LogoutHost(ctx, "a b") }, "DELETE", "/api/v1/hosts/a%20b", ""},
+		{"HostWorkflows all", func(ctx context.Context, c *Client) error { _, err := c.HostWorkflows(ctx, ""); return err }, "GET", "/api/v1/hosts/workflows", ""},
+		{"HostWorkflows one", func(ctx context.Context, c *Client) error { _, err := c.HostWorkflows(ctx, "prod"); return err }, "GET", "/api/v1/hosts/workflows?host=prod", ""},
 
 		{"WriteMemory", func(ctx context.Context, c *Client) error {
 			_, err := c.WriteMemory(ctx, memory.RESTWrite{Project: "p"})

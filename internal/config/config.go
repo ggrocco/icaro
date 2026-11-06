@@ -67,6 +67,11 @@ type DaemonConfig struct {
 	// UIListen is the loopback address `icaro ui` opens for the browser
 	// (ADR 0023). It must be a loopback address.
 	UIListen string `yaml:"ui_listen"`
+	// UITrustLoopback lets the browser use the UI listener without signing
+	// in (ADR 0034). Every process and OS user on this machine can then
+	// act as you, so it is off by default; Host, Origin and CSRF checks
+	// still refuse cross-site and DNS-rebinding requests.
+	UITrustLoopback bool `yaml:"ui_trust_loopback"`
 	// Pprof serves net/http/pprof under /debug/pprof on the Unix socket
 	// only (never TCP), for profiling (ADR 0024).
 	Pprof bool `yaml:"pprof"`

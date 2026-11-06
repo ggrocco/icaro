@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"icaro/internal/apiclient/rest"
+	"icaro/internal/hosts"
 	"icaro/internal/service"
 	"icaro/internal/usage"
 	"icaro/internal/workflow"
@@ -283,5 +284,45 @@ func (c *Client) WaitRun(ctx context.Context, id string, interval time.Duration)
 func (c *Client) Usage(ctx context.Context, since string) (*usage.Report, error) {
 	var out usage.Report
 	err := c.doJSON(ctx, http.MethodGet, "/api/v1/usage?since="+url.QueryEscape(since), nil, &out)
+	return &out, err
+}
+
+// Me returns who the client's token signs in as.
+func (c *Client) Me(ctx context.Context) (*service.UIPrincipal, error) {
+	var out service.UIPrincipal
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/ui/me", nil, &out)
+	return &out, err
+}
+
+// ListHosts lists the local host and every signed-in remote host.
+func (c *Client) ListHosts(ctx context.Context) ([]hosts.Host, error) {
+	var out struct {
+		Hosts []hosts.Host `json:"hosts"`
+	}
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/hosts", nil, &out)
+	return out.Hosts, err
+}
+
+// LoginHost signs the daemon in to a remote host.
+func (c *Client) LoginHost(ctx context.Context, in hosts.Login) (*hosts.Host, error) {
+	var out hosts.Host
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/hosts", in, &out)
+	return &out, err
+}
+
+// LogoutHost signs the daemon out of a remote host.
+func (c *Client) LogoutHost(ctx context.Context, alias string) error {
+	return c.doJSON(ctx, http.MethodDelete, "/api/v1/hosts/"+url.PathEscape(alias), nil, nil)
+}
+
+// HostWorkflows lists the workflows of every host, or of one when alias
+// is not empty.
+func (c *Client) HostWorkflows(ctx context.Context, alias string) (*hosts.Listing, error) {
+	path := "/api/v1/hosts/workflows"
+	if alias != "" {
+		path += "?host=" + url.QueryEscape(alias)
+	}
+	var out hosts.Listing
+	err := c.doJSON(ctx, http.MethodGet, path, nil, &out)
 	return &out, err
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, ApiError } from "./api";
+import { api, ApiError, type Me } from "./api";
 import { ErrorBox, Loading, PageHeader, useLoad } from "./components/common";
 import { Icon, Logo, type IconName } from "./components/icons";
 import { Editor } from "./pages/Editor";
+import { Hosts } from "./pages/Hosts";
 import { Deliveries, Integrations, ManifestEditor } from "./pages/Integrations";
 import { RunDetail } from "./pages/RunDetail";
 import { Usage } from "./pages/Usage";
@@ -11,7 +12,7 @@ import { Workflows } from "./pages/Workflows";
 import { href, useRoute } from "./router";
 
 export function App() {
-  const [me, setMe] = useState<{ name: string } | null | undefined>();
+  const [me, setMe] = useState<Me | null | undefined>();
   useEffect(() => {
     api
       .me()
@@ -23,7 +24,7 @@ export function App() {
   return <Shell me={me} />;
 }
 
-function Shell({ me }: { me: { name: string } }) {
+function Shell({ me }: { me: Me }) {
   const route = useRoute();
   const [section, a, b] = route;
   const nav: [string, string, IconName][] = [
@@ -31,6 +32,7 @@ function Shell({ me }: { me: { name: string } }) {
     ["runs", "Runs", "runs"],
     ["deliveries", "Deliveries", "deliveries"],
     ["integrations", "Integrations", "integrations"],
+    ["hosts", "Hosts", "hosts"],
     ["usage", "Usage", "usage"],
   ];
   return (
@@ -56,19 +58,22 @@ function Shell({ me }: { me: { name: string } }) {
         </nav>
         <div className="sidebar-foot">
           <span className="avatar" aria-hidden="true">
-            {me.name.replace(/^[^A-Za-z0-9]+/, "").charAt(0) || "?"}
+            {(me.local ? "This machine" : me.name).replace(/^[^A-Za-z0-9]+/, "").charAt(0) || "?"}
           </span>
-          <span className="who" title={me.name}>
-            {me.name}
+          <span className="who" title={me.local ? "This machine: no sign-in needed (daemon.ui_trust_loopback)" : me.name}>
+            {me.local ? "This machine" : me.name}
           </span>
-          <button
-            className="ghost icon-btn"
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={() => api.logout().then(() => window.location.reload())}
-          >
-            <Icon name="logout" />
-          </button>
+          {/* The trusted loopback UI has no session to sign out of. */}
+          {!me.local && (
+            <button
+              className="ghost icon-btn"
+              aria-label="Sign out"
+              title="Sign out"
+              onClick={() => api.logout().then(() => window.location.reload())}
+            >
+              <Icon name="logout" />
+            </button>
+          )}
         </div>
       </aside>
       <main id="main" tabIndex={-1}>
@@ -89,8 +94,9 @@ function Shell({ me }: { me: { name: string } }) {
         {section === "deliveries" && <Deliveries />}
         {section === "integrations" && !a && <Integrations />}
         {section === "integrations" && a && <ManifestEditor name={a} />}
+        {section === "hosts" && <Hosts />}
         {section === "usage" && <Usage since={a} />}
-        {!["workflows", "new", "runs", "deliveries", "integrations", "usage"].includes(section) && <p>Page not found.</p>}
+        {!["workflows", "new", "runs", "deliveries", "integrations", "hosts", "usage"].includes(section) && <p>Page not found.</p>}
       </main>
     </div>
   );
@@ -113,7 +119,7 @@ function AllRuns() {
   );
 }
 
-function Login({ onLogin }: { onLogin: (me: { name: string }) => void }) {
+function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   const [token, setToken] = useState(() => new URLSearchParams(window.location.search).get("token") ?? "");
   const [err, setErr] = useState<Error | undefined>();
   const submit = async (e?: React.FormEvent) => {
@@ -143,7 +149,8 @@ function Login({ onLogin }: { onLogin: (me: { name: string }) => void }) {
             <span className="label">API token</span>
             <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} autoFocus placeholder="icaro_…" />
             <span className="hint">
-              Run <code>icaro ui</code> for a one-time sign-in link, or paste a token from <code>icaro token create</code>.
+              Run <code>icaro ui</code> for a one-time sign-in link, or paste a token from <code>icaro token create</code>. On your own machine,{" "}
+              <code>daemon.ui_trust_loopback: true</code> skips signing in.
             </span>
           </label>
           <button className="primary" type="submit" disabled={!token}>

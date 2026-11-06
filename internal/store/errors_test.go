@@ -118,8 +118,18 @@ func TestClosedDatabase(t *testing.T) {
 			_, err := s.ClaimDueRun(ctx, "daemon")
 			return err
 		},
-		"ParkRun": func() error { return s.ParkRun(ctx, "r", nil) },
-		"WakeRun": func() error { return s.WakeRun(ctx, "r") },
+		"ParkRun":       func() error { return s.ParkRun(ctx, "r", nil) },
+		"PutRemoteHost": func() error { return s.PutRemoteHost(ctx, &RemoteHostRow{Alias: "a"}) },
+		"GetRemoteHost": func() error {
+			_, err := s.GetRemoteHost(ctx, "a")
+			return err
+		},
+		"ListRemoteHosts": func() error {
+			_, err := s.ListRemoteHosts(ctx)
+			return err
+		},
+		"DeleteRemoteHost": func() error { return s.DeleteRemoteHost(ctx, "a") },
+		"WakeRun":          func() error { return s.WakeRun(ctx, "r") },
 		"OpenApproval": func() error {
 			_, err := s.OpenApproval(ctx, "r", "s", "m")
 			return err

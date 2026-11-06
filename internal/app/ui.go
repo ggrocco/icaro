@@ -13,8 +13,12 @@ import (
 
 func init() {
 	RegisterWirer(75, "ui", func(_ context.Context, a *App) error {
-		ui := &uiListener{addr: a.Cfg.Daemon.UIListen, handler: a.Handler, log: a, reqs: make(chan chan uiResult)}
-		a.API.RegisterUI(api.UIOptions{Open: ui.Open})
+		ui := &uiListener{addr: a.Cfg.Daemon.UIListen, handler: a.Handler, log: a, reqs: make(chan chan uiResult), connContext: ConnContext}
+		if a.Cfg.Daemon.UITrustLoopback {
+			ui.connContext = api.TrustLoopbackConnContext
+			a.Log.Warn("daemon.ui_trust_loopback is on: the UI listener needs no sign-in, so every process and user on this machine can use it", "addr", a.Cfg.Daemon.UIListen)
+		}
+		a.API.RegisterUI(api.UIOptions{Open: ui.Open, TrustLoopback: a.Cfg.Daemon.UITrustLoopback})
 		a.Add(ui)
 		return nil
 	})
@@ -33,6 +37,9 @@ type uiListener struct {
 	handler func() http.Handler
 	log     *App
 	reqs    chan chan uiResult
+	// connContext marks connections; api.TrustLoopbackConnContext under
+	// daemon.ui_trust_loopback (ADR 0034).
+	connContext func(context.Context, net.Conn) context.Context
 }
 
 func (u *uiListener) Name() string { return "ui" }
@@ -78,7 +85,7 @@ func (u *uiListener) Run(ctx context.Context) error {
 				Handler:           u.handler(),
 				ReadHeaderTimeout: 10 * time.Second,
 				BaseContext:       func(net.Listener) context.Context { return ctx },
-				ConnContext:       ConnContext,
+				ConnContext:       u.connContext,
 			}
 			go func(s *http.Server) {
 				if err := s.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -86,7 +93,7 @@ func (u *uiListener) Run(ctx context.Context) error {
 				}
 			}(srv)
 			url = "http://" + ln.Addr().String()
-			u.log.Log.Info("ui listening (token or session cookie required)", "url", url)
+			u.log.Log.Info("ui listening", "url", url)
 			reply <- uiResult{url: url}
 		}
 	}

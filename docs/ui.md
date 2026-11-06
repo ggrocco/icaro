@@ -18,13 +18,25 @@ http://127.0.0.1:8787/ui/?token=icl_…
 
 You can also paste an API token (`icaro token create --name me --scope write`) into the sign-in page.
 
+### No sign-in on your own machine
+
+On a single-user machine you can skip the sign-in entirely:
+
+```yaml
+# ~/.icaro/config/icaro.yaml
+daemon:
+  ui_trust_loopback: true
+```
+
+The UI listener then serves the browser as you, with no sign-in page, no **Sign out** and no session to expire, and `icaro ui` prints a plain `http://127.0.0.1:8787/ui/` link. A request must still name a loopback `Host` (so a DNS-rebinding page is refused), come from the same origin, and carry the CSRF header to change anything. The trust applies only to the `daemon.ui_listen` listener, never to `--listen`. Every process and every other OS user on the machine can then use the UI as you, so it is off by default ([ADR 0034](../blueprint/docs/adr/0034-remote-hosts-and-trusted-loopback.md)).
+
 ## Sessions and CSRF
 
 Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` session cookie that lasts 12 hours. Every request that changes something, sign-in included, must also carry the `X-Icaro-CSRF: 1` header. A cross-site page cannot send that header without a CORS preflight, and the daemon answers none. The UI is served with a strict Content-Security-Policy (`frame-ancestors 'none'`, same-origin scripts and connections). **Sign out** deletes the session, and `icaro token revoke` ends every session signed in with that token. The token's scope applies: a `read` token can look but not change anything.
 
 ## What's in it
 
-- **Workflows:** the list, a graph of each workflow's DAG, the version history with diffs between versions, enable/disable, and **Run**. Run prompts for the `trigger.*` fields a manual run needs.
+- **Workflows:** the workflows of this machine and of every signed-in host, fetched from all hosts at once. With more than one host, each row shows its reference (`alias:name`) and the host's label; a remote workflow opens in that host's own UI, and a host that cannot be reached is shown above the list without hiding the others (`icaro workflow list --all-hosts` from a terminal). Each local workflow has a graph of its DAG, the version history with diffs between versions, enable/disable, and **Run**. Run prompts for the `trigger.*` fields a manual run needs.
 - **Editor:**
   - a form editor and a YAML editor over the same document, so fields the form doesn't know about, and comments, survive a round trip;
   - key completion from the JSON Schema;
@@ -36,6 +48,7 @@ Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` sess
 - **Runs:** a run is drawn from the workflow version it ran with, so pending steps are visible. Status, attempts, outputs and live logs stream over SSE, with no polling. **Cancel** kills the step containers; **Re-run** starts the run again on the same workflow version, with the same trigger payload (`icaro runs rerun ID` from a terminal), and the new run links back to the one it repeats. A workflow that was deleted cannot be re-run. A run waiting on an [approval step](workflows.md#approvals-and-waits) shows its request with **Approve** and **Reject** (a rejection needs a comment); the decision records your token or session name as the approver.
 - **Deliveries:** every inbound webhook with its verification result, the normalized payload, headers (secrets masked), the body, what each subscribed workflow did with it, and **Redeliver**.
 - **Usage:** the `icaro usage` report for the profile homes over the last 1–90 days: totals, a per-day table, and every source and model with its confidence. Costs are labelled as estimates, unpriced usage shows `n/a` (and turns a total into "at least"), days over `usage.daily_limit_usd` raise an alert, and an unreadable source is shown instead of hidden. Your own `~/.claude` is read only by `icaro usage --host-claude`.
+- **Hosts:** this machine and every remote Ícaro daemon the daemon is signed in to, any number at once. **Sign in to a host** takes an alias (the short name references use, as in `prod:deploy`), a label, the daemon's URL and an API token created there (`icaro token create --name me --scope read`). The daemon checks the token, seals it and sends it only to that URL; **Sign out** forgets it. Signing in needs an `admin` session. From a terminal: `icaro host login prod https://icaro.example.com --label Production`, `icaro host list`, `icaro host logout prod`.
 - **Integrations:** the installed integrations, and a manifest editor that validates an edit and commits it to your `local` pack. An invalid edit is rejected before anything is written, and **Push** stays a manual button.
 
 ## Building it

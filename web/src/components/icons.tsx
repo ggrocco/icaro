@@ -29,6 +29,14 @@ const paths: Record<string, React.ReactNode> = {
     </>
   ),
   usage: <path d="M3 3v18h18M8 17v-5M13 17V8M18 17v-8" />,
+  hosts: (
+    <>
+      <rect x="3" y="4" width="18" height="7" rx="1.5" />
+      <rect x="3" y="13" width="18" height="7" rx="1.5" />
+      <path d="M7 7.5h.01M7 16.5h.01" />
+    </>
+  ),
+  external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
   plus: <path d="M12 5v14M5 12h14" />,
   play: <path d="M7 4.5v15l12-7.5z" />,
   refresh: (
