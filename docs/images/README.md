@@ -22,6 +22,6 @@ The desktop image shows the Linux source build. The macOS app uses the same web 
    ```
 
 3. Run `icaro ui`, open the successful `hello` run, and select **greet**. Wait for the graph and logs to load. Capture the page at a 1360 px viewport width, including the output and log panel, as `web-run.png`.
-4. Build and launch the native app using the [desktop build instructions](../desktop.md#building-it), with the same `ICARO_HOME`. Open **hello → Edit → Form** and capture the app window, including its native title bar, as `desktop-app.png`. On a headless Linux machine, use a virtual display such as Xvfb and a window manager.
+4. Build and launch the native app using the [desktop build instructions](../desktop.md#building-it), with the same `ICARO_HOME`. Open **hello → Edit → Form** and capture the app window, including its native title bar, as `desktop-app.png`. On a headless Linux machine, use a virtual display such as Xvfb and a window manager, and start the app with `dbus-run-session` because it needs a session bus.
 5. Keep the UI unchanged during capture. Do not include API tokens, one-time sign-in links, personal paths, or real customer data. Use PNG and retain legible text at the README's display width.
 6. Update the captions and capture-environment table if the view or platform changes. Run `go run ./hack/linkcheck .` from the repository root, then stop the demo daemon and remove its disposable state.
