@@ -105,4 +105,4 @@ When a run starts, the engine **materializes** the loaded library into a content
 - A preset edit changes every workflow that uses it from their next run on, and validation runs again only when a workflow is validated or run. `put_library_item` and `icaro library status` list the workflows a change affects, and a run whose merged step no longer validates fails before any step starts, with the issues.
 - New state: `runs.library_hash`, a `library_snapshots` table, and snapshot directories under `~/.icaro/runs/lib/`.
 - Agent sessions (interactive, outside workflows) do not get `/icaro/lib` in this design.
-- Implementation would be a new phase after Phase 11: packs and loading, the snapshot and mount, `preset` in the contract and validator, the CLI, API, MCP and web UI library views, the skill, and docs.
+- Implementation is [Phase 13](../phases/13-workflow-library.md), after Phase 11, since every existing phase is closed.
