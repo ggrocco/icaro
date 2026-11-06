@@ -72,20 +72,9 @@ export function Icon({ name }: { name: IconName }) {
   );
 }
 
-// Logo is the site's sun-and-wings mark, simplified to read at 28px.
+// The shared Icarus mark is generated alongside the native application icons.
 export function Logo() {
   return (
-    <svg className="logo" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
-      <rect width="48" height="48" rx="12" fill="var(--surface-3)" />
-      <circle cx="33" cy="15" r="6.5" fill="#f2b33d" />
-      <g fill="none" stroke="var(--text)" strokeWidth="2.6" strokeLinecap="round">
-        <path d="M23 29c-4-4-9-5.5-15-5" />
-        <path d="M23 31.5c-4-2.6-8.5-3.2-13.5-2" />
-        <path d="M25 29c2-4.5 5-7 9.5-8" />
-        <path d="M25 31.5c2-3 4.5-4.6 7.5-5" />
-        <path d="M24 32v8" />
-      </g>
-      <circle cx="24" cy="27" r="2.4" fill="var(--text)" />
-    </svg>
+    <img className="logo" src={`${import.meta.env.BASE_URL}icaro.svg`} alt="" aria-hidden="true" />
   );
 }
