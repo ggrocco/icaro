@@ -324,6 +324,7 @@ func invented(s distill.Summary, chat string) []string {
 	var out []string
 	for _, re := range namePatterns {
 		for _, m := range re.FindAllString(flat.String(), -1) {
+			m = strings.TrimRight(m, ".,;:")
 			if !strings.Contains(low, strings.ToLower(m)) && !seen[m] {
 				seen[m] = true
 				out = append(out, m)
@@ -348,13 +349,14 @@ func tokens(ctx context.Context, c *distill.Client, text string) int {
 // calibrate measures prompt and generation speed with one plain
 // completion, from the timings llama-server reports.
 func calibrate(ctx context.Context, c *distill.Client) (prompt, gen float64) {
-	text := strings.Repeat("The workflow posts new bug reports to the team's channel and retries twice. ", 120)
+	// A fresh prefix, so the server's prompt cache cannot skip the work.
+	text := time.Now().Format(time.RFC3339Nano) + "\n" + strings.Repeat("The workflow posts new bug reports to the team's channel and retries twice. ", 120)
 	body, _ := json.Marshal(map[string]any{
 		"model":    c.Model,
 		"messages": []map[string]string{{"role": "user", "content": text + "\nSummarize in three sentences."}},
 		// Thinking off, as the distiller sends it.
 		"chat_template_kwargs": map[string]any{"enable_thinking": false},
-		"max_tokens":           128, "temperature": 0,
+		"max_tokens":           128, "temperature": 0, "cache_prompt": false,
 	})
 	var out struct {
 		Timings struct {

@@ -15,7 +15,7 @@ func TestDistillSpec(t *testing.T) {
 		t.Fatalf("%+v", spec)
 	}
 	// No network at all, and the baseline hardening.
-	if string(hc.NetworkMode) != "none" || !hc.ReadonlyRootfs || !slices.Contains(hc.CapDrop, "ALL") || hc.Resources.NanoCPUs != 2e9 || hc.Resources.Memory != 3<<30 {
+	if string(hc.NetworkMode) != "none" || !hc.ReadonlyRootfs || !slices.Contains(hc.CapDrop, "ALL") || hc.NanoCPUs != 2e9 || hc.Memory != 3<<30 {
 		t.Fatalf("host config %+v", hc)
 	}
 	var models, sock bool
@@ -33,7 +33,7 @@ func TestDistillSpec(t *testing.T) {
 		t.Fatalf("mounts %+v", hc.Mounts)
 	}
 	cmd := strings.Join(spec.Cmd, " ")
-	if cmd != "-m /models/q.gguf --host /sock/llama.sock -c 8192 -t 2 -np 1 --no-webui --log-disable" {
+	if cmd != "-m /models/q.gguf --host /sock/llama.sock -c 12288 -t 2 -np 1 --no-webui --log-disable" {
 		t.Fatal(cmd)
 	}
 	if s.String() == "" {

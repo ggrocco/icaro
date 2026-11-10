@@ -39,7 +39,8 @@ type DistillSpec struct {
 	Threads     int
 	NanoCPUs    int64
 	MemoryBytes int64
-	// Context is the context size in tokens (default 8192).
+	// Context is the context size in tokens (default 12288, which fits
+	// a distill.ChunkChars part, the prompt and the answer).
 	Context int
 	Labels  map[string]string
 }
@@ -52,7 +53,7 @@ func (d DistillSpec) Build() docker.Spec {
 	}
 	ctxSize := d.Context
 	if ctxSize <= 0 {
-		ctxSize = 8192
+		ctxSize = 12288
 	}
 	threads := max(d.Threads, 1)
 	hc := sandbox.Baseline(sandbox.BaselineOptions{

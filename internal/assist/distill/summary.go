@@ -59,10 +59,10 @@ Use only what the chat says. Never invent the names of workflows, integrations, 
 
 - intent: what the workflow is for, in one or two sentences.
 - constraints: requirements the person stated (when it runs, what it must or must not do).
-- preferences: choices the person made about names, images, timezones, channels or style.
-- rejected: proposals the person turned down, with the reason they gave.
-- open: questions left unanswered at the end.
-- resume: a short note (at most three sentences) to start the next chat on this workflow.`
+- preferences: the person's taste that is not a requirement (style, tone, a tool or profile they favour). Do not restate the workflow's configuration here.
+- rejected: everything the person said no to, replaced or asked to remove: a proposal, a value they changed (an earlier time, a profile they swapped), an integration they gave up. Give the reason they gave, or "" if none.
+- open: questions the chat itself left unanswered, or work the person said they will do later. Not questions of your own.
+- resume: where the chat left off, in at most three sentences: what was done last (validated, saved and its version, or not saved yet) and the next step if one was named.`
 
 // mergePrompt combines summaries of consecutive parts of one chat.
 const mergePrompt = systemPrompt + `
@@ -106,8 +106,14 @@ func (s Summary) Empty() bool {
 	return s.Intent == "" && s.Resume == "" && len(s.Constraints)+len(s.Preferences)+len(s.Rejected)+len(s.Open) == 0
 }
 
+// placeholders are what small models write for "nothing".
+var placeholders = map[string]bool{"none": true, "n/a": true, "na": true, "null": true, "nothing": true, "-": true, "not specified": true, "not mentioned": true}
+
 func text(s string, n int) string {
 	s = strings.Join(strings.Fields(strings.ToValidUTF8(s, "")), " ")
+	if placeholders[strings.ToLower(strings.TrimRight(s, ".!"))] {
+		return ""
+	}
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
@@ -172,9 +178,11 @@ func Chunk(turns []Turn, limit int) [][]Turn {
 
 // Limits of one summary call.
 const (
-	// ChunkChars keeps one part, the prompt and the answer inside an
-	// 8k-token context (about 4 characters per token).
-	ChunkChars = 16000
+	// ChunkChars keeps one part, the prompt and the answer inside the
+	// runtime's 12k-token context even at 3 characters per token (chats
+	// average about 4). Spike S12: one call on a 6,000-token chat is
+	// faster and better than two parts and a merge.
+	ChunkChars = 32000
 	maxTokens  = 700
 )
 

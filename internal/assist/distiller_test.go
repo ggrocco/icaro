@@ -110,7 +110,10 @@ func TestDistill(t *testing.T) {
 	// A run the person approved, which succeeds.
 	_, sid := e.chatWithSessionFor(d.ID)
 	done := make(chan map[string]any, 1)
-	go func() { out, _ := e.tool(sid, ToolRun, map[string]any{"name": "hello", "trigger": map[string]any{"who": "x"}}); done <- out }()
+	go func() {
+		out, _ := e.tool(sid, ToolRun, map[string]any{"name": "hello", "trigger": map[string]any{"who": "x"}})
+		done <- out
+	}()
 	e.waitFor("an approval", func() bool { full, _ := e.s.GetChat(e.ctx, d.ID); return len(full.Approvals) == 1 })
 	full, _ := e.s.GetChat(e.ctx, d.ID)
 	if _, err := e.s.Decide(e.ctx, d.ID, full.Approvals[0].ID, true, "token:alice"); err != nil {
@@ -201,6 +204,11 @@ func TestDistill(t *testing.T) {
 	first := string(turns[len(turns)-1].Stdin)
 	if !strings.HasPrefix(first, "[Notes from earlier chats") || !strings.Contains(first, "Greet whoever") || !strings.HasSuffix(first, "---\n\nhello workflow: add a Slack step") {
 		t.Fatalf("first turn stdin:\n%s", first)
+	}
+	// The lesson the person removed is in neither the notes nor the
+	// common mistakes.
+	if strings.Contains(first, "imagex") {
+		t.Fatalf("a removed memory reached the preamble:\n%s", first)
 	}
 	mems, _ := e.s.Memories(e.ctx, d2.ID)
 	if len(mems.Used) == 0 {

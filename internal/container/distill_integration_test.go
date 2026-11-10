@@ -23,7 +23,7 @@ func TestDistillContainerHasNoRouteOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	models, sock := t.TempDir(), t.TempDir()
-	_ = os.Chmod(sock, 0o777)
+	_ = os.Chmod(sock, 0o777) // #nosec G302 -- the container user must create its socket here
 	spec := DistillSpec{Name: "icaro-it-distill-" + time.Now().Format("150405"), Image: testImage, ModelsDir: models, SocketDir: sock,
 		ModelFile: "m.gguf", Threads: 1, NanoCPUs: 1e9, MemoryBytes: 256 << 20}.Build()
 	spec.Entrypoint = []string{"sh", "-c", `wget -T 3 -q -O- http://1.1.1.1/ >/dev/null 2>&1; echo "outside=$?";

@@ -314,6 +314,11 @@ func TestParseSummary(t *testing.T) {
 	if !(Summary{}).Empty() {
 		t.Fatal("empty")
 	}
+	// What small models write for "nothing" is nothing.
+	s, err = ParseSummary([]byte(`{"intent":"x","constraints":["None."],"preferences":["N/A"],"rejected":[{"what":"none","why":""}],"open":["Not mentioned"],"resume":"None"}`))
+	if err != nil || len(s.Constraints)+len(s.Preferences)+len(s.Rejected)+len(s.Open) != 0 || s.Resume != "" || s.Intent != "x" {
+		t.Fatalf("%+v %v", s, err)
+	}
 }
 
 func TestChunkAndRender(t *testing.T) {
@@ -446,7 +451,7 @@ func TestManaged(t *testing.T) {
 		}
 	}
 	spec := fake.Container(id).Spec
-	if string(spec.HostConfig.NetworkMode) != "none" || spec.HostConfig.Resources.NanoCPUs != 2e9 || spec.User != "1:1" {
+	if string(spec.HostConfig.NetworkMode) != "none" || spec.HostConfig.NanoCPUs != 2e9 || spec.User != "1:1" {
 		t.Fatalf("spec %+v", spec.HostConfig)
 	}
 	stop()
