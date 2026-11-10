@@ -29,6 +29,7 @@ type Chats interface {
 	RemoveMemory(ctx context.Context, chatID, memoryID string) error
 	Distill(ctx context.Context, chatID string) error
 	Stats(ctx context.Context) (*assist.Stats, error)
+	WorkflowNotes(ctx context.Context, workflow string) ([]assist.WorkflowNote, error)
 	Delete(ctx context.Context, chatID string) error
 	Entries(ctx context.Context, chatID string, offset int64) ([]assist.LogLine, int64, error)
 }
@@ -56,6 +57,7 @@ func RegisterChats(s *Server, c Chats, bus *events.Bus) {
 	m.Handle("DELETE /api/v1/chats/{id}/memories/{memory}", s.Auth(store.ScopeWrite, h.removeMemory))
 	m.Handle("POST /api/v1/chats/{id}/distill", s.Auth(store.ScopeWrite, h.distill))
 	m.Handle("GET /api/v1/assistant/stats", s.Auth(store.ScopeRead, h.stats))
+	m.Handle("GET /api/v1/assistant/notes", s.Auth(store.ScopeRead, h.notes))
 }
 
 type chatHandlers struct {
@@ -307,4 +309,13 @@ func (h *chatHandlers) stats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, st)
+}
+
+func (h *chatHandlers) notes(w http.ResponseWriter, r *http.Request) {
+	out, err := h.c.WorkflowNotes(r.Context(), r.URL.Query().Get("workflow"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"notes": out})
 }

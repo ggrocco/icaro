@@ -274,3 +274,45 @@ func group(xs []*store.ChatStats) StatsGroup {
 	}
 	return g
 }
+
+// WorkflowNote is a summary memory about a workflow, for its page.
+type WorkflowNote struct {
+	Type   string         `json:"type"` // intent | resume
+	ChatID string         `json:"chat_id"`
+	Memory *memory.Memory `json:"memory"`
+}
+
+// WorkflowNotes returns the latest intent and resume notes the chats
+// about workflow left (ADR 0036), newest chat first, at most one of each.
+func (s *Service) WorkflowNotes(ctx context.Context, workflow string) ([]WorkflowNote, error) {
+	out := []WorkflowNote{}
+	if s.o.Memories == nil || workflow == "" {
+		return out, nil
+	}
+	cs, err := s.o.Store.ListChats(ctx, 200)
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for _, c := range cs { // newest first
+		if c.Workflow != workflow {
+			continue
+		}
+		mine, err := s.o.Memories.ByOrigin(ctx, MemoryScope(c), Origin(c.ID), 200)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range mine {
+			typ, _ := m.Metadata["type"].(string)
+			if (typ == "intent" || typ == "resume") && !have[typ] {
+				have[typ] = true
+				out = append(out, WorkflowNote{Type: typ, ChatID: c.ID, Memory: m})
+			}
+		}
+		if len(have) == 2 {
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
+	return out, nil
+}

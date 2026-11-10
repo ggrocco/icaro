@@ -166,6 +166,15 @@ func TestDistill(t *testing.T) {
 		t.Fatalf("stats %+v", stats[0])
 	}
 
+	// The workflow's page shows the latest intent and resume.
+	notes, err := e.s.WorkflowNotes(e.ctx, "hello")
+	if err != nil || len(notes) != 2 || notes[0].Type != "intent" || notes[1].Type != "resume" || notes[0].ChatID != d.ID {
+		t.Fatalf("%+v %v", notes, err)
+	}
+	if n, _ := e.s.WorkflowNotes(e.ctx, ""); len(n) != 0 {
+		t.Fatal("notes for no workflow")
+	}
+
 	// Running it again changes nothing and opens the model once per batch.
 	if again := e.runDistill(dist, d.ID); again.Memories != job.Memories {
 		t.Fatalf("not idempotent: %d then %d", job.Memories, again.Memories)

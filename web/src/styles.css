@@ -1495,3 +1495,9 @@ main.login {
 .composer .row {
   justify-content: flex-end;
 }
+.workflow-notes p {
+  margin: 0 0 4px;
+}
+.workflow-notes p:last-child {
+  margin: 0;
+}

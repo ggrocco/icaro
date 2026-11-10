@@ -1,0 +1,65 @@
+{
+ "name": "nightly-backup-rejected-cron",
+ "workflow": "db-backup",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "I need a nightly backup of the postgres database to S3."
+  },
+  {
+   "role": "assistant",
+   "text": "Here is a first version: a schedule trigger with cron `0 2 * * *` and an image step running pg_dump, then an s3 upload step."
+  },
+  {
+   "role": "user",
+   "text": "No, 2am UTC is bad, our traffic peaks then in Asia. Run it at 18:00 UTC."
+  },
+  {
+   "role": "assistant",
+   "text": "Changed the cron to `0 18 * * *`."
+  },
+  {
+   "role": "user",
+   "text": "Also don't put the database password in the env block, use the secret DB_PASSWORD."
+  },
+  {
+   "role": "assistant",
+   "text": "Switched to `${{ secrets.DB_PASSWORD }}`. I have not validated yet because the s3 integration is not installed in this daemon; you will need to add it before saving."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "backup"
+   ],
+   [
+    "postgres|database|pg_dump"
+   ]
+  ],
+  "constraints": [
+   [
+    "18:00|0 18|18"
+   ],
+   [
+    "DB_PASSWORD|secret"
+   ]
+  ],
+  "preferences": [],
+  "rejected": [
+   [
+    "2am|2 am|0 2|02:00|2:00"
+   ]
+  ],
+  "open": [
+   [
+    "s3"
+   ]
+  ],
+  "resume": [
+   [
+    "s3|validat|install"
+   ]
+  ]
+ }
+}

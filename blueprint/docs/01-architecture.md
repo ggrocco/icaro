@@ -174,6 +174,8 @@ Scope is enforced server-side from the session identity. Deterministic ingest ru
 
 Handoffs only help if agents use them. Each agent session gets a short, configurable preamble telling it to accept a pending handoff before starting and to leave one when done.
 
+**Assistant memory** ([ADR 0036](adr/0036-local-memory-distiller.md)): when an assistant chat goes idle or is closed, a distill job turns it into memories with `origin: distill:<chat>`, in the chat's project scope (or a global `assistant` scope). Stage 1 needs no model: it writes exact facts from the chat's log and the store (validator lessons with the fix as a diff, integration actions a clean draft uses, run outcomes, saves, working examples). Stage 2 is optional: a small local model (llama.cpp's `llama-server`, in a container with no network that listens on a Unix socket, or the person's own endpoint) summarizes the person's and the assistant's messages, never run logs, into intent, constraints, preferences, rejected proposals, open questions and where the chat left off. Those memories are marked `confidence: model` and expire. A new chat starts with the matching notes, framed as data, within `assistant.memory_budget` tokens.
+
 ## 9. Integrations
 
 An integration is a **declarative manifest in a git-backed pack**, not code ([ADR 0007](adr/0007-integration-manifests.md)). Out-of-v1 limits are in [MVP cut 9](02-decisions-risks.md#mandatory-mvp-cuts).

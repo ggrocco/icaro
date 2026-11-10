@@ -258,7 +258,7 @@ func (s *Service) CreateChat(ctx context.Context, req CreateRequest, actor strin
 		}
 		yaml = w.YAML
 	}
-	c := &store.Chat{Title: clip(strings.TrimSpace(req.Title), 120), Profile: profile, Agent: prof.Agent, ProjectID: req.ProjectID, Workflow: req.Workflow, CreatedBy: actor}
+	c := &store.Chat{Title: clip(strings.TrimSpace(s.redactor(ctx).RedactString(req.Title)), 120), Profile: profile, Agent: prof.Agent, ProjectID: req.ProjectID, Workflow: req.Workflow, CreatedBy: actor}
 	if err := s.o.Store.CreateChat(ctx, c); err != nil {
 		return nil, err
 	}
@@ -373,14 +373,16 @@ func (s *Service) Send(ctx context.Context, chatID, text, actor string) ([]Messa
 	if err != nil {
 		return nil, err
 	}
+	// Only redacted copies of the text are stored, the title included.
+	redacted := s.redactor(ctx).RedactString(text)
 	if c.Title == "" {
-		if err := s.o.Store.SetChatField(ctx, c.ID, store.ChatTitle, clip(firstLine(text), 80)); err != nil {
+		if err := s.o.Store.SetChatField(ctx, c.ID, store.ChatTitle, clip(firstLine(redacted), 80)); err != nil {
 			return nil, err
 		}
 	}
 	a := s.actor(chatID)
 	off := a.size()
-	u := &store.ChatMessage{ChatID: chatID, Role: store.RoleUser, Text: s.redactor(ctx).RedactString(text), Status: store.TurnDone, LogOffset: off}
+	u := &store.ChatMessage{ChatID: chatID, Role: store.RoleUser, Text: redacted, Status: store.TurnDone, LogOffset: off}
 	if err := s.o.Store.AddChatMessage(ctx, u); err != nil {
 		return nil, err
 	}

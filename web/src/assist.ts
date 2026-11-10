@@ -108,6 +108,14 @@ export interface Memory {
   created_at: string;
 }
 
+// WorkflowNote is the latest intent or resume note chats left about a
+// workflow.
+export interface WorkflowNote {
+  type: "intent" | "resume";
+  chat_id: string;
+  memory: Memory;
+}
+
 export interface ChatMemories {
   used: MemoryRef[];
   produced: Memory[];
@@ -153,6 +161,8 @@ export const assistApi = {
   memories: (id: string) => call<ChatMemories>("GET", `${chat(id)}/memories`),
   forget: (id: string, memory: string) => call<void>("DELETE", `${chat(id)}/memories/${encodeURIComponent(memory)}`),
   distill: (id: string) => call<void>("POST", `${chat(id)}/distill`),
+  workflowNotes: (workflow: string) =>
+    call<{ notes: WorkflowNote[] }>("GET", `/api/v1/assistant/notes?workflow=${encodeURIComponent(workflow)}`).then((r) => r.notes ?? []),
 };
 
 // subscribeChat follows a chat's log over SSE from the start, so the view

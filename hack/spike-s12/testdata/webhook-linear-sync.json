@@ -1,0 +1,54 @@
+{
+ "name": "webhook-linear-sync",
+ "workflow": "linear-sync",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "Sync Linear issues tagged customer into our support sheet."
+  },
+  {
+   "role": "assistant",
+   "text": "There is no Google Sheets integration in this daemon. I can use a generic http step to call the Sheets API, but you would need to add an integration manifest with its credentials."
+  },
+  {
+   "role": "user",
+   "text": "Let's do the manifest later. For now just post them to the #support channel in Slack."
+  },
+  {
+   "role": "assistant",
+   "text": "Proposed linear-sync: linear.issue trigger with label customer, slack.post_message to #support. It validated."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "linear"
+   ],
+   [
+    "customer|support"
+   ]
+  ],
+  "constraints": [
+   [
+    "#support|support"
+   ]
+  ],
+  "preferences": [],
+  "rejected": [
+   [
+    "sheet|manifest|http"
+   ]
+  ],
+  "open": [
+   [
+    "sheet|manifest"
+   ]
+  ],
+  "resume": [
+   [
+    "sheet|manifest|later|slack"
+   ]
+  ]
+ }
+}

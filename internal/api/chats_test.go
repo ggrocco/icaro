@@ -99,6 +99,13 @@ func (f *fakeChats) Stats(context.Context) (*assist.Stats, error) {
 	return &assist.Stats{WithMemory: assist.StatsGroup{Chats: 2}}, nil
 }
 
+func (f *fakeChats) WorkflowNotes(_ context.Context, wf string) ([]assist.WorkflowNote, error) {
+	if err := f.rec("notes " + wf); err != nil {
+		return nil, err
+	}
+	return []assist.WorkflowNote{{Type: "intent", ChatID: "c1"}}, nil
+}
+
 func (f *fakeChats) Apply(_ context.Context, id, yaml, actor string) (*service.WorkflowInfo, error) {
 	if err := f.rec("apply " + id + " " + yaml + " " + actor); err != nil {
 		return nil, err
@@ -209,6 +216,7 @@ func TestChatRoutes(t *testing.T) {
 		{"DELETE", "/api/v1/chats/c1/memories/m1", "", 204, "forget c1 m1", ""},
 		{"POST", "/api/v1/chats/c1/distill", "", 202, "distill c1", ""},
 		{"GET", "/api/v1/assistant/stats", "", 200, "stats", `"chats": 2`},
+		{"GET", "/api/v1/assistant/notes?workflow=hello", "", 200, "notes hello", `"type": "intent"`},
 		{"DELETE", "/api/v1/chats/c1", "", 204, "delete c1", ""},
 	} {
 		status, body := f.do(tc.method, tc.path, f.write, tc.body)
@@ -261,7 +269,7 @@ func TestChatErrors(t *testing.T) {
 			{"POST", "/api/v1/chats/c1/apply", `{"yaml":"x"}`},
 			{"GET", "/api/v1/chats/c1/memories", ""}, {"DELETE", "/api/v1/chats/c1/memories/m", ""},
 			{"POST", "/api/v1/chats/c1/distill", ""}, {"GET", "/api/v1/assistant/stats", ""},
-			{"GET", "/api/v1/chats/c1/events", ""},
+			{"GET", "/api/v1/assistant/notes?workflow=w", ""}, {"GET", "/api/v1/chats/c1/events", ""},
 		} {
 			if status, body := f.do(r[0], r[1], f.write, r[2]); status != want {
 				t.Errorf("%v: %s %s = %d %s", err, r[0], r[1], status, body)
