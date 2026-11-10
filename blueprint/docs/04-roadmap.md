@@ -70,7 +70,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [12 — Await steps](phases/12-await-steps.md) | Not started | Waits on [ADR 0032](adr/0032-await-event-steps.md) being accepted |
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
 | [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Built; S11 open | Every deliverable is built and tested end to end with a fake CLI. Open: spike S11 (real Claude/Codex logins: flags, recorded streams, start-up time), and the two acceptance runs that need a real subscription and a real API key |
-| [15 — Memory distiller](phases/15-memory-distiller.md) | In progress | [ADR 0036](adr/0036-local-memory-distiller.md) is accepted; spike S12 runs on the build machine's CPU, the Mac and GPU tiers wait |
+| [15 — Memory distiller](phases/15-memory-distiller.md) | In progress | [ADR 0036](adr/0036-local-memory-distiller.md) is accepted. Spike S12 passed on the build machine's CPU; the 8 GB laptop, Mac, GPU and person-graded set are still open |
 
 Open spikes:
 
