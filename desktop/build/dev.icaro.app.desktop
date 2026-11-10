@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ícaro
+GenericName=Coding agent sessions
+Comment=Run many coding agents in parallel, each in an isolated session
+Exec=icaro-app
+Icon=dev.icaro.app
+Terminal=false
+Categories=Development;
+StartupNotify=false

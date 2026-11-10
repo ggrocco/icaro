@@ -37,7 +37,7 @@ The run view shows each step's status and outputs, with logs streamed live. Buil
 
 ![Ícaro native Linux desktop window editing the hello workflow, with form fields, validation status, and a graph of its steps.](docs/images/desktop-app.png)
 
-Shown here is the Linux source build. The desktop app opens the same UI in its own window and adds a menu with active runs, recent failures, previews, usage, and quick actions. It can launch at login and notify you about failed runs or daemon outages. [Desktop setup and platform status](docs/desktop.md).
+Shown here is the Linux build. The desktop app opens the same UI in its own window and adds a menu with active runs, recent failures, previews, usage, and quick actions. It can launch at login and notify you about failed runs or daemon outages. [Desktop setup and platform status](docs/desktop.md).
 
 These captures use local demo workflows. See the [screenshot notes](docs/images/README.md) for the capture environment and how to refresh them.
 
@@ -84,7 +84,7 @@ The [full quickstart](docs/quickstart.md) walks through a session, a first workf
 | Browser | `icaro ui` and the [web UI guide](docs/ui.md) |
 | macOS app | Download `Icaro_<version>_macos_universal.zip` from [Releases](https://github.com/ggrocco/icaro/releases), move the app to Applications, and follow the [desktop guide](docs/desktop.md). |
 
-**Desktop status:** CI builds and tests the app on macOS and Linux; a clean-install test on a Mac is still pending. Linux desktop builds are available from source. See the desktop guide for signing and first-launch details.
+**Desktop status:** CI builds and tests the app on macOS and Linux; a clean-install test on a Mac is still pending. Releases attach it as `Icaro.app` for macOS and as a tarball for Linux (amd64 and arm64). See the desktop guide for signing and first-launch details.
 
 ## Teach your agent to use Ícaro
 

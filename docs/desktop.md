@@ -1,17 +1,30 @@
 # Desktop app
 
-`Icaro.app` is a menu bar app on top of the daemon. It shows what is running and what failed, gives you a few quick actions, and opens the web UI in its own window. It does no work of its own: everything it shows and does goes through the daemon's API, so the CLI and the web UI see the same thing ([ADR 0027](../blueprint/docs/adr/0027-desktop-app.md)).
+The desktop app (`Icaro.app` on macOS, `icaro-app` on Linux) is a menu bar app on top of the daemon. It shows what is running and what failed, gives you a few quick actions, and opens the web UI in its own window. It does no work of its own: everything it shows and does goes through the daemon's API, so the CLI and the web UI see the same thing ([ADR 0027](../blueprint/docs/adr/0027-desktop-app.md)).
 
-> **Status:** CI builds and tests the app on macOS and Linux, but it has not yet been through a clean-install test on a Mac. Until a release is notarized, macOS blocks the downloaded app: Control-click it and choose **Open** the first time.
+> **Status:** CI builds and tests the app on macOS and Linux, but it has not yet been through a clean-install test on a Mac. Until a release is notarized, macOS blocks the downloaded app: Control-click it and choose **Open** the first time. The Linux tarball is built and installed in CI, and has not been through a pass on a real desktop session.
 
 ## Install and start
 
-Download `Icaro_<version>_macos_universal.zip` from the [releases](https://github.com/ggrocco/icaro/releases), unzip it, and move `Icaro.app` to `/Applications`. The bundle includes the `icaro` CLI, which the app uses to start the daemon.
+**macOS:** download `Icaro_<version>_macos_universal.zip` from the [releases](https://github.com/ggrocco/icaro/releases), unzip it, and move `Icaro.app` to `/Applications`. The bundle includes the `icaro` CLI, which the app uses to start the daemon.
+
+**Linux:** download `Icaro_<version>_linux_amd64.tar.gz` or `Icaro_<version>_linux_arm64.tar.gz` from the [releases](https://github.com/ggrocco/icaro/releases) and extract it into `~/.local`:
+
+```sh
+tar -xzf Icaro_*_linux_*.tar.gz --strip-components=1 -C ~/.local
+```
+
+That installs `~/.local/bin/icaro-app`, the `icaro` CLI next to it (replacing one the installer put there), a launcher entry, and an icon. Start **Ícaro** from your launcher or run `icaro-app`. The app needs:
+
+- GTK 4 and WebKitGTK 6 from your distribution (Debian/Ubuntu: `libgtk-4-1 libwebkitgtk-6.0-4`; Fedora: `gtk4 webkitgtk6.0`). The release is built on Ubuntu 24.04 and runs on distributions at least that new.
+- A desktop that hosts StatusNotifier tray items: KDE does, and GNOME needs the AppIndicator extension.
+
+Each tarball has a `.sha256` file and a `.sig` ed25519 signature made with the release key. `icaro update` replaces the CLI only; to update the app, extract a newer tarball over the old one.
 
 When the app launches:
 
 1. It attaches to the daemon if one is already running, whether the CLI, `icaro service install` or an earlier launch started it. It never starts a second daemon.
-2. Otherwise it starts `icaro serve` in the background, as the CLI does. It looks for `icaro` in this order: `$ICARO_BIN`, the copy inside the bundle, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, then `PATH`.
+2. Otherwise it starts `icaro serve` in the background, as the CLI does. It looks for `icaro` in this order: `$ICARO_BIN`, the copy next to the app (inside the bundle on macOS), `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, then `PATH`.
 3. It opens the web UI in a window, unless tray-only mode is on.
 
 Quitting the app leaves the daemon running, because the daemon owns your runs and sessions. Stop the daemon with the CLI.
@@ -55,4 +68,4 @@ These are separate from `icaro service install`, which starts the daemon itself 
 
 ## Building it
 
-The app is a separate Go module under [`desktop/`](../desktop/) and needs cgo. On macOS, `make app-macos` builds a universal `bin/Icaro.app`, signed ad hoc. On Linux, the same app builds with `make app` after installing `libgtk-4-dev libwebkitgtk-6.0-dev`. It shows a tray only on desktops that host StatusNotifier items. Linux releases ship the CLI and daemon only.
+The app is a separate Go module under [`desktop/`](../desktop/) and needs cgo. On macOS, `make app-macos` builds a universal `bin/Icaro.app`, signed ad hoc. On Linux, the same app builds with `make app` after installing `libgtk-4-dev libwebkitgtk-6.0-dev`, and `make app-linux` builds the release tarball for your architecture into `bin/`.
