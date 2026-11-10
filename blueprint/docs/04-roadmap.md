@@ -69,7 +69,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
 | [12 — Await steps](phases/12-await-steps.md) | Not started | Waits on [ADR 0032](adr/0032-await-event-steps.md) being accepted |
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
-| [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | In progress | [ADR 0035](adr/0035-workflow-assistant-chat.md) is accepted; built against modeled stream fixtures while spike S11 waits on real logins |
+| [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Built; S11 open | Every deliverable is built and tested end to end with a fake CLI. Open: spike S11 (real Claude/Codex logins: flags, recorded streams, start-up time), and the two acceptance runs that need a real subscription and a real API key |
 | [15 — Memory distiller](phases/15-memory-distiller.md) | Not started | Waits on Phase 14, [ADR 0036](adr/0036-local-memory-distiller.md) being accepted, and spike S12 |
 
 Open spikes:

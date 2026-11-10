@@ -168,3 +168,7 @@ Sessions are stored in the database. When the daemon starts, it probes every ses
 ## Run sessions
 
 Each workflow run also gets a session of kind `run`, whose workspace its steps share ([ADR 0010](../blueprint/docs/adr/0010-run-sessions.md)). `icaro session list --kind run` shows them.
+
+## Assistant sessions
+
+Each [workflow assistant](assistant.md) chat gets a session of kind `assist` ([ADR 0035](../blueprint/docs/adr/0035-workflow-assistant-chat.md)): a scratch workspace instead of a worktree, a container that idles between messages and stops after `assistant.idle_timeout`, and an MCP socket that serves the assistant's tools instead of memory. They have their own cap, `assistant.max_active`, and do not count against `sessions.max_active`. `icaro session list --kind assist` shows them; deleting the chat removes its session.

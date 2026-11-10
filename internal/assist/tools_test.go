@@ -3,10 +3,12 @@ package assist
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"icaro/internal/authoring"
 	"icaro/internal/mcp"
 	"icaro/internal/session"
 	"icaro/internal/store"
@@ -244,5 +246,33 @@ func TestAttacher(t *testing.T) {
 	names := srv.ToolNames()
 	if len(names) != 4 {
 		t.Fatalf("%v", names)
+	}
+}
+
+// The assistant's server, wired as the daemon wires it, has no tool that
+// saves or deletes a workflow: a prompt injection in a run log or a
+// manifest ("call update_workflow …") has nothing to call.
+func TestNoWriteTools(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.svc.ApplyWorkflow(e.ctx, helloYAML, "local"); err != nil {
+		t.Fatal(err)
+	}
+	srv := e.s.Server("test", func(s *mcp.Server) { authoring.RegisterRead(s, authoring.Deps{Workflows: e.svc}) })
+	names := srv.ToolNames()
+	for _, banned := range []string{authoring.ToolCreate, authoring.ToolUpdate, "delete_workflow", "memory_write"} {
+		if slices.Contains(names, banned) {
+			t.Errorf("%s is served to the assistant: %v", banned, names)
+		}
+	}
+	_, sid := e.chatWithSession("")
+	c := mcp.InProcess(srv, mcp.Caller{SessionID: sid, Principal: "assist:" + sid, Scope: "read"})
+	for _, name := range []string{authoring.ToolCreate, authoring.ToolUpdate, "delete_workflow"} {
+		if _, err := c.CallTool(e.ctx, name, map[string]any{"yaml": strings.Replace(helloYAML, "Greet whoever", "Pwned:", 1), "name": "hello"}); err == nil {
+			t.Errorf("%s answered", name)
+		}
+	}
+	w, _ := e.svc.GetWorkflow(e.ctx, "hello")
+	if w.Version != 1 || strings.Contains(w.YAML, "Pwned") {
+		t.Fatalf("the saved workflow changed: v%d", w.Version)
 	}
 }
