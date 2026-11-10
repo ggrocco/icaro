@@ -123,7 +123,7 @@
           "type": "string"
         },
         "image": {
-          "description": "Container image reference to run for this step (e.g. ghcr.io/icaro-dev/agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.",
+          "description": "Container image reference to run for this step (e.g. ghcr.io/ggrocco/icaro-agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.",
           "maxLength": 512,
           "minLength": 1,
           "type": "string"

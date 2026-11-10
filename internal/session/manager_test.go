@@ -268,7 +268,7 @@ func TestTwoSessionsOnTwoWorktrees(t *testing.T) {
 			t.Fatalf("missing mount %q in %s", want, joined)
 		}
 	}
-	if spec.Image != "ghcr.io/icaro-dev/agent-base:latest@sha256:abc" {
+	if spec.Image != "ghcr.io/ggrocco/icaro-agent-base:latest@sha256:abc" {
 		t.Fatal("image not pinned by digest: " + spec.Image)
 	}
 	// Memory and preview facets were attached.

@@ -6,8 +6,10 @@ name: release
 # Secrets: ICARO_SIGNING_KEY (base64 ed25519 seed), and optionally
 # HOMEBREW_TAP_TOKEN (without it the cask is not pushed to the tap).
 # Variables: ICARO_RELEASE_PUBKEY (base64 ed25519 public key).
-# The macOS app (ADR 0027) is signed and notarized when these secrets are
-# set, and signed ad hoc otherwise: MACOS_CERTIFICATE (base64 .p12 of a
+# The desktop app (ADR 0027) is attached for macOS (a universal Icaro.app)
+# and for Linux (a tarball per architecture). The macOS app is signed and
+# notarized when these secrets are set, and signed ad hoc otherwise:
+# MACOS_CERTIFICATE (base64 .p12 of a
 # "Developer ID Application" identity), MACOS_CERTIFICATE_PASSWORD,
 # APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password).
 #
@@ -102,7 +104,7 @@ jobs:
       - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           syft-version: v1.42.3
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: v2.5.2
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
@@ -211,6 +213,60 @@ jobs:
         with:
           subject-path: dist/*.zip
 
+  linux-app:
+    # The desktop app for Linux (ADR 0027), attached to the release as one
+    # tarball per architecture with a SHA-256 file and an ed25519 signature
+    # (go run ./hack/sign verify). It needs cgo and the system's GTK, so
+    # each architecture builds on its own runner. The runner image is
+    # pinned: the app runs on distributions at least as new as it.
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    environment: release
+    permissions:
+      contents: write     # upload to the release
+      id-token: write     # provenance
+      attestations: write # provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The bundled CLI embeds the web UI, as the released binaries do.
+      - run: make web
+      - name: GTK 4 and WebKitGTK 6 headers
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: build the tarball
+        env:
+          ICARO_RELEASE_PUBKEY: ${{ vars.ICARO_RELEASE_PUBKEY }}
+        run: |
+          tarball=$(desktop/build/package-linux.sh dist "$GITHUB_REF_NAME")
+          test "$(basename "$tarball")" = "Icaro_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}.tar.gz"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ICARO_SIGNING_KEY: ${{ secrets.ICARO_SIGNING_KEY }}
+        run: |
+          (cd dist && sha256sum "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256")
+          go run ./hack/sign sign -in "$TARBALL" -out "$TARBALL.sig"
+          gh release upload "$GITHUB_REF_NAME" "$TARBALL" "$TARBALL.sha256" "$TARBALL.sig" --clobber
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+
   agent-image:
     # The agent base image (architecture §5) referenced by the default
     # profiles. Override the name with the AGENT_IMAGE repository variable;
@@ -223,7 +279,7 @@ jobs:
       packages: write # push the agent base image to GHCR
       id-token: write # cosign keyless signing
     env:
-      IMAGE: ${{ vars.AGENT_IMAGE || 'ghcr.io/icaro-dev/agent-base' }}
+      IMAGE: ${{ vars.AGENT_IMAGE || 'ghcr.io/ggrocco/icaro-agent-base' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -236,7 +292,7 @@ jobs:
           done
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -250,10 +306,16 @@ jobs:
           push: true
           provenance: true
           sbom: true
+          # Links the GHCR package to this repository, which is what lets
+          # the workflow's GITHUB_TOKEN create it and push later versions.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}
             ${{ env.IMAGE }}:latest
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: v2.5.2
       - name: sign the image by digest (keyless)

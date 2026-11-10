@@ -67,6 +67,7 @@ upgrade:
 	go run ./hack/licenses -npm web -out web/THIRD_PARTY_LICENSES.md
 	cd desktop && go mod tidy
 	go run ./hack/licenses -dir desktop -goos darwin -pkg . -out THIRD_PARTY_LICENSES.md
+	go run ./hack/licenses -dir desktop -goos linux -pkg . -out THIRD_PARTY_LICENSES.linux.md
 
 # Tags the tip of origin/main as $(TAG) and pushes it, which starts the
 # release workflow (CONTRIBUTING.md#releases). DRY_RUN=1 only checks.
@@ -80,10 +81,11 @@ clean:
 
 # The desktop app (ADR 0027) is its own module under desktop/ and needs cgo:
 # Xcode command line tools on macOS, GTK 4 and WebKitGTK 6 headers on Linux
-# (libgtk-4-dev libwebkitgtk-6.0-dev). app-macos builds bin/Icaro.app.
+# (libgtk-4-dev libwebkitgtk-6.0-dev). app-macos builds bin/Icaro.app;
+# app-linux builds bin/Icaro_<version>_linux_<arch>.tar.gz.
 APP_BIN ?= bin/icaro-app
 
-.PHONY: app app-test app-macos
+.PHONY: app app-test app-macos app-linux
 app:
 	cd desktop && go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o ../$(APP_BIN) .
 
@@ -93,7 +95,10 @@ app-test:
 app-macos:
 	desktop/build/bundle.sh bin $(VERSION)
 
-AGENT_IMAGE ?= ghcr.io/icaro-dev/agent-base:$(VERSION)
+app-linux:
+	desktop/build/package-linux.sh bin $(VERSION)
+
+AGENT_IMAGE ?= ghcr.io/ggrocco/icaro-agent-base:$(VERSION)
 AGENT_ARCH  ?= $(shell go env GOARCH)
 
 # The agent base image embeds a static Linux icaro for internal commands.
