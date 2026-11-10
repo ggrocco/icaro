@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MCPSocket is where a session's memory MCP socket appears in its container.
@@ -89,7 +90,22 @@ func chatCodex(t ChatTurn) []string {
 	if t.ConversationID != "" {
 		cmd = append(cmd, "resume", t.ConversationID)
 	}
-	return append(cmd, "--json", "--skip-git-repo-check", "--sandbox", "read-only", "-c", `approval_policy="never"`, "-")
+	return append(cmd, "--json", "--skip-git-repo-check", "--sandbox", "read-only", "-c", `approval_policy="never"`,
+		"-c", fmt.Sprintf("mcp_servers.icaro.tool_timeout_sec=%d", int(ChatToolTimeout.Seconds())), "-")
+}
+
+// ChatToolTimeout is how long an assistant turn's CLI waits for one MCP
+// tool call. A gated call (run_workflow) waits for a person, so this must
+// outlast assistant.approval_timeout; the CLIs' defaults are much shorter
+// (Codex: 60 s).
+const ChatToolTimeout = 30 * time.Minute
+
+// ChatEnv is the environment of an assistant turn.
+func (a Agent) ChatEnv() []string {
+	if a.Name == "claude" {
+		return []string{fmt.Sprintf("MCP_TOOL_TIMEOUT=%d", ChatToolTimeout.Milliseconds())}
+	}
+	return nil
 }
 
 // HomeFiles reads and writes one session's home.

@@ -83,12 +83,15 @@ func (l Layout) Secrets() string { return filepath.Join(l.Root, "secrets") }
 // Previews holds generated compose overrides.
 func (l Layout) Previews() string { return filepath.Join(l.Root, "previews") }
 
+// Assist holds the workflow assistant's per-chat scratch directories.
+func (l Layout) Assist() string { return filepath.Join(l.Root, "assist") }
+
 // Skills holds skill bundles written by `icaro skill install`.
 func (l Layout) Skills() string { return filepath.Join(l.Root, "skills") }
 
 // PrivateDirs are created with 0700.
 func (l Layout) PrivateDirs() []string {
-	return []string{l.Root, l.RunDir(), l.ConfigDir(), l.Logs(), l.Homes(), l.Worktrees(), l.Repos(), l.Runs(), l.Integrations(), l.Secrets(), l.Previews()}
+	return []string{l.Root, l.RunDir(), l.ConfigDir(), l.Logs(), l.Homes(), l.Worktrees(), l.Repos(), l.Runs(), l.Integrations(), l.Secrets(), l.Previews(), l.Assist()}
 }
 
 // Ensure creates the private directories and tightens their mode.

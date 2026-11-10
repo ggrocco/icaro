@@ -42,6 +42,7 @@ type Config struct {
 	Workflows WorkflowsConfig          `yaml:"workflows"`
 	Previews  PreviewsConfig           `yaml:"previews"`
 	Memory    MemoryConfig             `yaml:"memory"`
+	Assistant AssistantConfig          `yaml:"assistant"`
 	Webhooks  WebhooksConfig           `yaml:"webhooks"`
 	// Integrations holds user-owned per-integration settings; a pack can
 	// never grant itself these.
@@ -170,6 +171,43 @@ type MemoryConfig struct {
 	Preamble string `yaml:"preamble"`
 }
 
+// AssistantConfig tunes the workflow assistant chat (ADR 0035).
+type AssistantConfig struct {
+	// Profile runs the assistant's agent CLI; empty picks the first
+	// profile (by name) whose agent is claude, then codex.
+	Profile string `yaml:"profile"`
+	// MaxActive caps assistant containers running at once; a chat over
+	// the cap waits as queued.
+	MaxActive int `yaml:"max_active"`
+	// IdleTimeout stops a chat's container after this long without a turn.
+	IdleTimeout time.Duration `yaml:"idle_timeout"`
+	// TurnTimeout bounds one turn.
+	TurnTimeout time.Duration `yaml:"turn_timeout"`
+	// ApprovalTimeout is how long a gated call waits for a person.
+	ApprovalTimeout time.Duration `yaml:"approval_timeout"`
+}
+
+// AssistantProfile returns the profile the assistant runs under, or ""
+// when no profile has an agent with a headless chat mode.
+func (c *Config) AssistantProfile() string {
+	if c.Assistant.Profile != "" {
+		return c.Assistant.Profile
+	}
+	names := make([]string, 0, len(c.Profiles))
+	for n := range c.Profiles {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	for _, agent := range []string{"claude", "codex"} {
+		for _, n := range names {
+			if c.Profiles[n].Agent == agent {
+				return n
+			}
+		}
+	}
+	return ""
+}
+
 // WebhooksConfig bounds inbound webhooks.
 type WebhooksConfig struct {
 	MaxBodyBytes int64         `yaml:"max_body_bytes"`
@@ -220,30 +258,34 @@ func DefaultProfiles() map[string]ProfileConfig {
 // Defaults returns the baseline configuration as flat keys.
 func Defaults() map[string]any {
 	return map[string]any{
-		"version":                  CurrentVersion,
-		"home":                     paths.Default().Root,
-		"database.driver":          "sqlite",
-		"daemon.ui_listen":         "127.0.0.1:8787",
-		"limits.timeout":           "30m",
-		"limits.memory_mb":         2048,
-		"limits.cpus":              2.0,
-		"limits.pids":              512,
-		"limits.nofile":            4096,
-		"sessions.max_active":      0,
-		"sessions.default_profile": "claude",
-		"workflows.concurrency":    4,
-		"workflows.profile":        "workflow",
-		"previews.enabled":         true,
-		"previews.http_port":       8780,
-		"previews.traefik_image":   "traefik:v3.1",
-		"previews.debounce":        "2s",
-		"memory.preamble":          DefaultPreamble,
-		"webhooks.max_body_bytes":  1 << 20,
-		"webhooks.max_skew":        "5m",
-		"webhooks.rate_per_min":    120,
-		"webhooks.retention":       "720h",
-		"webhooks.max_rejected":    1000,
-		"usage.timezone":           "Local",
+		"version":                    CurrentVersion,
+		"home":                       paths.Default().Root,
+		"database.driver":            "sqlite",
+		"daemon.ui_listen":           "127.0.0.1:8787",
+		"limits.timeout":             "30m",
+		"limits.memory_mb":           2048,
+		"limits.cpus":                2.0,
+		"limits.pids":                512,
+		"limits.nofile":              4096,
+		"sessions.max_active":        0,
+		"sessions.default_profile":   "claude",
+		"workflows.concurrency":      4,
+		"workflows.profile":          "workflow",
+		"previews.enabled":           true,
+		"previews.http_port":         8780,
+		"previews.traefik_image":     "traefik:v3.1",
+		"previews.debounce":          "2s",
+		"memory.preamble":            DefaultPreamble,
+		"assistant.max_active":       2,
+		"assistant.idle_timeout":     "15m",
+		"assistant.turn_timeout":     "10m",
+		"assistant.approval_timeout": "5m",
+		"webhooks.max_body_bytes":    1 << 20,
+		"webhooks.max_skew":          "5m",
+		"webhooks.rate_per_min":      120,
+		"webhooks.retention":         "720h",
+		"webhooks.max_rejected":      1000,
+		"usage.timezone":             "Local",
 	}
 }
 
@@ -431,6 +473,21 @@ func (c *Config) Validate() error {
 	}
 	if _, ok := c.Profiles[c.Workflows.Profile]; !ok {
 		errs = append(errs, fmt.Errorf("workflows.profile %q is not a profile", c.Workflows.Profile))
+	}
+	if p := c.Assistant.Profile; p != "" {
+		if prof, ok := c.Profiles[p]; !ok {
+			errs = append(errs, fmt.Errorf("assistant.profile %q is not a profile", p))
+		} else if prof.Agent != "claude" && prof.Agent != "codex" {
+			errs = append(errs, fmt.Errorf("assistant.profile %q runs agent %q; the assistant needs claude or codex", p, prof.Agent))
+		}
+	}
+	if c.Assistant.MaxActive < 1 {
+		errs = append(errs, errors.New("assistant.max_active must be >= 1"))
+	}
+	for key, d := range map[string]time.Duration{"idle_timeout": c.Assistant.IdleTimeout, "turn_timeout": c.Assistant.TurnTimeout, "approval_timeout": c.Assistant.ApprovalTimeout} {
+		if d <= 0 {
+			errs = append(errs, fmt.Errorf("assistant.%s must be > 0", key))
+		}
 	}
 	return errors.Join(errs...)
 }

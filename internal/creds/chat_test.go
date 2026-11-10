@@ -51,7 +51,7 @@ func TestChatCommandClaude(t *testing.T) {
 func TestChatCommandCodex(t *testing.T) {
 	a, _ := LookupAgent("codex")
 	first, _ := a.ChatCommand(ChatTurn{NewID: "ignored"})
-	if got := strings.Join(first, " "); got != `codex exec --json --skip-git-repo-check --sandbox read-only -c approval_policy="never" -` {
+	if got := strings.Join(first, " "); got != `codex exec --json --skip-git-repo-check --sandbox read-only -c approval_policy="never" -c mcp_servers.icaro.tool_timeout_sec=1800 -` {
 		t.Errorf("first turn %q", got)
 	}
 	next, _ := a.ChatCommand(ChatTurn{ConversationID: "t1"})
@@ -67,5 +67,16 @@ func TestChatCommandShell(t *testing.T) {
 	}
 	if _, err := a.ChatCommand(ChatTurn{}); !errors.Is(err, ErrNoChat) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestChatEnv(t *testing.T) {
+	c, _ := LookupAgent("claude")
+	if env := c.ChatEnv(); len(env) != 1 || env[0] != "MCP_TOOL_TIMEOUT=1800000" {
+		t.Errorf("claude env %v", env)
+	}
+	x, _ := LookupAgent("codex")
+	if env := x.ChatEnv(); env != nil {
+		t.Errorf("codex env %v", env)
 	}
 }

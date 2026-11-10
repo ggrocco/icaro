@@ -48,7 +48,7 @@ func TestFixtures(t *testing.T) {
 			got = append(got, '\n')
 			golden := strings.TrimSuffix(f, ".jsonl") + ".golden"
 			if *update {
-				if err := os.WriteFile(golden, got, 0o644); err != nil {
+				if err := os.WriteFile(golden, got, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

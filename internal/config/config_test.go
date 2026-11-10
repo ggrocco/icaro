@@ -311,3 +311,49 @@ func TestLoadTypesEveryLayer(t *testing.T) {
 		t.Fatalf("a mistyped value is an error naming it: %v", err)
 	}
 }
+
+func TestAssistantConfig(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Assistant.MaxActive != 2 || cfg.Assistant.IdleTimeout != 15*time.Minute || cfg.Assistant.TurnTimeout != 10*time.Minute || cfg.Assistant.ApprovalTimeout != 5*time.Minute {
+		t.Fatalf("defaults %+v", cfg.Assistant)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// The first claude profile by name wins, then codex.
+	cfg.Profiles = map[string]ProfileConfig{"zed": {Agent: "claude", Egress: []string{}}, "alpha": {Agent: "codex", Egress: []string{}}, "beta": {Agent: "claude", Egress: []string{}}}
+	if got := cfg.AssistantProfile(); got != "beta" {
+		t.Fatalf("auto profile %q", got)
+	}
+	cfg.Profiles = map[string]ProfileConfig{"alpha": {Agent: "codex"}, "sh": {}}
+	if got := cfg.AssistantProfile(); got != "alpha" {
+		t.Fatalf("codex fallback %q", got)
+	}
+	cfg.Profiles = map[string]ProfileConfig{"sh": {}}
+	if got := cfg.AssistantProfile(); got != "" {
+		t.Fatalf("no chat agent %q", got)
+	}
+	cfg.Assistant.Profile = "pinned"
+	if got := cfg.AssistantProfile(); got != "pinned" {
+		t.Fatalf("explicit %q", got)
+	}
+
+	cfg, _ = Load("")
+	cfg.Assistant = AssistantConfig{Profile: "ghost"}
+	err = cfg.Validate()
+	for _, want := range []string{`assistant.profile "ghost" is not a profile`, "assistant.max_active", "assistant.idle_timeout", "assistant.turn_timeout", "assistant.approval_timeout"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+	cfg, _ = Load("")
+	cfg.Profiles["plain"] = ProfileConfig{Egress: []string{}}
+	cfg.Assistant.Profile = "plain"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "needs claude or codex") {
+		t.Errorf("shell profile accepted: %v", err)
+	}
+}

@@ -55,6 +55,9 @@ type Fake struct {
 	Images     map[string]bool
 	PullErr    error
 	OnStart    func(c *FakeContainer) Behavior
+	// OnExec runs an exec's command; Execs records every exec.
+	OnExec func(ctx context.Context, o ExecOptions, stdout, stderr io.Writer) (int, error)
+	Execs  []FakeExec
 }
 
 // NewFake returns an empty fake engine.

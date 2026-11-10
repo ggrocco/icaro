@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -239,5 +240,30 @@ func TestSecretsNeverReturnedAndReadOnlyScope(t *testing.T) {
 	}
 	if err := e.client.Call(e.ctx, "resources/read", map[string]any{"uri": "icaro://schemas/workflow"}, &res); err != nil || len(res.Contents) == 0 || !strings.Contains(res.Contents[0].Text, "steps") {
 		t.Fatalf("schema resource: %v %+v", err, res)
+	}
+}
+
+func TestRegisterRead(t *testing.T) {
+	srv := mcp.NewServer("icaro", "test", "")
+	RegisterRead(srv, Deps{Workflows: &fakeWorkflows{}})
+	got := srv.ToolNames()
+	want := append([]string(nil), ReadTools...)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("tools %v, want %v", got, want)
+	}
+	for _, w := range []string{ToolCreate, ToolUpdate, ToolRun} {
+		if slices.Contains(got, w) {
+			t.Errorf("%s is served", w)
+		}
+	}
+	c := mcp.InProcess(srv, mcp.Caller{Scope: "write"})
+	if _, err := c.CallTool(context.Background(), ToolCreate, map[string]any{"yaml": "name: x"}); err == nil {
+		t.Error("create_workflow answered")
+	}
+	all := mcp.NewServer("icaro", "test", "")
+	Register(all, Deps{Workflows: &fakeWorkflows{}})
+	if len(all.ToolNames()) != len(ReadTools)+3 {
+		t.Errorf("full set %v", all.ToolNames())
 	}
 }
