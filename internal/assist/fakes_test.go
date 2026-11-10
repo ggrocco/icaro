@@ -17,6 +17,7 @@ import (
 	"icaro/internal/container/docker"
 	"icaro/internal/crypto"
 	"icaro/internal/mcp"
+	"icaro/internal/memory"
 	"icaro/internal/secrets"
 	"icaro/internal/service"
 	"icaro/internal/session"
@@ -238,6 +239,7 @@ type env struct {
 	cfg  *config.Config
 	mcp  *mcp.Server
 	bus  *events.Bus
+	mem  *memory.Engine
 }
 
 func newEnv(t *testing.T, mods ...func(*config.Config)) *env {
@@ -271,6 +273,9 @@ func newEnv(t *testing.T, mods ...func(*config.Config)) *env {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	bus := events.New(ctx)
 	fake := docker.NewFake()
+	fake.OnStart = func(*docker.FakeContainer) docker.Behavior {
+		return docker.Behavior{Stdout: "hi\n", Output: []byte(`{"greeting":"hi"}`)}
+	}
 	eng := engine.New(engine.Config{
 		Concurrency: 2, StepTimeout: time.Minute, LogsDir: t.TempDir(), RunsDir: t.TempDir(),
 		RetryBase: time.Millisecond, PollInterval: 10 * time.Millisecond, Heartbeat: 20 * time.Millisecond,
@@ -280,11 +285,12 @@ func newEnv(t *testing.T, mods ...func(*config.Config)) *env {
 	svc.SetRunner(eng)
 	svc.SetSecrets(sec)
 	sess := newFakeSessions()
+	mem := memory.New(st, quiet, "test")
 	s := New(Options{Store: st, Config: cfg, Sessions: sess, Workflows: svc, Secrets: sec, Events: bus, Log: quiet,
-		LogsDir: filepath.Join(t.TempDir(), "assist"), Poll: 5 * time.Millisecond})
+		LogsDir: filepath.Join(t.TempDir(), "assist"), Poll: 5 * time.Millisecond, Memories: mem})
 	go func() { _ = s.Run(ctx) }()
 	<-s.started
-	e := &env{t: t, ctx: ctx, s: s, st: st, sess: sess, svc: svc, sec: sec, cfg: cfg, bus: bus}
+	e := &env{t: t, ctx: ctx, s: s, st: st, sess: sess, svc: svc, sec: sec, cfg: cfg, bus: bus, mem: mem}
 	e.mcp = s.Server("test", nil)
 	return e
 }

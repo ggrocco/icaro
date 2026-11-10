@@ -61,7 +61,10 @@ type Options struct {
 	Workflows Workflows
 	Secrets   SecretValues // optional
 	Events    *events.Bus  // optional
-	Log       *slog.Logger
+	// Memories gives new conversations notes from earlier chats and
+	// stores what the distiller writes (ADR 0036); optional.
+	Memories Memories
+	Log      *slog.Logger
 	// LogsDir holds one append-only JSONL log per chat.
 	LogsDir string
 	// Now is the clock (tests).
@@ -85,6 +88,8 @@ type Service struct {
 	waiters *owned[chan string]
 	base    context.Context
 	started chan struct{}
+	// distiller is set by NewDistiller; chats are queued on it when idle.
+	distiller *Distiller
 }
 
 // New builds a Service; call Run before using it.
@@ -554,6 +559,8 @@ func (s *Service) Delete(ctx context.Context, chatID string) error {
 	if err := s.o.Store.DeleteChat(ctx, chatID); err != nil {
 		return err
 	}
+	// The memories it left stay: they are knowledge, not the chat.
+	_ = s.o.Store.DeleteDistill(ctx, chatID)
 	_ = os.Remove(s.logPath(chatID))
 	return nil
 }
