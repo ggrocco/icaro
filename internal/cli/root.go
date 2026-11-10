@@ -16,6 +16,7 @@ import (
 	"icaro/internal/apiclient"
 	"icaro/internal/config"
 	"icaro/internal/daemon"
+	"icaro/internal/platform"
 )
 
 // version is set at build time via -ldflags.
@@ -81,7 +82,39 @@ func newRootCmd() *cobra.Command {
 	for _, f := range commandFactories {
 		root.AddCommand(f(opts))
 	}
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error { return requireHost(cmd) }
 	return root
+}
+
+// daemonSupported reports whether the daemon runs on this platform
+// (replaced in tests).
+var daemonSupported = platform.DaemonSupported
+
+// errClientOnly explains the Windows build (ADR 0039).
+const errClientOnly = "on Windows icaro is a client of a daemon running elsewhere (WSL2, Linux or macOS): "
+
+// hostOnly are the commands that act on the daemon's own machine: they
+// run the daemon, open its database, or exec into its containers through
+// the local Docker engine. The rest go through the API and work against a
+// remote daemon.
+var hostOnly = map[string]bool{
+	"icaro serve": true, "icaro service": true, "icaro init": true, "icaro setup": true,
+	"icaro migrate": true, "icaro token": true, "icaro doctor": true, "icaro update": true,
+	"icaro usage": true, "icaro sh": true, "icaro claude": true, "icaro codex": true,
+	"icaro login": true, "icaro session attach": true,
+}
+
+// requireHost refuses a host-only command where no daemon can run.
+func requireHost(cmd *cobra.Command) error {
+	if daemonSupported() {
+		return nil
+	}
+	for c := cmd; c != nil; c = c.Parent() {
+		if hostOnly[c.CommandPath()] {
+			return fmt.Errorf(errClientOnly+"run %q on the machine that runs the daemon", c.CommandPath())
+		}
+	}
+	return nil
 }
 
 // loadConfig resolves configuration for commands that need it.
@@ -125,6 +158,9 @@ func (o *rootOpts) client(ctx context.Context) (*apiclient.Client, error) {
 			return nil, errors.New("daemon.url is set but no token: set daemon.token or ICARO_DAEMON__TOKEN")
 		}
 		return apiclient.New(cfg.Daemon.URL, cfg.Daemon.Token), nil
+	}
+	if !daemonSupported() {
+		return nil, errors.New(errClientOnly + "set daemon.url and daemon.token (ICARO_DAEMON__URL, ICARO_DAEMON__TOKEN)")
 	}
 	l := cfg.Layout()
 	if err := daemon.EnsureRunning(ctx, l, o.daemonArgs()); err != nil {

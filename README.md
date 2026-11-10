@@ -43,7 +43,7 @@ These captures use local demo workflows. See the [screenshot notes](docs/images/
 
 ## Get started
 
-You need **macOS or Linux**, **Git**, and a **running Docker engine** (Docker Desktop on macOS). Agent sessions also need access to the provider you choose. The release installer requires OpenSSL 3.0+ to verify signatures.
+You need **macOS or Linux**, **Git**, and a **running Docker engine** (Docker Desktop on macOS). On **Windows**, run Ícaro inside WSL2, or use `icaro.exe` as a client of a daemon running elsewhere ([Windows](docs/windows.md)). Agent sessions also need access to the provider you choose. The release installer requires OpenSSL 3.0+ to verify signatures.
 
 ### 1. Install and initialize
 

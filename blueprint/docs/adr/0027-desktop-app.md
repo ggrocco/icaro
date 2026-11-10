@@ -89,7 +89,8 @@ Clicking a notification opens the run, or starts the daemon. Only those non-dest
 **Bundle and release.**
 - `Icaro.app` contains universal `icaro-app` and `icaro` binaries. It sets `LSUIElement` (no Dock icon), uses the bundle id `dev.icaro.app`, and builds its icon from `desktop/icons/app.png`.
 - The release job builds the bundle on a macOS runner. With the Developer ID secrets, it signs with the hardened runtime and a timestamp, then notarizes and staples. Without them, it signs ad hoc and posts a warning.
-- The zip ships with a SHA-256 file and the same ed25519 signature as `checksums.txt`.
+- The app is attached as a zip and as a disk image with a link to `/Applications` ([`dmg.sh`](../../../desktop/build/dmg.sh)). The image is built after the app is stapled, then signed, notarized and stapled itself when the secrets are set.
+- Each ships with a SHA-256 file and the same ed25519 signature as `checksums.txt`.
 - For Linux, a release job builds `Icaro_<version>_linux_<arch>.tar.gz` on a native runner for each of amd64 and arm64 ([`package-linux.sh`](../../../desktop/build/package-linux.sh)). The tarball is laid out as an install prefix and is extracted into `~/.local`:
   - `bin/icaro-app` and the `icaro` CLI next to it, where the app looks first;
   - a `dev.icaro.app.desktop` launcher entry and a scalable icon;
