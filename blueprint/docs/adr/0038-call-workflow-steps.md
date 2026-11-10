@@ -118,4 +118,4 @@ This ADR adds **no** way for a running step to start a workflow. A child is star
 - Parked callers keep slots free, so nested calls do not deadlock the engine. A tree of runs still uses one run session and container set per active run.
 - New schema: the `call` step form, the `call` trigger type and workflow-level `outputs` (drift-tested against [the contract](../schemas/workflow.schema.json)). New config: `workflows.max_call_depth` and `workflows.max_runs_per_root`. The existing lineage columns get used, and step runs gain the child run id and version.
 - A child's edit changes every caller's next run. Validation of the callers catches broken inputs and outputs only when they are validated or run. The child's page lists its callers, and `icaro workflow validate` on a child also validates the workflows that call it.
-- Implementation would be a new phase: schema and validation (cycles, inputs, outputs), the engine's enqueue, park, wake and outcome mapping, cancellation down the tree, the brakes, re-run pinning, the clients' tree views, the skill, and docs.
+- Implementation is [Phase 17](../phases/17-call-steps.md).
