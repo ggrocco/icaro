@@ -129,4 +129,4 @@ Pass: git and at least one API client work, with the token never visible in the 
 - New code in the daemon: the `github-app` provider (JWT, minting, cache, revocation), the setup callback, the installations record, and a second relay target in the injector. This is security-boundary code ([03-security](../03-security.md)), reviewed as such.
 - Manifest schema v1 gains `github-app`, the per-action `app` block and `auth` lists. The schema and its drift test change, and third-party packs can declare the kind but only ever reach their own integration's credentials.
 - The App's private key is the most powerful credential Ícaro holds: it can act on every repository of every installation. It is stored like other secrets, host-bound, never sent anywhere but the bound host, and `icaro doctor` warns when its binding is wrong or an installation is suspended.
-- Implementation would be a new phase: the provider and manifest changes first, then setup, then step access after S13.
+- Implementation is [Phase 18](../phases/18-github-app.md): the provider and manifest changes first, then setup, then step access after S13.
