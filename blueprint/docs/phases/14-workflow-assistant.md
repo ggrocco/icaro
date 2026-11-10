@@ -2,7 +2,7 @@
 
 **Objective:** a chat beside the workflow editor that drives the profile's own agent CLI headless, under the user's subscription login or an `inject` API key, and authors workflows through the MCP tools, as proposed in [ADR 0035](../adr/0035-workflow-assistant-chat.md).
 
-**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0035 **accepted**, with its open questions settled, and spike **S11** passed.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0035 **accepted** (done, with its questions settled). Spike **S11** needs real subscription logins: the phase is built against fixtures modeled on the CLIs' documented stream formats, and S11 must pass, with its recorded fixtures replacing the modeled ones, before the assistant is released.
 
 ## Spike S11 — headless chat on a subscription login
 

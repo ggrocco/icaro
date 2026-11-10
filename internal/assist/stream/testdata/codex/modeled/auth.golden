@@ -1,0 +1,10 @@
+{
+  "events": [
+    {
+      "kind": "auth_required",
+      "text": "unexpected status 401 Unauthorized: please log in again"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "auth_required"
+}

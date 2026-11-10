@@ -1,0 +1,21 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "c0ffee"
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "kind": "auth_required",
+      "text": "Invalid API key · Please run /login"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "auth_required"
+}

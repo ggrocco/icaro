@@ -1,0 +1,28 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "9a1b"
+    },
+    {
+      "kind": "text",
+      "text": "Hel"
+    },
+    {
+      "kind": "text",
+      "text": "lo."
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 3,
+        "output": 2
+      }
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "done"
+}

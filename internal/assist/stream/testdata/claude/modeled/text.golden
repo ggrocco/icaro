@@ -1,0 +1,27 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "3f0c6b2e-8a51-4c1e-9d7a-0d9f1a2b3c4d"
+    },
+    {
+      "kind": "text",
+      "text": "Hi! Tell me what the workflow should do."
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 1200,
+        "output": 9,
+        "cache_read": 800,
+        "cache_write": 40,
+        "cost_usd": 0.0012
+      }
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "done"
+}
