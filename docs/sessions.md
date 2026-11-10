@@ -46,17 +46,17 @@ A profile picks the agent, the image, the egress allowlist and any extra mounts.
 profiles:
   claude:
     agent: claude
-    image: ghcr.io/icaro-dev/agent-base:latest
+    image: ghcr.io/ggrocco/icaro-agent-base:latest
     egress: [api.anthropic.com, console.anthropic.com, claude.ai, statsig.anthropic.com]
   codex:
     agent: codex
-    image: ghcr.io/icaro-dev/agent-base:latest
+    image: ghcr.io/ggrocco/icaro-agent-base:latest
     egress: [api.openai.com, auth.openai.com, chatgpt.com]
   shell:
-    image: ghcr.io/icaro-dev/agent-base:latest
+    image: ghcr.io/ggrocco/icaro-agent-base:latest
     egress: []
   workflow:                       # used by workflow image steps (workflows.profile)
-    image: ghcr.io/icaro-dev/agent-base:latest
+    image: ghcr.io/ggrocco/icaro-agent-base:latest
     egress: []
 sessions:
   default_profile: claude

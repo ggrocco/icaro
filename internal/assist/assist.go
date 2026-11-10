@@ -114,18 +114,20 @@ func (s *Service) Name() string { return "assistant" }
 // and approvals they waited on are expired.
 func (s *Service) Run(ctx context.Context) error {
 	s.base = ctx
-	close(s.started)
+	// Approvals first: once a turn reads as interrupted, no card it left
+	// can still be approved.
+	if _, err := s.o.Store.ExpireChatApprovals(ctx); err != nil {
+		s.o.Log.Error("assistant: expire approvals", "err", err)
+	}
 	n, err := s.o.Store.InterruptChatTurns(ctx, "the daemon restarted during this turn; retry it")
 	if err != nil {
 		s.o.Log.Error("assistant: interrupt turns", "err", err)
-	}
-	if _, err := s.o.Store.ExpireChatApprovals(ctx); err != nil {
-		s.o.Log.Error("assistant: expire approvals", "err", err)
 	}
 	if n > 0 {
 		s.o.Log.Info("assistant: interrupted turns lost in a restart", "turns", n)
 		go s.killLeftovers(ctx)
 	}
+	close(s.started) // recovered
 	<-ctx.Done()
 	var all []*actor
 	s.actors.do(func(m map[string]*actor) {

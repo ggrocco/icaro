@@ -285,9 +285,25 @@ jobs:
           make app-macos
           bin/Icaro.app/Contents/MacOS/icaro version
           bin/Icaro.app/Contents/MacOS/icaro-app --version
-      - name: Go module licenses (the macOS app)
+      # The tarball a release attaches (release.yml, linux-app), installed
+      # into a scratch prefix the way docs/desktop.md says to.
+      - name: Linux tarball
         if: runner.os == 'Linux'
-        run: go run ./hack/licenses -dir desktop -goos darwin -pkg . -out THIRD_PARTY_LICENSES.md -check
+        run: |
+          sudo apt-get install -y desktop-file-utils
+          tarball=$(desktop/build/package-linux.sh "$RUNNER_TEMP/dist" v0.0.0-ci)
+          mkdir "$RUNNER_TEMP/prefix"
+          tar -xzf "$tarball" --strip-components=1 -C "$RUNNER_TEMP/prefix"
+          "$RUNNER_TEMP/prefix/bin/icaro" version
+          "$RUNNER_TEMP/prefix/bin/icaro-app" --version
+          desktop-file-validate "$RUNNER_TEMP/prefix/share/applications/dev.icaro.app.desktop"
+          test -s "$RUNNER_TEMP/prefix/share/icons/hicolor/scalable/apps/dev.icaro.app.svg"
+          test -s "$RUNNER_TEMP/prefix/share/doc/icaro-app/THIRD_PARTY_LICENSES.md"
+      - name: Go module licenses (the macOS and Linux apps)
+        if: runner.os == 'Linux'
+        run: |
+          go run ./hack/licenses -dir desktop -goos darwin -pkg . -out THIRD_PARTY_LICENSES.md -check
+          go run ./hack/licenses -dir desktop -goos linux -pkg . -out THIRD_PARTY_LICENSES.linux.md -check
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: runner.os == 'Linux'
         with:
