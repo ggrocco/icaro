@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type Me } from "./api";
 import { ErrorBox, Loading, PageHeader, useLoad } from "./components/common";
 import { Icon, Logo, type IconName } from "./components/icons";
+import { Assistant, AssistantChat } from "./pages/Assistant";
 import { Editor } from "./pages/Editor";
 import { Hosts } from "./pages/Hosts";
 import { Deliveries, Integrations, ManifestEditor } from "./pages/Integrations";
@@ -29,6 +30,7 @@ function Shell({ me }: { me: Me }) {
   const [section, a, b] = route;
   const nav: [string, string, IconName][] = [
     ["workflows", "Workflows", "workflows"],
+    ["assistant", "Assistant", "assistant"],
     ["runs", "Runs", "runs"],
     ["deliveries", "Deliveries", "deliveries"],
     ["integrations", "Integrations", "integrations"],
@@ -89,6 +91,8 @@ function Shell({ me }: { me: Me }) {
             <Editor />
           </section>
         )}
+        {section === "assistant" && !a && <Assistant />}
+        {section === "assistant" && a && <AssistantChat id={a} />}
         {section === "runs" && !a && <AllRuns />}
         {section === "runs" && a && <RunDetail id={a} />}
         {section === "deliveries" && <Deliveries />}
@@ -96,7 +100,7 @@ function Shell({ me }: { me: Me }) {
         {section === "integrations" && a && <ManifestEditor name={a} />}
         {section === "hosts" && <Hosts />}
         {section === "usage" && <Usage since={a} />}
-        {!["workflows", "new", "runs", "deliveries", "integrations", "hosts", "usage"].includes(section) && <p>Page not found.</p>}
+        {!["workflows", "new", "assistant", "runs", "deliveries", "integrations", "hosts", "usage"].includes(section) && <p>Page not found.</p>}
       </main>
     </div>
   );

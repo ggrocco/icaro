@@ -52,6 +52,25 @@ func TestDraftTools(t *testing.T) {
 	if _, err := e.svc.GetWorkflow(e.ctx, "hello"); err == nil {
 		t.Fatal("propose_workflow saved a workflow")
 	}
+	// The person accepts and saves: the version is attributed to them via
+	// the chat.
+	w, err := e.s.Apply(e.ctx, empty.ID, helloYAML, "token:alice")
+	if err != nil || w.Name != "hello" || w.Version != 1 {
+		t.Fatal(w, err)
+	}
+	vs, _ := e.svc.ListWorkflowVersions(e.ctx, "hello")
+	if len(vs) != 1 || vs[0].Actor != "token:alice via assistant "+empty.ID {
+		t.Fatalf("versions %+v", vs)
+	}
+	if c, _ := e.st.GetChat(e.ctx, empty.ID); c.Workflow != "hello" {
+		t.Fatalf("chat workflow %q", c.Workflow)
+	}
+	if _, err := e.s.Apply(e.ctx, empty.ID, "name: [", ""); err == nil {
+		t.Fatal("an invalid document was saved")
+	}
+	if _, err := e.s.Apply(e.ctx, "nope", helloYAML, "x"); err != ErrNotFound {
+		t.Fatal(err)
+	}
 	// The person's edit is what get_draft returns next.
 	if d, err := e.s.PutDraft(e.ctx, empty.ID, helloYAML+"# edited\n"); err != nil || d.Source != "user" || d.Version != 3 {
 		t.Fatal(d, err)

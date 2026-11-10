@@ -43,6 +43,7 @@ type Sessions interface {
 // Workflows is the part of the service layer the chat's tools use.
 type Workflows interface {
 	ValidateWorkflow(ctx context.Context, yaml string) (*workflow.Spec, workflow.Issues, error)
+	ApplyWorkflow(ctx context.Context, yaml, actor string) (*service.WorkflowInfo, error)
 	GetWorkflow(ctx context.Context, name string) (*service.WorkflowInfo, error)
 	StartRun(ctx context.Context, name string, trigger map[string]any, actor string) (*service.RunInfo, error)
 }
@@ -472,6 +473,25 @@ func (s *Service) putDraft(ctx context.Context, chatID, yaml, source string) (*D
 	info := draftInfo(d)
 	s.actor(chatID).append(entry{Type: EntryDraft, Draft: &DraftEntry{Version: d.Version, Source: source, Issues: len(issues)}})
 	return info, nil
+}
+
+// Apply saves yaml, the person's editor document after they accepted the
+// assistant's proposal, as a new workflow version attributed to them via
+// this chat ("<actor> via assistant <chat>"), and notes it in the chat.
+func (s *Service) Apply(ctx context.Context, chatID, yaml, actor string) (*service.WorkflowInfo, error) {
+	if _, err := s.chat(ctx, chatID); err != nil {
+		return nil, err
+	}
+	if actor == "" {
+		actor = "someone"
+	}
+	w, err := s.o.Workflows.ApplyWorkflow(ctx, yaml, actor+" via assistant "+chatID)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.o.Store.SetChatField(ctx, chatID, store.ChatWorkflow, w.Name)
+	s.actor(chatID).append(entry{Type: EntryStatus, Note: fmt.Sprintf("Saved as %s v%d.", w.Name, w.Version)})
+	return w, nil
 }
 
 // Decide approves or declines a gated call.

@@ -24,6 +24,7 @@ type Chats interface {
 	Cancel(ctx context.Context, chatID string) error
 	PutDraft(ctx context.Context, chatID, yaml string) (*assist.DraftInfo, error)
 	Decide(ctx context.Context, chatID, approvalID string, approve bool, actor string) (*assist.ApprovalInfo, error)
+	Apply(ctx context.Context, chatID, yaml, actor string) (*service.WorkflowInfo, error)
 	Delete(ctx context.Context, chatID string) error
 	Entries(ctx context.Context, chatID string, offset int64) ([]assist.LogLine, int64, error)
 }
@@ -42,6 +43,7 @@ func RegisterChats(s *Server, c Chats, bus *events.Bus) {
 	m.Handle("POST /api/v1/chats/{id}/messages/{msg}/retry", s.Auth(store.ScopeWrite, h.retry))
 	m.Handle("POST /api/v1/chats/{id}/cancel", s.Auth(store.ScopeWrite, h.cancel))
 	m.Handle("PUT /api/v1/chats/{id}/draft", s.Auth(store.ScopeWrite, h.draft))
+	m.Handle("POST /api/v1/chats/{id}/apply", s.Auth(store.ScopeWrite, h.apply))
 	m.Handle("POST /api/v1/chats/{id}/approvals/{approval}/approve", s.Auth(store.ScopeWrite, h.decide(true)))
 	m.Handle("POST /api/v1/chats/{id}/approvals/{approval}/decline", s.Auth(store.ScopeWrite, h.decide(false)))
 	m.Handle("GET /api/v1/chats/{id}/events", s.Auth(store.ScopeRead, h.events))
@@ -155,6 +157,24 @@ func (h *chatHandlers) draft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, d)
+}
+
+// apply saves the editor's document as a workflow version attributed to
+// the person via this chat.
+func (h *chatHandlers) apply(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		YAML string `json:"yaml"`
+	}
+	if err := ReadJSON(r, &in); err != nil {
+		h.fail(w, err)
+		return
+	}
+	wf, err := h.c.Apply(r.Context(), r.PathValue("id"), in.YAML, actor(r))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, wf)
 }
 
 func (h *chatHandlers) decide(approve bool) http.HandlerFunc {

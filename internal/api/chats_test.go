@@ -79,6 +79,13 @@ func (f *fakeChats) Decide(_ context.Context, id, ap string, approve bool, actor
 
 func (f *fakeChats) Delete(_ context.Context, id string) error { return f.rec("delete " + id) }
 
+func (f *fakeChats) Apply(_ context.Context, id, yaml, actor string) (*service.WorkflowInfo, error) {
+	if err := f.rec("apply " + id + " " + yaml + " " + actor); err != nil {
+		return nil, err
+	}
+	return &service.WorkflowInfo{Name: "hello", Version: 1}, nil
+}
+
 func (f *fakeChats) Entries(_ context.Context, _ string, offset int64) ([]assist.LogLine, int64, error) {
 	if f.err != nil {
 		return nil, offset, f.err
@@ -177,6 +184,7 @@ func TestChatRoutes(t *testing.T) {
 		{"PUT", "/api/v1/chats/c1/draft", `{"yaml":"name: x"}`, 200, "draft c1", `"version": 2`},
 		{"POST", "/api/v1/chats/c1/approvals/a1/approve", "", 200, "decide c1 a1 approved token:writer", `"approved"`},
 		{"POST", "/api/v1/chats/c1/approvals/a1/decline", "", 200, "decide c1 a1 declined token:writer", `"declined"`},
+		{"POST", "/api/v1/chats/c1/apply", `{"yaml":"name: hello"}`, 200, "apply c1 name: hello token:writer", `"version": 1`},
 		{"DELETE", "/api/v1/chats/c1", "", 204, "delete c1", ""},
 	} {
 		status, body := f.do(tc.method, tc.path, f.write, tc.body)
@@ -200,8 +208,14 @@ func TestChatRoutes(t *testing.T) {
 			t.Errorf("unknown field %s: %d", p, status)
 		}
 	}
-	if status, _ := f.do("PUT", "/api/v1/chats/c1/draft", f.write, `[`); status != http.StatusBadRequest {
-		t.Errorf("bad draft body: %d", status)
+	for _, p := range []string{"/api/v1/chats/c1/draft", "/api/v1/chats/c1/apply"} {
+		method := "PUT"
+		if strings.HasSuffix(p, "apply") {
+			method = "POST"
+		}
+		if status, _ := f.do(method, p, f.write, `[`); status != http.StatusBadRequest {
+			t.Errorf("bad body %s: %d", p, status)
+		}
 	}
 }
 
@@ -220,6 +234,7 @@ func TestChatErrors(t *testing.T) {
 			{"POST", "/api/v1/chats/c1/messages", `{"text":"x"}`}, {"POST", "/api/v1/chats/c1/messages/m/retry", ""},
 			{"POST", "/api/v1/chats/c1/cancel", ""}, {"PUT", "/api/v1/chats/c1/draft", "{}"},
 			{"POST", "/api/v1/chats/c1/approvals/a/approve", ""}, {"DELETE", "/api/v1/chats/c1", ""},
+			{"POST", "/api/v1/chats/c1/apply", `{"yaml":"x"}`},
 			{"GET", "/api/v1/chats/c1/events", ""},
 		} {
 			if status, body := f.do(r[0], r[1], f.write, r[2]); status != want {
