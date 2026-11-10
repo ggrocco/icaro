@@ -19,6 +19,8 @@ Phases 1, 5, and 6 converge on this milestone; they are facets of the spine, not
 SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 2 + 3 + ADR 0032 accepted ──> 12  (post-GA)
 2 + ADR 0033 accepted ──> 13  (post-GA)
+4 + ADR 0035 accepted + S11 ──> 14  (post-GA)
+6 + 14 + ADR 0036 accepted + S12 ──> 15  (post-GA)
 ```
 
 | Phase | Track | Depends on |
@@ -67,6 +69,8 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
 | [12 — Await steps](phases/12-await-steps.md) | Not started | Waits on [ADR 0032](adr/0032-await-event-steps.md) being accepted |
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
+| [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Not started | Waits on [ADR 0035](adr/0035-workflow-assistant-chat.md) being accepted and spike S11 |
+| [15 — Memory distiller](phases/15-memory-distiller.md) | Not started | Waits on Phase 14, [ADR 0036](adr/0036-local-memory-distiller.md) being accepted, and spike S12 |
 
 Open spikes:
 
@@ -76,6 +80,8 @@ Open spikes:
 - S7: `.test` resolution with VPNs.
 - S8: manifests against the live APIs.
 - S9: Wails v3. The app is built; the clean-install run on a Mac is open.
+- S11: a headless chat turn on a subscription login, for the workflow assistant ([ADR 0035](adr/0035-workflow-assistant-chat.md)). Not started; it needs real logins.
+- S12: small local models (CPU tier and up) distilling assistant chats into memory within a time and quality budget ([ADR 0036](adr/0036-local-memory-distiller.md)). Not started.
 
 S2 (home overlay, on Linux), S3 (MCP transport, [ADR 0019](adr/0019-memory-mcp-transport.md)) and S6 (heterogeneous compose, [ADR 0026](adr/0026-preview-port-discovery.md)) have passed.
 
