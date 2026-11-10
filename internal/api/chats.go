@@ -25,6 +25,10 @@ type Chats interface {
 	PutDraft(ctx context.Context, chatID, yaml string) (*assist.DraftInfo, error)
 	Decide(ctx context.Context, chatID, approvalID string, approve bool, actor string) (*assist.ApprovalInfo, error)
 	Apply(ctx context.Context, chatID, yaml, actor string) (*service.WorkflowInfo, error)
+	Memories(ctx context.Context, chatID string) (*assist.ChatMemories, error)
+	RemoveMemory(ctx context.Context, chatID, memoryID string) error
+	Distill(ctx context.Context, chatID string) error
+	Stats(ctx context.Context) (*assist.Stats, error)
 	Delete(ctx context.Context, chatID string) error
 	Entries(ctx context.Context, chatID string, offset int64) ([]assist.LogLine, int64, error)
 }
@@ -47,6 +51,11 @@ func RegisterChats(s *Server, c Chats, bus *events.Bus) {
 	m.Handle("POST /api/v1/chats/{id}/approvals/{approval}/approve", s.Auth(store.ScopeWrite, h.decide(true)))
 	m.Handle("POST /api/v1/chats/{id}/approvals/{approval}/decline", s.Auth(store.ScopeWrite, h.decide(false)))
 	m.Handle("GET /api/v1/chats/{id}/events", s.Auth(store.ScopeRead, h.events))
+	// Assistant memory (ADR 0036).
+	m.Handle("GET /api/v1/chats/{id}/memories", s.Auth(store.ScopeRead, h.memories))
+	m.Handle("DELETE /api/v1/chats/{id}/memories/{memory}", s.Auth(store.ScopeWrite, h.removeMemory))
+	m.Handle("POST /api/v1/chats/{id}/distill", s.Auth(store.ScopeWrite, h.distill))
+	m.Handle("GET /api/v1/assistant/stats", s.Auth(store.ScopeRead, h.stats))
 }
 
 type chatHandlers struct {
@@ -264,4 +273,38 @@ func (h *chatHandlers) events(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (h *chatHandlers) memories(w http.ResponseWriter, r *http.Request) {
+	m, err := h.c.Memories(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, m)
+}
+
+func (h *chatHandlers) removeMemory(w http.ResponseWriter, r *http.Request) {
+	if err := h.c.RemoveMemory(r.Context(), r.PathValue("id"), r.PathValue("memory")); err != nil {
+		h.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *chatHandlers) distill(w http.ResponseWriter, r *http.Request) {
+	if err := h.c.Distill(r.Context(), r.PathValue("id")); err != nil {
+		h.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *chatHandlers) stats(w http.ResponseWriter, r *http.Request) {
+	st, err := h.c.Stats(r.Context())
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, st)
 }

@@ -26,6 +26,7 @@ var doctorTableChecks = map[string]string{ //nolint:gosec // doctor check names,
 	"Injected credential unusable":                     "credential injection",
 	"A profile's `runtime` not registered with Docker": "container runtimes",
 	"Workflow assistant unavailable":                   "workflow assistant",
+	"Memory distiller model unverified or unreachable": "memory distiller",
 }
 
 func TestDoctorCoversSecurityTable(t *testing.T) {

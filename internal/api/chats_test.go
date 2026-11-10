@@ -79,6 +79,26 @@ func (f *fakeChats) Decide(_ context.Context, id, ap string, approve bool, actor
 
 func (f *fakeChats) Delete(_ context.Context, id string) error { return f.rec("delete " + id) }
 
+func (f *fakeChats) Memories(_ context.Context, id string) (*assist.ChatMemories, error) {
+	if err := f.rec("memories " + id); err != nil {
+		return nil, err
+	}
+	return &assist.ChatMemories{Used: []assist.MemoryRef{{ID: "m1"}}}, nil
+}
+
+func (f *fakeChats) RemoveMemory(_ context.Context, id, mem string) error {
+	return f.rec("forget " + id + " " + mem)
+}
+
+func (f *fakeChats) Distill(_ context.Context, id string) error { return f.rec("distill " + id) }
+
+func (f *fakeChats) Stats(context.Context) (*assist.Stats, error) {
+	if err := f.rec("stats"); err != nil {
+		return nil, err
+	}
+	return &assist.Stats{WithMemory: assist.StatsGroup{Chats: 2}}, nil
+}
+
 func (f *fakeChats) Apply(_ context.Context, id, yaml, actor string) (*service.WorkflowInfo, error) {
 	if err := f.rec("apply " + id + " " + yaml + " " + actor); err != nil {
 		return nil, err
@@ -185,6 +205,10 @@ func TestChatRoutes(t *testing.T) {
 		{"POST", "/api/v1/chats/c1/approvals/a1/approve", "", 200, "decide c1 a1 approved token:writer", `"approved"`},
 		{"POST", "/api/v1/chats/c1/approvals/a1/decline", "", 200, "decide c1 a1 declined token:writer", `"declined"`},
 		{"POST", "/api/v1/chats/c1/apply", `{"yaml":"name: hello"}`, 200, "apply c1 name: hello token:writer", `"version": 1`},
+		{"GET", "/api/v1/chats/c1/memories", "", 200, "memories c1", `"m1"`},
+		{"DELETE", "/api/v1/chats/c1/memories/m1", "", 204, "forget c1 m1", ""},
+		{"POST", "/api/v1/chats/c1/distill", "", 202, "distill c1", ""},
+		{"GET", "/api/v1/assistant/stats", "", 200, "stats", `"chats": 2`},
 		{"DELETE", "/api/v1/chats/c1", "", 204, "delete c1", ""},
 	} {
 		status, body := f.do(tc.method, tc.path, f.write, tc.body)
@@ -235,6 +259,8 @@ func TestChatErrors(t *testing.T) {
 			{"POST", "/api/v1/chats/c1/cancel", ""}, {"PUT", "/api/v1/chats/c1/draft", "{}"},
 			{"POST", "/api/v1/chats/c1/approvals/a/approve", ""}, {"DELETE", "/api/v1/chats/c1", ""},
 			{"POST", "/api/v1/chats/c1/apply", `{"yaml":"x"}`},
+			{"GET", "/api/v1/chats/c1/memories", ""}, {"DELETE", "/api/v1/chats/c1/memories/m", ""},
+			{"POST", "/api/v1/chats/c1/distill", ""}, {"GET", "/api/v1/assistant/stats", ""},
 			{"GET", "/api/v1/chats/c1/events", ""},
 		} {
 			if status, body := f.do(r[0], r[1], f.write, r[2]); status != want {

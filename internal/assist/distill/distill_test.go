@@ -491,3 +491,55 @@ func FuzzParseSummary(f *testing.F) {
 		}
 	})
 }
+
+func TestSource(t *testing.T) {
+	ctx := context.Background()
+	if c, _, skip, err := (Source{}).Open(ctx); c != nil || skip != SkipDisabled || err != nil {
+		t.Fatal("disabled")
+	}
+	srv := httptest.NewServer(fakeServer(t, func(chatRequest) (int, string) { return 200, content("{}") }))
+	defer srv.Close()
+	c, closeFn, skip, err := Source{Enabled: true, Endpoint: srv.URL, EndpointModel: "qwen"}.Open(ctx)
+	if err != nil || skip != "" || c == nil {
+		t.Fatal(skip, err)
+	}
+	closeFn()
+	if _, _, _, err := (Source{Enabled: true, Endpoint: "http://127.0.0.1:1"}).Open(ctx); err == nil || !strings.Contains(err.Error(), "memory.distill.endpoint") {
+		t.Fatal(err)
+	}
+	empty := Source{Enabled: true, Model: "auto", Tier: TierCPU, Store: Store{Dir: t.TempDir()}}
+	if _, _, skip, err := empty.Open(ctx); skip != SkipNoModel || err != nil {
+		t.Fatal(skip, err)
+	}
+	if _, _, _, err := (Source{Enabled: true, Model: "nope", Store: Store{Dir: t.TempDir()}}).Open(ctx); err == nil {
+		t.Fatal("unknown model")
+	}
+	// A pulled model starts the managed server.
+	dir := shortDir(t)
+	store := Store{Dir: filepath.Join(dir, "models")}
+	_ = os.MkdirAll(store.Dir, 0o700)
+	m, _ := Lookup("qwen3.5-0.8b")
+	fakeInstall(t, store, m)
+	fake := docker.NewFake()
+	fake.OnStart = func(ct *docker.FakeContainer) docker.Behavior {
+		for _, mt := range ct.Spec.HostConfig.Mounts {
+			if mt.Target == "/sock" {
+				stop := serveUnix(t, filepath.Join(mt.Source, container.DistillSocketName), fakeServer(t, func(chatRequest) (int, string) { return 200, content("{}") }))
+				t.Cleanup(stop)
+			}
+		}
+		return docker.Behavior{Duration: time.Hour}
+	}
+	src := Source{Enabled: true, Model: "auto", Tier: TierCPU, Store: store,
+		Managed: Managed{Docker: fake, Models: store, SocketDir: filepath.Join(dir, "s"), Name: "d", Key: "k", Poll: time.Millisecond}}
+	c, closeFn, skip, err = src.Open(ctx)
+	if err != nil || skip != "" || c == nil {
+		t.Fatal(skip, err)
+	}
+	closeFn()
+	src.Managed.ReadyTimeout = 10 * time.Millisecond
+	fake.OnStart = nil
+	if _, _, _, err := src.Open(ctx); err == nil {
+		t.Fatal("a server that never starts")
+	}
+}
