@@ -35,7 +35,7 @@ The MVP is the parallel-isolated-agents experience built on this spine. Anything
 
 Each principle is a one-line summary; the linked doc is canonical.
 
-- **One binary, one daemon.** CLI, HTTP server, and the macOS app are clients of the same per-user daemon ([ADR 0001](docs/adr/0001-single-daemon.md)); Linux gets CLI + daemon only in the MVP.
+- **One binary, one daemon.** CLI, HTTP server, and the desktop app are clients of the same per-user daemon ([ADR 0001](docs/adr/0001-single-daemon.md)); on Linux the same app ships as a tarball ([ADR 0027](docs/adr/0027-desktop-app.md)), and the CLI + daemon stay the supported baseline.
 - **Local-first state** in `~/.icaro/` (paths configurable), stored in SQLite behind a `database/sql` store ([architecture §4](docs/01-architecture.md#4-persistence)).
 - **Secure by default.** Non-privileged containers, no Docker socket, an explicit mount allowlist, and a mandatory egress allowlist ([security](docs/03-security.md)).
 - **Credentials live in a managed, per-profile home** that is seeded once and confined by the egress allowlist. The host's real `~/.claude` is never mounted ([ADR 0005](docs/adr/0005-persistent-home-egress.md)).

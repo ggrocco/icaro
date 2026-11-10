@@ -35,7 +35,7 @@ The separate module keeps cgo, GTK/WebKit and Wails' dependencies out of the CLI
 
 The other direction holds too: the app links none of the daemon. `internal/desktop` talks to the API through `internal/apiclient/rest`, the transport alone, and decodes the few response fields it reads into its own structs, because `internal/apiclient`'s typed calls return the daemon's types and would link the store, its database drivers and the Docker client. A CI step in the lint job fails if `internal/desktop` links any module beyond the YAML parser its config loading needs.
 
-`internal/desktop` is UI glue rather than domain code. Its controller state (the last poll, the settings, the cached usage) is read by menu clicks on the shell's threads and written by the poll loop, so a single mutex guards it. That is the one exception to the engineering rule of channels over mutexes, recorded here as that rule requires. The app has its own `desktop/THIRD_PARTY_LICENSES.md`, generated for the macOS build.
+`internal/desktop` is UI glue rather than domain code. Its controller state (the last poll, the settings, the cached usage) is read by menu clicks on the shell's threads and written by the poll loop, so a single mutex guards it. That is the one exception to the engineering rule of channels over mutexes, recorded here as that rule requires. The app has its own `desktop/THIRD_PARTY_LICENSES.md`, generated for the macOS build, and `desktop/THIRD_PARTY_LICENSES.linux.md` for the Linux one.
 
 **One daemon.** The app resolves the configuration as the CLI does: the same `--config`/`--home` flags, `ICARO_HOME` and `daemon.url`.
 - It checks the socket's health and starts `icaro serve` (`daemon.StartProgram`) only when nothing answers. The daemon's lock settles a race with the CLI or with launchd.
@@ -90,8 +90,19 @@ Clicking a notification opens the run, or starts the daemon. Only those non-dest
 - `Icaro.app` contains universal `icaro-app` and `icaro` binaries. It sets `LSUIElement` (no Dock icon), uses the bundle id `dev.icaro.app`, and builds its icon from `desktop/icons/app.png`.
 - The release job builds the bundle on a macOS runner. With the Developer ID secrets, it signs with the hardened runtime and a timestamp, then notarizes and staples. Without them, it signs ad hoc and posts a warning.
 - The zip ships with a SHA-256 file and the same ed25519 signature as `checksums.txt`.
+- For Linux, a release job builds `Icaro_<version>_linux_<arch>.tar.gz` on a native runner for each of amd64 and arm64 ([`package-linux.sh`](../../../desktop/build/package-linux.sh)). The tarball is laid out as an install prefix and is extracted into `~/.local`:
+  - `bin/icaro-app` and the `icaro` CLI next to it, where the app looks first;
+  - a `dev.icaro.app.desktop` launcher entry and a scalable icon;
+  - the license lists.
 
-**Linux.** The same app builds and runs on Linux (GTK 4, WebKitGTK 6; the tray needs a StatusNotifier host). It is not distributed: Linux stays CLI plus daemon, as the [blueprint](../../README.md) says. CI builds and tests it so the shell compiles on every push.
+  It ships with a SHA-256 file and the same ed25519 signature as the zip.
+
+**Linux.** The same app builds and runs on Linux (GTK 4, WebKitGTK 6; the tray needs a StatusNotifier host). It was first kept out of releases, with Linux as CLI plus daemon only. It is now distributed as the tarball above, because a release that offers the app for one platform leaves Linux users to build it from source.
+
+- The tarball is not a `.deb`, `.rpm`, AppImage or Flatpak. The app links the distribution's own GTK and WebKitGTK, so it bundles no libraries and gets their security updates from the distribution. The cost is a floor: it runs on distributions at least as new as the pinned runner that builds it (Ubuntu 24.04).
+- The CLI's `.deb` and `.rpm` packages stay pure Go and do not depend on GTK.
+- `icaro update` does not update the app. A newer tarball is extracted over the old one.
+- CI builds the tarball on every push, installs it into a scratch prefix, runs both binaries and validates the launcher entry.
 
 ## Spike S9 so far
 
@@ -115,5 +126,6 @@ The pass criterion is unchanged.
 
 - Wails is a beta. An upgrade can change its API, so the shell is kept small, and the logic it renders does not depend on Wails.
 - CI gains a `desktop` job on two operating systems.
+- The release gains a `linux-app` job on two runners, and the Linux build has its own license list (`desktop/THIRD_PARTY_LICENSES.linux.md`), because it links a D-Bus module the macOS build does not.
 - Notarization needs an Apple Developer ID. Until the secrets are set, the release zip is signed ad hoc, and Gatekeeper blocks it after download (Control-click → Open).
 - The release job now builds the web UI before goreleaser. Released binaries had been shipping without it and served the "not built" page, which the app's window would have shown.

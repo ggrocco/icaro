@@ -6,8 +6,10 @@ name: release
 # Secrets: ICARO_SIGNING_KEY (base64 ed25519 seed), and optionally
 # HOMEBREW_TAP_TOKEN (without it the cask is not pushed to the tap).
 # Variables: ICARO_RELEASE_PUBKEY (base64 ed25519 public key).
-# The macOS app (ADR 0027) is signed and notarized when these secrets are
-# set, and signed ad hoc otherwise: MACOS_CERTIFICATE (base64 .p12 of a
+# The desktop app (ADR 0027) is attached for macOS (a universal Icaro.app)
+# and for Linux (a tarball per architecture). The macOS app is signed and
+# notarized when these secrets are set, and signed ad hoc otherwise:
+# MACOS_CERTIFICATE (base64 .p12 of a
 # "Developer ID Application" identity), MACOS_CERTIFICATE_PASSWORD,
 # APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password).
 #
@@ -210,6 +212,60 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*.zip
+
+  linux-app:
+    # The desktop app for Linux (ADR 0027), attached to the release as one
+    # tarball per architecture with a SHA-256 file and an ed25519 signature
+    # (go run ./hack/sign verify). It needs cgo and the system's GTK, so
+    # each architecture builds on its own runner. The runner image is
+    # pinned: the app runs on distributions at least as new as it.
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    environment: release
+    permissions:
+      contents: write     # upload to the release
+      id-token: write     # provenance
+      attestations: write # provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The bundled CLI embeds the web UI, as the released binaries do.
+      - run: make web
+      - name: GTK 4 and WebKitGTK 6 headers
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: build the tarball
+        env:
+          ICARO_RELEASE_PUBKEY: ${{ vars.ICARO_RELEASE_PUBKEY }}
+        run: |
+          tarball=$(desktop/build/package-linux.sh dist "$GITHUB_REF_NAME")
+          test "$(basename "$tarball")" = "Icaro_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}.tar.gz"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ICARO_SIGNING_KEY: ${{ secrets.ICARO_SIGNING_KEY }}
+        run: |
+          (cd dist && sha256sum "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256")
+          go run ./hack/sign sign -in "$TARBALL" -out "$TARBALL.sig"
+          gh release upload "$GITHUB_REF_NAME" "$TARBALL" "$TARBALL.sha256" "$TARBALL.sig" --clobber
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
 
   agent-image:
     # The agent base image (architecture §5) referenced by the default
