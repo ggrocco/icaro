@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"icaro/internal/api"
+	"icaro/internal/assist"
 	"icaro/internal/config"
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
@@ -59,7 +60,8 @@ type App struct {
 	// session.PreviewHook for the session manager.
 	Previews *preview.Manager
 	Memory   *memory.Engine
-	MCP      *mcp.Server // host MCP server at /mcp; Phase 4 adds authoring tools
+	MCP      *mcp.Server     // host MCP server at /mcp; Phase 4 adds authoring tools
+	Assist   *assist.Service // the workflow assistant (ADR 0035)
 	// Workflows holds the workflow engine and the collaborators earlier
 	// wirers provide to it (see internal/app/workflows.go).
 	Workflows WorkflowWiring

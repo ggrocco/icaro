@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -120,6 +121,36 @@ func (s *Store) CreateChat(ctx context.Context, c *Chat) error {
 // GetChat returns a chat.
 func (s *Store) GetChat(ctx context.Context, id string) (*Chat, error) {
 	return scanChat(s.queryRow(ctx, `SELECT `+chatCols+` FROM chats WHERE id = ?`, id))
+}
+
+// GetChatBySession returns the chat an assist session belongs to.
+func (s *Store) GetChatBySession(ctx context.Context, sessionID string) (*Chat, error) {
+	if sessionID == "" {
+		return nil, ErrNotFound
+	}
+	return scanChat(s.queryRow(ctx, `SELECT `+chatCols+` FROM chats WHERE session_id = ?`, sessionID))
+}
+
+// Chat fields SetChatField may write. Writing one field at a time keeps
+// concurrent writers (a turn recording its conversation id, a rename from
+// the API) from undoing each other.
+const (
+	ChatTitle          = "title"
+	ChatWorkflow       = "workflow"
+	ChatSessionID      = "session_id"
+	ChatConversationID = "conversation_id"
+)
+
+// SetChatField writes one of the chat's mutable fields and bumps
+// UpdatedAt.
+func (s *Store) SetChatField(ctx context.Context, id, field, value string) error {
+	switch field {
+	case ChatTitle, ChatWorkflow, ChatSessionID, ChatConversationID:
+	default:
+		return fmt.Errorf("store: chat field %q is not writable", field)
+	}
+	res, err := s.exec(ctx, `UPDATE chats SET `+field+` = ?, updated_at = ? WHERE id = ?`, value, ts(Now()), id) //nolint:gosec // field is from the allowlist above
+	return wrote(res, err)
 }
 
 // ListChats returns chats, most recently updated first.
@@ -399,6 +430,17 @@ func (s *Store) DecideChatApproval(ctx context.Context, id, decision, actor, res
 		return nil, ErrConflict
 	}
 	return s.GetChatApproval(ctx, id)
+}
+
+// ExpireChatApprovals marks every pending gated call expired (a restart
+// ended the turns waiting on them) and returns how many it marked.
+func (s *Store) ExpireChatApprovals(ctx context.Context) (int, error) {
+	res, err := s.exec(ctx, `UPDATE chat_approvals SET decision = 'expired', decided_at = ? WHERE decision = ''`, ts(Now()))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // SetChatApprovalResult records a decided call's result (the run id).

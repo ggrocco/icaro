@@ -18,6 +18,7 @@ CREATE TABLE chats (
     updated_at      TEXT NOT NULL
 );
 CREATE INDEX chats_updated ON chats (updated_at);
+CREATE INDEX chats_session ON chats (session_id);
 
 -- The visible messages, in order. An assistant row is one turn: its
 -- status follows the turn (queued, running, done, error, cancelled,

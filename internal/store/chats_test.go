@@ -39,6 +39,26 @@ func TestChats(t *testing.T) {
 			t.Fatalf("%+v", again)
 		}
 
+		byS, err := s.GetChatBySession(ctx, "s1")
+		if err != nil || byS.ID != c.ID {
+			t.Fatalf("by session %+v %v", byS, err)
+		}
+		if _, err := s.GetChatBySession(ctx, ""); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if err := s.SetChatField(ctx, c.ID, ChatConversationID, "conv-2"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetChatField(ctx, c.ID, "profile", "x"); err == nil {
+			t.Fatal("profile is not writable")
+		}
+		if err := s.SetChatField(ctx, "nope", ChatTitle, "x"); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetChat(ctx, c.ID); got.ConversationID != "conv-2" || got.Title != "renamed" {
+			t.Fatalf("%+v", got)
+		}
+
 		// Messages: seq is assigned in order, and adding one bumps the chat.
 		time.Sleep(2 * time.Millisecond)
 		u := &ChatMessage{ChatID: other.ID, Role: RoleUser, Text: "hello", Status: TurnDone}
@@ -149,6 +169,16 @@ func TestChats(t *testing.T) {
 		if _, err := s.DecideChatApproval(ctx, "nope", "declined", "x", ""); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("missing approval: %v", err)
 		}
+		stale := &ChatApproval{ChatID: c.ID, Tool: "run_workflow", Request: "{}", ExpiresAt: time.Now()}
+		if err := s.CreateChatApproval(ctx, stale); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := s.ExpireChatApprovals(ctx); err != nil || n != 1 {
+			t.Fatalf("expired %d %v", n, err)
+		}
+		if got, _ := s.GetChatApproval(ctx, stale.ID); got.Decision != "expired" || got.DecidedAt == nil {
+			t.Fatalf("%+v", got)
+		}
 		if err := s.SetChatApprovalResult(ctx, ap.ID, "run-1"); err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +188,7 @@ func TestChats(t *testing.T) {
 		if p, _ := s.ListChatApprovals(ctx, c.ID, true); len(p) != 0 {
 			t.Fatalf("still pending: %v", p)
 		}
-		if all, _ := s.ListChatApprovals(ctx, c.ID, false); len(all) != 1 || all[0].Result != "run-1" {
+		if all, _ := s.ListChatApprovals(ctx, c.ID, false); len(all) != 2 || all[0].Result != "run-1" {
 			t.Fatalf("all: %+v", all)
 		}
 
@@ -211,5 +241,8 @@ func TestChatsClosedStore(t *testing.T) {
 	}
 	if err := s.DeleteChat(ctx, "c"); err == nil {
 		t.Error("delete")
+	}
+	if _, err := s.ExpireChatApprovals(ctx); err == nil {
+		t.Error("expire")
 	}
 }
