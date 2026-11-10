@@ -168,7 +168,28 @@ type PreviewsConfig struct {
 
 // MemoryConfig tunes shared memory.
 type MemoryConfig struct {
-	Preamble string `yaml:"preamble"`
+	Preamble string        `yaml:"preamble"`
+	Distill  DistillConfig `yaml:"distill"`
+}
+
+// DistillConfig tunes the memory distiller of assistant chats (ADR 0036).
+type DistillConfig struct {
+	// Enabled turns stage 2 (the local model) on when a model is pulled
+	// or an endpoint is set; stage 1 (exact facts) always runs.
+	Enabled bool `yaml:"enabled"`
+	// Model is a catalog name, or auto for the machine's tier.
+	Model string `yaml:"model"`
+	// Endpoint is an OpenAI-compatible server the user runs (llama-server
+	// or Ollama, e.g. for a GPU); empty uses the managed CPU container.
+	Endpoint string `yaml:"endpoint"`
+	// EndpointModel names the model on Endpoint (Ollama needs it).
+	EndpointModel string `yaml:"endpoint_model"`
+	// CPUs bounds the managed container.
+	CPUs float64 `yaml:"cpus"`
+	// TTL is how long model-written memories live.
+	TTL time.Duration `yaml:"ttl"`
+	// Timeout bounds one chat's summary.
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 // AssistantConfig tunes the workflow assistant chat (ADR 0035).
@@ -185,6 +206,9 @@ type AssistantConfig struct {
 	TurnTimeout time.Duration `yaml:"turn_timeout"`
 	// ApprovalTimeout is how long a gated call waits for a person.
 	ApprovalTimeout time.Duration `yaml:"approval_timeout"`
+	// MemoryBudget caps, in tokens, the notes from earlier chats a new
+	// conversation starts with (ADR 0036).
+	MemoryBudget int `yaml:"memory_budget"`
 }
 
 // AssistantProfile returns the profile the assistant runs under, or ""
@@ -280,6 +304,12 @@ func Defaults() map[string]any {
 		"assistant.idle_timeout":     "15m",
 		"assistant.turn_timeout":     "10m",
 		"assistant.approval_timeout": "5m",
+		"assistant.memory_budget":    2000,
+		"memory.distill.enabled":     true,
+		"memory.distill.model":       "auto",
+		"memory.distill.cpus":        2.0,
+		"memory.distill.ttl":         "2160h",
+		"memory.distill.timeout":     "10m",
 		"webhooks.max_body_bytes":    1 << 20,
 		"webhooks.max_skew":          "5m",
 		"webhooks.rate_per_min":      120,
@@ -480,6 +510,15 @@ func (c *Config) Validate() error {
 		} else if prof.Agent != "claude" && prof.Agent != "codex" {
 			errs = append(errs, fmt.Errorf("assistant.profile %q runs agent %q; the assistant needs claude or codex", p, prof.Agent))
 		}
+	}
+	if c.Assistant.MemoryBudget < 0 {
+		errs = append(errs, errors.New("assistant.memory_budget must be >= 0 (0 = no notes)"))
+	}
+	if d := c.Memory.Distill; d.CPUs <= 0 || d.TTL <= 0 || d.Timeout <= 0 {
+		errs = append(errs, errors.New("memory.distill.cpus, ttl and timeout must be > 0"))
+	}
+	if e := c.Memory.Distill.Endpoint; e != "" && !strings.HasPrefix(e, "http://") && !strings.HasPrefix(e, "https://") {
+		errs = append(errs, fmt.Errorf("memory.distill.endpoint %q must be an http(s) URL", e))
 	}
 	if c.Assistant.MaxActive < 1 {
 		errs = append(errs, errors.New("assistant.max_active must be >= 1"))

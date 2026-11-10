@@ -2,7 +2,7 @@
 
 **Objective:** turn every assistant chat into memories that make the next chat converge faster: structured facts with no model, plus an optional small local model for intent and handoffs, as proposed in [ADR 0036](../adr/0036-local-memory-distiller.md).
 
-**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0036 **accepted**, with its open questions settled, and spike **S12** passed. The stage 1 deliverables need only [Phase 14](14-workflow-assistant.md); stage 2 needs S12.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0036 **accepted** (done, with its questions settled). Spike **S12** runs alongside: the CPU tier on the build machine, the Mac and GPU tiers on those machines before release. The stage 1 deliverables need only [Phase 14](14-workflow-assistant.md); stage 2 needs S12.
 
 ## Spike S12 — small models on ordinary machines
 

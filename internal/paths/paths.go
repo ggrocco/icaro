@@ -86,12 +86,15 @@ func (l Layout) Previews() string { return filepath.Join(l.Root, "previews") }
 // Assist holds the workflow assistant's per-chat scratch directories.
 func (l Layout) Assist() string { return filepath.Join(l.Root, "assist") }
 
+// Models holds local models the memory distiller runs (ADR 0036).
+func (l Layout) Models() string { return filepath.Join(l.Root, "models") }
+
 // Skills holds skill bundles written by `icaro skill install`.
 func (l Layout) Skills() string { return filepath.Join(l.Root, "skills") }
 
 // PrivateDirs are created with 0700.
 func (l Layout) PrivateDirs() []string {
-	return []string{l.Root, l.RunDir(), l.ConfigDir(), l.Logs(), l.Homes(), l.Worktrees(), l.Repos(), l.Runs(), l.Integrations(), l.Secrets(), l.Previews(), l.Assist()}
+	return []string{l.Root, l.RunDir(), l.ConfigDir(), l.Logs(), l.Homes(), l.Worktrees(), l.Repos(), l.Runs(), l.Integrations(), l.Secrets(), l.Previews(), l.Assist(), l.Models()}
 }
 
 // Ensure creates the private directories and tightens their mode.

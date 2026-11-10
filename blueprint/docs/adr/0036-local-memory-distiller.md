@@ -1,6 +1,6 @@
 # ADR 0036 — A small local model distills assistant chats into memory
 
-**Status:** Proposed. Builds on [ADR 0035](0035-workflow-assistant-chat.md) (assistant chats), [ADR 0004](0004-memory-mcp.md) and [ADR 0020](0020-portable-memory-search.md) (memory and BM25 search). Adds an optional model runtime the daemon manages; no Go dependency. Spike S12 gates it.
+**Status:** Accepted. The open questions are settled below. Spike S12 runs in part: the CPU tier is measured on the build machine, and the Apple Silicon and GPU tiers wait for those machines. Builds on [ADR 0035](0035-workflow-assistant-chat.md) (assistant chats), [ADR 0004](0004-memory-mcp.md) and [ADR 0020](0020-portable-memory-search.md) (memory and BM25 search). Adds an optional model runtime the daemon manages; no Go dependency.
 
 ## Context
 
@@ -51,10 +51,13 @@ Every memory either stage writes carries `origin: distill:<chat>`, the chat and 
 
 ### The runtime: llama.cpp, managed or bring-your-own
 
-- **Managed (default when enabled).** The daemon runs llama.cpp's `llama-server` as a helper container, using the upstream image pinned by digest. It runs under the helper baseline, on an internal network with **no egress**, with a CPU quota (`memory.distill.cpus`, default 2) and low priority, so a running distillation never competes with agent sessions. It is started for a batch of jobs and stopped after it. The daemon talks to it over HTTP (OpenAI-compatible API) with the standard library; there is no cgo and no new Go module.
+- **Managed (default when enabled).** The daemon runs llama.cpp's `llama-server` as a helper container, using the upstream image pinned by digest (`ghcr.io/ggml-org/llama.cpp:server`).
+  - It runs under the helper baseline with **no network at all** (`--network none`). It listens on a Unix socket in a directory only it and the daemon share, and it mounts the models directory read-only.
+  - It has a CPU quota (`memory.distill.cpus`, default 2) and a memory limit sized from the model, so a running distillation never competes with agent sessions.
+  - It is started for a batch of jobs and stopped after it. The daemon talks to it over HTTP on that socket (OpenAI-compatible API) with the standard library; there is no cgo and no new Go module.
 - **Bring your own.** `memory.distill.endpoint` points at a llama-server or Ollama the user already runs on the host. This is the fast path on Apple Silicon, where containers in Docker Desktop cannot use the GPU but a host process can use Metal.
 - **Jobs.** Distillation is a queued background job, one at a time, never on a chat's code path. A transcript longer than the model's context is cut into chunks, each chunk is summarized, and the summaries are merged in a second pass. A failed job is recorded and retried once; it never blocks a chat.
-- **Models** are downloaded only on opt-in (`icaro memory model pull [<name>]`), pinned by SHA-256, stored under `~/.icaro/models/`, and listed by `icaro doctor`.
+- **Models** are downloaded only on opt-in (`icaro memory model pull [<name>]`), pinned by SHA-256, stored under `~/.icaro/models/`, and listed by `icaro doctor`. There are no official GGUF builds of the Qwen3.5 small models; the catalog pins the community conversions it was checked against (Unsloth's Qwen3.5 and Gemma 4, IBM's own Granite), each Apache 2.0 like its base model, by repository, file and SHA-256.
 
 ### Model tiers
 
@@ -100,11 +103,11 @@ Embeddings stay out, as ADR 0020 requires, until these numbers show that BM25 re
 - **Embed a model runtime in the daemon** (llama.cpp through cgo, or a pure-Go runtime). That would mean one process and no container, but cgo breaks the pure-Go build, and the pure-Go runtimes are much slower on CPU. Rejected under the [dependency policy](../05-engineering.md#dependency-policy).
 - **A model for everything, no deterministic stage.** It is simpler to describe, but the structured facts are exact without a model, and a small model would only make them less reliable.
 
-## Open questions
+## Settled questions
 
-1. Should stage 2 be on by default once a model is pulled, or opt-in per project?
-2. Do distilled memories expire (a TTL), or do they stay until a person removes them?
-3. Should the managed runtime use a GPU when Docker exposes one (the CUDA or Vulkan image), or should GPU users always bring their own endpoint?
+1. **Stage 2 runs for every chat once a model is available.** Pulling a model (or setting `memory.distill.endpoint`) is the opt-in; `memory.distill.enabled: false` turns stage 2 off.
+2. **Model-written memories expire** after `memory.distill.ttl` (default 90 days). Stage 1's exact facts stay until a person removes them.
+3. **The managed runtime is CPU only.** GPU and Apple Silicon users point `memory.distill.endpoint` at their own llama-server or Ollama.
 
 ## Consequences
 
