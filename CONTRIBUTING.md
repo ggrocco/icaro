@@ -60,7 +60,7 @@ Once CI passes on the tagged commit, approve the `release` environment in the wo
 3. In Settings → Secrets and variables → Actions → Variables, add `ICARO_RELEASE_PUBKEY` with the printed public key. It is embedded in every binary and in `install.sh`.
 4. Optional: add `HOMEBREW_TAP_TOKEN` to the `release` environment, a fine-grained token with contents write access to `ggrocco/homebrew-tap`. Without it the release still publishes, and the cask is not pushed.
 5. Optional: the `MACOS_*` and `APPLE_*` secrets listed at the top of `release.yml`, to sign and notarize the desktop app. Without them it is signed ad hoc.
-6. The `agent-image` job pushes to `ghcr.io/icaro-dev/agent-base` (the default in `config.DefaultAgentImage`). The workflow's `GITHUB_TOKEN` can only push there if that package grants this repository write access; otherwise set the `AGENT_IMAGE` variable to an image you can push.
+6. The `agent-image` job pushes to `ghcr.io/ggrocco/icaro-agent-base` (the default in `config.DefaultAgentImage`), in the namespace of this repository's owner, so the workflow's `GITHUB_TOKEN` creates the package on the first release. GHCR creates it private: after that first release, set its visibility to public (the package's settings page), or `icaro setup` cannot pull it. A fork sets the `AGENT_IMAGE` variable to an image it can push.
 
 The `release` job fails first thing, before it builds anything, when the signing key or public key is missing.
 

@@ -93,7 +93,7 @@ app-test:
 app-macos:
 	desktop/build/bundle.sh bin $(VERSION)
 
-AGENT_IMAGE ?= ghcr.io/icaro-dev/agent-base:$(VERSION)
+AGENT_IMAGE ?= ghcr.io/ggrocco/icaro-agent-base:$(VERSION)
 AGENT_ARCH  ?= $(shell go env GOARCH)
 
 # The agent base image embeds a static Linux icaro for internal commands.

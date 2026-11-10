@@ -26,7 +26,7 @@ const envPrefix = "ICARO_"
 const CurrentVersion = 1
 
 // DefaultAgentImage is the agent base image (architecture §5).
-const DefaultAgentImage = "ghcr.io/icaro-dev/agent-base:latest"
+const DefaultAgentImage = "ghcr.io/ggrocco/icaro-agent-base:latest"
 
 // Config is the full configuration.
 type Config struct {
