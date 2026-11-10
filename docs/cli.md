@@ -4,6 +4,95 @@
 
 Every command also accepts the global flags `--config` (config file, default `$ICARO_CONFIG` or `~/.icaro/config/icaro.yaml`) and `--home` (state root, default `$ICARO_HOME` or `~/.icaro`).
 
+## `icaro assist`
+
+The workflow assistant runs your profile's own agent CLI (claude or codex) under its login, so a subscription works without an API key. It reads the schema, integrations and runs, and proposes drafts; you apply them. Runs it asks for wait for your approval. See docs/assistant.md.
+
+```text
+      --json   print JSON
+```
+
+Subcommands: `approve` `cancel` `decline` `list` `new` `rm` `send` `show`
+
+## `icaro assist approve`
+
+Approve a run the assistant asked for
+
+```text
+icaro assist approve CHAT APPROVAL
+```
+
+## `icaro assist cancel`
+
+Stop the chat's running turn and drop its queued ones
+
+```text
+icaro assist cancel CHAT
+```
+
+## `icaro assist decline`
+
+Decline a run the assistant asked for
+
+```text
+icaro assist decline CHAT APPROVAL
+```
+
+## `icaro assist list`
+
+List chats
+
+```text
+icaro assist list
+```
+
+## `icaro assist new`
+
+Start a chat (optionally about a saved workflow or a draft file)
+
+```text
+icaro assist new [flags]
+```
+
+```text
+  -f, --file string         start from this draft (a path, or - for stdin)
+      --project-id string   scope the assistant's memory reads to this project
+      --title string        the chat's title (default: the first message)
+      --workflow string     start from this saved workflow
+```
+
+## `icaro assist rm`
+
+Delete a chat, its container and its log
+
+```text
+icaro assist rm CHAT [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
+```
+
+## `icaro assist send`
+
+Send a message and print the reply as it streams
+
+```text
+icaro assist send CHAT MESSAGE... [flags]
+```
+
+```text
+      --no-wait   queue the message and return
+```
+
+## `icaro assist show`
+
+Show a chat's messages, draft and pending approvals
+
+```text
+icaro assist show CHAT
+```
+
 ## `icaro claude`
 
 Run claude in an isolated session for the current repository

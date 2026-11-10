@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"icaro/internal/config"
+	"icaro/internal/creds"
 	"icaro/internal/crypto"
 	"icaro/internal/doctor"
 	"icaro/internal/secrets"
@@ -369,7 +370,7 @@ func TestBaseChecks(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	if got := checkNames(BaseChecks(cfg, nil, nil, nil)); len(got) != 2 {
+	if got := checkNames(BaseChecks(cfg, nil, nil, nil)); len(got) != 3 {
 		t.Errorf("without store and engine: %v", got)
 	}
 
@@ -619,5 +620,47 @@ func TestMemorySocketCheck(t *testing.T) {
 	r := run(t, MemorySocketCheck(cfg))
 	if r.Severity != doctor.Warning || !strings.Contains(r.Detail, "without shared memory") || !strings.Contains(r.Detail, "ICARO_HOME") {
 		t.Errorf("long home: %+v", r)
+	}
+}
+
+func TestAssistantCheck(t *testing.T) {
+	cfg := testConfig(t, "")
+	run := func() doctor.Result {
+		t.Helper()
+		return AssistantCheck(cfg).Run(context.Background())
+	}
+	// The default claude profile, not signed in yet.
+	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "icaro login claude") {
+		t.Fatalf("%+v", r)
+	}
+	seed := (&creds.Homes{Layout: cfg.Layout()}).SeedDir("claude")
+	if err := os.MkdirAll(filepath.Join(seed, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, ".claude", ".credentials.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(); r.Severity != doctor.OK || !strings.Contains(r.Detail, "signed in") {
+		t.Fatalf("%+v", r)
+	}
+	p := cfg.Profiles["claude"]
+	p.Egress = []string{"claude.ai"}
+	cfg.Profiles["claude"] = p
+	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "does not reach api.anthropic.com") {
+		t.Fatalf("%+v", r)
+	}
+	p.Inject = map[string]string{"anthropic": "key"}
+	cfg.Profiles["claude"] = p
+	if r := run(); r.Severity != doctor.OK || !strings.Contains(r.Detail, "injected API key") {
+		t.Fatalf("%+v", r)
+	}
+	cfg.Assistant.Profile = "shell"
+	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "no headless chat mode") {
+		t.Fatalf("%+v", r)
+	}
+	cfg.Assistant.Profile = ""
+	cfg.Profiles = map[string]config.ProfileConfig{"shell": {}}
+	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "unavailable") {
+		t.Fatalf("%+v", r)
 	}
 }
