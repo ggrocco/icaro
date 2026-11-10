@@ -216,7 +216,11 @@ func TestGatedRunCancelled(t *testing.T) {
 		res, err := c.CallTool(ctx, ToolRun, map[string]any{"name": "hello"})
 		done <- err != nil || res.IsError
 	}()
-	time.Sleep(50 * time.Millisecond)
+	// Cancel once the call is waiting on its card, not after a guess.
+	e.waitFor("the approval card", func() bool {
+		aps, _ := e.st.ListChatApprovals(e.ctx, d.ID, true)
+		return len(aps) == 1
+	})
 	cancel()
 	if failed := <-done; !failed {
 		t.Fatal("a cancelled call succeeded")
