@@ -21,6 +21,7 @@ SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 2 + ADR 0033 accepted ──> 13  (post-GA)
 4 + ADR 0035 accepted + S11 ──> 14  (post-GA)
 6 + 14 + ADR 0036 accepted + S12 ──> 15  (post-GA)
+2 + 14 (agent adapters) + ADR 0037 accepted + S11 ──> 16  (post-GA)
 ```
 
 | Phase | Track | Depends on |
@@ -39,6 +40,7 @@ SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 | [11 — Hardening and GA](phases/11-hardening.md) | Quality | spine + 2 + 4 + 7 + 8 + 10 |
 | [12 — Await steps](phases/12-await-steps.md) | Automation (post-GA) | 2, 3; [ADR 0032](adr/0032-await-event-steps.md) accepted |
 | [13 — Workflow library](phases/13-workflow-library.md) | Automation (post-GA) | 2; [ADR 0033](adr/0033-workflow-library.md) accepted |
+| [16 — Agent steps](phases/16-agent-steps.md) | Automation (post-GA) | 2; Phase 14's agent adapters; [ADR 0037](adr/0037-agent-steps.md) accepted; spike S11 |
 
 ## Rules for every phase
 
@@ -71,6 +73,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
 | [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Not started | Waits on [ADR 0035](adr/0035-workflow-assistant-chat.md) being accepted and spike S11 |
 | [15 — Memory distiller](phases/15-memory-distiller.md) | Not started | Waits on Phase 14, [ADR 0036](adr/0036-local-memory-distiller.md) being accepted, and spike S12 |
+| [16 — Agent steps](phases/16-agent-steps.md) | Not started | Waits on [ADR 0037](adr/0037-agent-steps.md) being accepted, spike S11, and Phase 14's agent adapters |
 
 Open spikes:
 

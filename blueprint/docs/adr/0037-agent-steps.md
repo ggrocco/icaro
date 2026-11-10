@@ -92,4 +92,4 @@ A prompt that interpolates `trigger.*` from an integration event carries text an
 - Agent steps and assistant chats share one adapter per CLI. A CLI upgrade that changes flags or the event format is fixed in one place and caught by the same recorded-stream fixtures.
 - `agent` is a new step kind for the schema (drift-tested against [the contract](../schemas/workflow.schema.json)), the validator, the API, the CLI and the web UI's run views. `result` is a new built-in output.
 - Agent runs cost money and are nondeterministic. A retry reruns the agent from scratch with a fresh home layer, but `/workspace` keeps what the failed attempt wrote, as it does for image steps.
-- Implementation would be a new phase, after Phase 14 if ADR 0035's adapter is built there first: the catalog's step additions, the schema and validation, per-step home layers and egress, image pinning on the step run, result and usage capture, client views, doctor checks, and docs.
+- Implementation is [Phase 16](../phases/16-agent-steps.md), which reuses Phase 14's agent adapters.
