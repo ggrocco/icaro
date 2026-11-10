@@ -20,7 +20,7 @@ var fieldAnnotations = map[string]string{
 	"RepositoryRef.ref":       "{\"description\": \"Repository identifier/remote.\"}",
 	"RepositoryRef.revision":  "{\"description\": \"Branch, tag, or commit. Defaults to the repo's default branch when omitted.\"}",
 	"StepSpec.id":             "{\"pattern\": \"^[a-z][a-z0-9-]{1,62}$\"}",
-	"StepSpec.image":          "{\"description\": \"Container image reference to run for this step (e.g. ghcr.io/icaro-dev/agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.\", \"minLength\": 1, \"maxLength\": 512}",
+	"StepSpec.image":          "{\"description\": \"Container image reference to run for this step (e.g. ghcr.io/ggrocco/icaro-agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.\", \"minLength\": 1, \"maxLength\": 512}",
 	"StepSpec.uses":           "{\"pattern\": \"^[a-z][a-z0-9-]{1,62}\\\\.[a-z][a-z0-9-]{1,62}$\", \"description\": \"Integration action reference as <integration>.<action> (e.g. slack.post-message), resolved against installed manifest packs. Executed in-process by the daemon's HTTP action executor with host-bound credentials. Mutually exclusive with `image`.\"}",
 	"StepSpec.needs":          "{\"uniqueItems\": true}",
 	"StepSpec.repository":     "{}",

@@ -87,7 +87,7 @@ Tables (the migrations in `internal/store/migrations/{sqlite,postgres}` are the 
 
 ## 5. Agent container
 
-Image `ghcr.io/icaro-dev/agent-base:<version>`:
+Image `ghcr.io/ggrocco/icaro-agent-base:<version>`:
 
 - Non-root user, UID/GID mapped when possible.
 - `/workspace` is an explicit bind mount of the session's worktree.

@@ -223,7 +223,7 @@ jobs:
       packages: write # push the agent base image to GHCR
       id-token: write # cosign keyless signing
     env:
-      IMAGE: ${{ vars.AGENT_IMAGE || 'ghcr.io/icaro-dev/agent-base' }}
+      IMAGE: ${{ vars.AGENT_IMAGE || 'ghcr.io/ggrocco/icaro-agent-base' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -250,6 +250,12 @@ jobs:
           push: true
           provenance: true
           sbom: true
+          # Links the GHCR package to this repository, which is what lets
+          # the workflow's GITHUB_TOKEN create it and push later versions.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}
             ${{ env.IMAGE }}:latest

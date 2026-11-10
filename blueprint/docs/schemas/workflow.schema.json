@@ -81,7 +81,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "image": {"type": "string", "description": "Container image reference to run for this step (e.g. ghcr.io/icaro-dev/agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.", "minLength": 1, "maxLength": 512},
+        "image": {"type": "string", "description": "Container image reference to run for this step (e.g. ghcr.io/ggrocco/icaro-agent-base:<version> for an agent, or any image for shell/js work). Mutually exclusive with `uses`.", "minLength": 1, "maxLength": 512},
         "uses": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}\\.[a-z][a-z0-9-]{1,62}$", "description": "Integration action reference as <integration>.<action> (e.g. slack.post-message), resolved against installed manifest packs. Executed in-process by the daemon's HTTP action executor with host-bound credentials. Mutually exclusive with `image`."},
         "needs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
         "repository": {"$ref": "#/$defs/repositoryRef"},
