@@ -69,10 +69,15 @@ jobs:
           for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
             ls dist/icaro_*_"$target".tar.gz
           done
+          ls dist/icaro_*_windows_amd64.zip dist/icaro_*_windows_arm64.zip
+          grep -q 'icaro_.*_windows_amd64\.zip' dist/checksums.txt
+          # Packages and the cask are for Linux and macOS only.
           ls dist/*.deb dist/*.rpm
+          if ls dist/*windows*.deb dist/*windows*.rpm 2>/dev/null; then echo "a Windows package was built" >&2; exit 1; fi
           grep -q "$ICARO_RELEASE_PUBKEY" build/install.sh
           cask=$(find dist -path '*Casks/icaro.rb')
           test -n "$cask" && grep -q 'binary "icaro"' "$cask"
+          if grep -qi windows "$cask"; then echo "the cask references a Windows archive" >&2; exit 1; fi
           # The binary embeds the web UI and the release public key.
           tar -xzf dist/icaro_*_linux_amd64.tar.gz -C "$RUNNER_TEMP" icaro
           "$RUNNER_TEMP/icaro" version

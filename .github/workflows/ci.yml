@@ -221,7 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [linux, darwin]
+        goos: [linux, darwin, windows]
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -229,6 +229,39 @@ jobs:
         with:
           go-version-file: go.mod
       - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o /dev/null ./cmd/icaro
+
+  windows:
+    # icaro.exe is a client of a daemon running elsewhere (ADR 0039). Run
+    # the real binary on Windows: it starts, refuses the commands that need
+    # the daemon's own machine, and asks for daemon.url otherwise.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: CGO_ENABLED=0 go build -o icaro.exe ./cmd/icaro
+      - name: client-only behavior
+        run: |
+          export ICARO_HOME="$RUNNER_TEMP/icaro-home"
+          ./icaro.exe version
+          ./icaro.exe schema > /dev/null
+          expect() { # expect TEXT ARGS...: the command fails and says TEXT
+            want=$1; shift
+            if out=$(./icaro.exe "$@" 2>&1); then echo "icaro $* succeeded: $out" >&2; exit 1; fi
+            case $out in *"$want"*) ;; *) echo "icaro $*: $out" >&2; exit 1 ;; esac
+          }
+          expect "on Windows icaro is a client" serve
+          expect "on Windows icaro is a client" setup
+          expect "on Windows icaro is a client" update --check
+          expect "set daemon.url and daemon.token" runs list
+          # With a daemon configured it gets as far as the network.
+          export ICARO_DAEMON__URL=http://127.0.0.1:9 ICARO_DAEMON__TOKEN=x
+          if out=$(./icaro.exe runs list 2>&1); then echo "reached a daemon on port 9: $out" >&2; exit 1; fi
+          case $out in *"on Windows"*) echo "still refused with daemon.url set: $out" >&2; exit 1 ;; esac
 
   integration:
     runs-on: ubuntu-latest
@@ -285,6 +318,13 @@ jobs:
           make app-macos
           bin/Icaro.app/Contents/MacOS/icaro version
           bin/Icaro.app/Contents/MacOS/icaro-app --version
+          # The disk image a release attaches: mount it and run the app in it.
+          dmg=$(desktop/build/dmg.sh bin v0.0.0-ci)
+          hdiutil attach -quiet -nobrowse -readonly -mountpoint "$RUNNER_TEMP/icaro-dmg" "$dmg"
+          "$RUNNER_TEMP/icaro-dmg/Icaro.app/Contents/MacOS/icaro-app" --version
+          codesign --verify --strict "$RUNNER_TEMP/icaro-dmg/Icaro.app"
+          test "$(readlink "$RUNNER_TEMP/icaro-dmg/Applications")" = /Applications
+          hdiutil detach -quiet "$RUNNER_TEMP/icaro-dmg"
       # The tarball a release attaches (release.yml, linux-app), installed
       # into a scratch prefix the way docs/desktop.md says to.
       - name: Linux tarball
