@@ -33,8 +33,11 @@ func TestOSHelpers(t *testing.T) {
 	if IsMacOS() != (runtime.GOOS == "darwin") {
 		t.Fatal("IsMacOS")
 	}
-	if a := Detach(); a == nil || !a.Setsid {
-		t.Fatalf("Detach = %+v", a)
+	if DaemonSupported() != (runtime.GOOS != "windows") {
+		t.Fatal("DaemonSupported")
+	}
+	if Detach() == nil {
+		t.Fatal("Detach returned nil")
 	}
 	if ProcessAlive(-1) {
 		t.Fatal("negative pid is not alive")

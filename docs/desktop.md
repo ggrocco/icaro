@@ -6,7 +6,7 @@ The desktop app (`Icaro.app` on macOS, `icaro-app` on Linux) is a menu bar app o
 
 ## Install and start
 
-**macOS:** download `Icaro_<version>_macos_universal.zip` from the [releases](https://github.com/ggrocco/icaro/releases), unzip it, and move `Icaro.app` to `/Applications`. The bundle includes the `icaro` CLI, which the app uses to start the daemon.
+**macOS:** download `Icaro_<version>_macos_universal.dmg` from the [releases](https://github.com/ggrocco/icaro/releases), open it, and drag `Icaro.app` onto **Applications**. The same app is also attached as `Icaro_<version>_macos_universal.zip`. The bundle includes the `icaro` CLI, which the app uses to start the daemon.
 
 **Linux:** download `Icaro_<version>_linux_amd64.tar.gz` or `Icaro_<version>_linux_arm64.tar.gz` from the [releases](https://github.com/ggrocco/icaro/releases) and extract it into `~/.local`:
 
@@ -68,4 +68,4 @@ These are separate from `icaro service install`, which starts the daemon itself 
 
 ## Building it
 
-The app is a separate Go module under [`desktop/`](../desktop/) and needs cgo. On macOS, `make app-macos` builds a universal `bin/Icaro.app`, signed ad hoc. On Linux, the same app builds with `make app` after installing `libgtk-4-dev libwebkitgtk-6.0-dev`, and `make app-linux` builds the release tarball for your architecture into `bin/`.
+The app is a separate Go module under [`desktop/`](../desktop/) and needs cgo. On macOS, `make app-macos` builds a universal `bin/Icaro.app`, signed ad hoc. `desktop/build/dmg.sh bin <version>` then wraps it in a disk image. On Linux, the same app builds with `make app` after installing `libgtk-4-dev libwebkitgtk-6.0-dev`, and `make app-linux` builds the release tarball for your architecture into `bin/`.

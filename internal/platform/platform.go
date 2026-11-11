@@ -13,6 +13,11 @@ import (
 // ErrLocked reports that another process holds a lock.
 var ErrLocked = errors.New("lock is held by another process")
 
+// DaemonSupported reports whether the daemon runs on this platform. It
+// does not on Windows, where icaro is a client of a daemon running
+// elsewhere (ADR 0039).
+func DaemonSupported() bool { return runtime.GOOS != "windows" }
+
 // IsMacOS reports whether we run on macOS (Docker Desktop semantics apply).
 func IsMacOS() bool { return runtime.GOOS == "darwin" }
 

@@ -18,6 +18,7 @@ These pages describe how to use what is built. The design (architecture, decisio
 - [Workflow assistant](assistant.md): a chat beside the editor that runs your own agent CLI, on a subscription or an API key
 - [Web UI](ui.md): `icaro ui`, sign-in, what the UI shows
 - [Desktop app](desktop.md): the menu bar app, notifications, launch at login
+- [Windows](windows.md): WSL2, or `icaro.exe` as a client of a daemon elsewhere
 - [Usage tracking](#usage-tracking)
 - [CLI reference](cli.md) (generated)
 

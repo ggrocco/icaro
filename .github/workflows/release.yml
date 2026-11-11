@@ -125,13 +125,14 @@ jobs:
         with:
           subject-path: |
             dist/*.tar.gz
+            dist/*.zip
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
 
   macos-app:
-    # Icaro.app, attached to the release as a zip with a SHA-256 file and
-    # an ed25519 signature (go run ./hack/sign verify).
+    # Icaro.app, attached to the release as a zip and as a disk image, each
+    # with a SHA-256 file and an ed25519 signature (go run ./hack/sign verify).
     needs: release
     runs-on: macos-latest
     environment: release
@@ -196,6 +197,18 @@ jobs:
           xcrun stapler staple dist/Icaro.app
           spctl --assess --type execute --verbose dist/Icaro.app
           rm dist/notarize.zip
+      # After the app is stapled, so the copy in the image has its ticket.
+      - name: disk image
+        run: echo "DMG=$(desktop/build/dmg.sh dist "$GITHUB_REF_NAME")" >> "$GITHUB_ENV"
+      - name: notarize the disk image
+        if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
       - name: unsigned build
         if: env.HAS_CERT != 'true' || env.HAS_NOTARY != 'true'
         run: echo "::warning::Icaro.app is not notarized; set the MACOS_* and APPLE_* secrets (see the top of release.yml)"
@@ -206,12 +219,16 @@ jobs:
         run: |
           zip="dist/Icaro_${GITHUB_REF_NAME#v}_macos_universal.zip"
           ditto -c -k --keepParent dist/Icaro.app "$zip"
-          (cd dist && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
-          go run ./hack/sign sign -in "$zip" -out "$zip.sig"
-          gh release upload "$GITHUB_REF_NAME" "$zip" "$zip.sha256" "$zip.sig" --clobber
+          for f in "$zip" "$DMG"; do
+            (cd dist && shasum -a 256 "$(basename "$f")" > "$(basename "$f").sha256")
+            go run ./hack/sign sign -in "$f" -out "$f.sig"
+            gh release upload "$GITHUB_REF_NAME" "$f" "$f.sha256" "$f.sig" --clobber
+          done
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/*.zip
+          subject-path: |
+            dist/*.zip
+            dist/*.dmg
 
   linux-app:
     # The desktop app for Linux (ADR 0027), attached to the release as one
