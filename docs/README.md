@@ -17,6 +17,7 @@ These pages describe how to use what is built. The design (architecture, decisio
 - [Agents and MCP](agents.md): a hands-on MCP and skills tutorial, client setup, workflow authoring, and troubleshooting
 - [Web UI](ui.md): `icaro ui`, sign-in, what the UI shows
 - [Desktop app](desktop.md): the menu bar app, notifications, launch at login
+- [Windows](windows.md): WSL2, or `icaro.exe` as a client of a daemon elsewhere
 - [Usage tracking](#usage-tracking)
 - [CLI reference](cli.md) (generated)
 

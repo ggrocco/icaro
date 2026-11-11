@@ -51,7 +51,7 @@ make release TAG=v1.2.3             # tags origin/main and pushes the tag
 
 [`hack/release.sh`](hack/release.sh) refuses a malformed tag, a dirty tree, a `HEAD` that is not the tip of `origin/main`, an existing tag, and a version older than the latest tag. A tag with a pre-release suffix (`v1.2.3-rc.1`) is published as a GitHub pre-release and does not update the Homebrew cask. Pushing a `v*` tag by hand (`git tag -a v1.2.3 -m v1.2.3 && git push origin v1.2.3`) starts the same workflow.
 
-Once CI passes on the tagged commit, approve the `release` environment in the workflow run. The release then gets, for each of `linux_amd64`, `linux_arm64`, `darwin_amd64`, and `darwin_arm64`, a `icaro_<version>_<os>_<arch>.tar.gz` archive, plus `.deb` and `.rpm` packages for Linux, the desktop app as `Icaro_<version>_macos_universal.zip` and `Icaro_<version>_linux_<arch>.tar.gz` (amd64 and arm64), `install.sh`, and `checksums.txt` with its ed25519 and Sigstore signatures. Windows is not a target: the daemon depends on Unix sockets and `flock`.
+Once CI passes on the tagged commit, approve the `release` environment in the workflow run. The release then gets, for each of `linux_amd64`, `linux_arm64`, `darwin_amd64`, and `darwin_arm64`, a `icaro_<version>_<os>_<arch>.tar.gz` archive, plus `.deb` and `.rpm` packages for Linux, the desktop app as `Icaro_<version>_macos_universal.zip`, `Icaro_<version>_macos_universal.dmg` and `Icaro_<version>_linux_<arch>.tar.gz` (amd64 and arm64), `install.sh`, and `checksums.txt` with its ed25519 and Sigstore signatures. For Windows it gets `icaro_<version>_windows_<arch>.zip` (amd64 and arm64): a client build, because the daemon does not run there ([ADR 0039](blueprint/docs/adr/0039-windows-client.md)).
 
 ### One-time setup
 

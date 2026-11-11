@@ -21,7 +21,8 @@ builds:
     binary: icaro
     env:
       - CGO_ENABLED=0
-    goos: [linux, darwin]
+    # Windows is a client build: the daemon does not run there (ADR 0039).
+    goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
@@ -34,6 +35,9 @@ archives:
   - id: default
     formats: [tar.gz]
     name_template: "icaro_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     files:
       - LICENSE
       - README.md
