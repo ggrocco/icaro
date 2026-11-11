@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,19 +30,20 @@ var brokenYAML = strings.Replace(helloYAML, "    image:", "    imagex:", 1)
 
 // fakeModel answers Open with a scripted completer.
 type fakeModel struct {
-	c      distill.Completer
-	skip   string
-	err    error
-	opens  int
-	closes int
+	c    distill.Completer
+	skip string
+	err  error
+	// The distiller's goroutine counts; the test reads.
+	opens  atomic.Int32
+	closes atomic.Int32
 }
 
 func (f *fakeModel) Open(context.Context) (distill.Completer, func(), string, error) {
-	f.opens++
+	f.opens.Add(1)
 	if f.err != nil {
 		return nil, nil, "", f.err
 	}
-	return f.c, func() { f.closes++ }, f.skip, nil
+	return f.c, func() { f.closes.Add(1) }, f.skip, nil
 }
 
 type scripted struct {
@@ -306,7 +308,7 @@ func TestDistillerLoopAndIdle(t *testing.T) {
 		j, err := e.st.GetDistill(e.ctx, d.ID)
 		return err == nil && j.Status == store.DistillDone
 	})
-	e.waitFor("the model server to stop", func() bool { return model.closes == model.opens && model.opens > 0 })
+	e.waitFor("the model server to stop", func() bool { return model.closes.Load() == model.opens.Load() && model.opens.Load() > 0 })
 	if err := e.s.Distill(e.ctx, d.ID); err != nil {
 		t.Fatal(err)
 	}
