@@ -54,6 +54,14 @@ const paths: Record<string, React.ReactNode> = {
     </>
   ),
   check: <path d="M20 6 9 17l-5-5" />,
+  assistant: (
+    <>
+      <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l.9-4.6A8 8 0 1 1 21 12z" />
+      <path d="M9 11h.01M12 11h.01M15 11h.01" />
+    </>
+  ),
+  close: <path d="M6 6l12 12M18 6 6 18" />,
+  send: <path d="M4 12 20 4l-6 16-3-7z" />,
   commit: (
     <>
       <circle cx="12" cy="12" r="3.5" />

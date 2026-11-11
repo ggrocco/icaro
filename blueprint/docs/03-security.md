@@ -40,6 +40,7 @@
 - Secrets in the macOS keychain / Linux secret store when available; fallback to an encrypted `0600` file only after an explicit password.
 - Logs: a secret redactor for every known secret value (6+ characters), known patterns, and structured records, covering HTTP response bodies from integration actions; never log the full env.
 - MCP surface (architecture §10): same auth as the API; no tool returns a secret value; no destructive tools in v1.
+- **The workflow assistant writes nothing on its own** ([ADR 0035](adr/0035-workflow-assistant-chat.md)). An `assist` session's socket serves the read-only authoring tools to a read-only caller, plus `propose_workflow` (a draft only the person applies) and `run_workflow`, which starts nothing until a person approves it over the authenticated API. The tool set comes from the session's kind, server-side. The CLI runs with the `icaro` server as its only MCP server and its built-in shell, file and web tools denied. Its stream and log are capped, parsed as untrusted input and secret-redacted as written. Ícaro runs the vendor's CLI under the profile's login and never reads that login itself.
 
 **Integrations** ([ADR 0007](adr/0007-integration-manifests.md))
 
@@ -70,3 +71,4 @@
 | Local DNS for `.test` misconfigured | warning when enabled | shows the resolver state; suggests `localhost:<port>` |
 | Missing webhook secret | error when enabled | generates/requests a secret |
 | Dangerous compose | error | shows the blocked field |
+| Workflow assistant unavailable (no profile runs claude or codex, its profile is not signed in, or its allowlist does not reach the provider) | warning | `icaro login <profile>`, or set `assistant.profile` ([ADR 0035](adr/0035-workflow-assistant-chat.md)) |

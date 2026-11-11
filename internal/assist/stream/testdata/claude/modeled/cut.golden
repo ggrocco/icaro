@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "c0ffee"
+    },
+    {
+      "kind": "text",
+      "text": "Working on it"
+    }
+  ],
+  "dropped": 0,
+  "terminal": ""
+}

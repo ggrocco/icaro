@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -88,7 +89,20 @@ const (
 )
 
 // Register adds the authoring tools and resources to s.
-func Register(s *mcp.Server, d Deps) {
+func Register(s *mcp.Server, d Deps) { register(s, d, func(string) bool { return true }) }
+
+// ReadTools are the authoring tools that change nothing.
+var ReadTools = []string{ToolGetSchema, ToolListIntegration, ToolGetIntegration, ToolListSecrets, ToolValidate, ToolGet, ToolList, ToolGetRun}
+
+// RegisterRead adds the resources and only the tools in ReadTools: the
+// workflow assistant's socket serves these, and writes go through its own
+// draft and approval tools instead (ADR 0035).
+func RegisterRead(s *mcp.Server, d Deps) {
+	register(s, d, func(name string) bool { return slices.Contains(ReadTools, name) })
+}
+
+func register(srv *mcp.Server, d Deps, keep func(string) bool) {
+	s := filtered{srv, keep}
 	s.AddResource(mcp.Resource{
 		URI: "icaro://schemas/workflow", Name: "workflow-schema", Title: "Workflow JSON Schema",
 		Description: "The published workflow v1 contract. Re-read it before writing a workflow.", MimeType: "application/schema+json",
@@ -355,6 +369,20 @@ func Register(s *mcp.Server, d Deps) {
 			return mcp.JSONResult(out), nil
 		},
 	})
+}
+
+// filtered registers resources, and only the tools keep accepts.
+type filtered struct {
+	s    *mcp.Server
+	keep func(string) bool
+}
+
+func (f filtered) AddResource(r mcp.Resource) { f.s.AddResource(r) }
+
+func (f filtered) AddTool(t mcp.Tool) {
+	if f.keep(t.Name) {
+		f.s.AddTool(t)
+	}
 }
 
 func summary(w *service.WorkflowInfo) map[string]any {

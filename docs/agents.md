@@ -5,7 +5,7 @@ Connect Claude Code, Codex, or another MCP client to Ícaro to create workflows 
 - **MCP (Model Context Protocol)** is the connection: it exposes tools for discovering, validating, running, and debugging workflows, plus reading and writing project memory.
 - **A skill** is a set of instructions for the agent. Ícaro bundles [`icaro-workflows`](../skills/icaro-workflows/SKILL.md), which teaches the workflow-authoring loop. The skill uses the MCP tools; install both to follow the tutorial.
 
-The host daemon exposes workflow authoring and memory. Agents inside isolated Ícaro sessions get a separate, memory-only MCP endpoint automatically; they cannot reach the daemon's authoring API.
+The host daemon exposes workflow authoring and memory. Agents inside isolated Ícaro sessions get a separate, memory-only MCP endpoint automatically; they cannot reach the daemon's authoring API. The one exception is the [workflow assistant](assistant.md): its sessions get the read-only authoring tools plus tools that propose drafts and ask before running, never the tools that save a workflow.
 
 ## Connecting an agent on your machine
 

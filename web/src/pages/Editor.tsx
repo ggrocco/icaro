@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type Issue } from "../api";
+import { assistApi } from "../assist";
+import { AssistantPanel } from "../components/AssistantPanel";
+import { Icon } from "../components/icons";
 import { FormEditor } from "../components/FormEditor";
 import { YamlEditor } from "../components/lazy";
 import { RunGraph } from "../components/lazy";
@@ -24,12 +27,20 @@ interface Props {
   name?: string;
   initial?: string;
   onSaved?: (name: string) => void;
+  // chat opens the editor with this assistant chat beside it.
+  chat?: string;
+  onChatSettled?: () => void;
 }
 
 // Editor shows the form and the YAML side by side over one source text,
 // validates continuously, and saves only a document the daemon accepts.
-export function Editor({ name, initial, onSaved }: Props) {
+export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
   const [yaml, setYaml] = useState(initial ?? TEMPLATE);
+  const [chatId, setChatId] = useState<string | undefined>(chat);
+  const [assistOpen, setAssistOpen] = useState(chat !== undefined);
+  const [assistError, setAssistError] = useState<Error | undefined>();
+  // The document the chat's draft last got, so edits are sent once.
+  const synced = useRef<string | undefined>(initial);
   const [tab, setTab] = useState<"form" | "yaml" | "json">("form");
   const [issues, setIssues] = useState<Issue[]>([]);
   const [saving, setSaving] = useState(false);
@@ -42,6 +53,33 @@ export function Editor({ name, initial, onSaved }: Props) {
   useEffect(() => {
     if (initial !== undefined) setYaml(initial);
   }, [initial]);
+
+  // The person's edits become the chat's draft (debounced), so the
+  // assistant's get_draft sees what is in the editor.
+  useEffect(() => {
+    if (!chatId || yaml === synced.current) return;
+    const t = window.setTimeout(() => {
+      synced.current = yaml;
+      assistApi.putDraft(chatId, yaml).catch(setAssistError);
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [chatId, yaml]);
+
+  const openAssistant = async () => {
+    setAssistError(undefined);
+    if (chatId) {
+      setAssistOpen(true);
+      return;
+    }
+    try {
+      const d = await assistApi.create({ workflow: name, yaml });
+      synced.current = yaml;
+      setChatId(d.id);
+      setAssistOpen(true);
+    } catch (e) {
+      setAssistError(e as Error);
+    }
+  };
 
   // Validate as the user types (debounced): the same structured issues as
   // the CLI, API and MCP validate_workflow.
@@ -70,10 +108,12 @@ export function Editor({ name, initial, onSaved }: Props) {
         setTab("yaml");
         return;
       }
-      const info = await api.apply(yaml);
+      // With a chat attached, the version is recorded as the person's
+      // "via assistant <chat>".
+      const info = chatId ? await assistApi.apply(chatId, yaml) : await api.apply(yaml);
       setSaved(true);
       onSaved?.(info.name);
-      if (!name) go("workflows", info.name);
+      if (!name && !chatId) go("workflows", info.name);
     } catch (e) {
       setSaveError(e as Error);
       if (e instanceof ApiError && e.issues.length) setIssues(e.issues);
@@ -99,8 +139,16 @@ export function Editor({ name, initial, onSaved }: Props) {
           {saving ? "Saving…" : "Validate & save"}
         </button>
         {saved && <span className="muted">Saved.</span>}
+        {!assistOpen && (
+          <button onClick={openAssistant}>
+            <Icon name="assistant" />
+            Ask the assistant
+          </button>
+        )}
       </div>
       {saveError && <ErrorBox error={saveError} />}
+      {assistError && <ErrorBox error={assistError} />}
+      <div className={assistOpen && chatId ? "with-assistant" : undefined}>
       <div className="split">
         <div className="pane">
           {tab === "form" && <FormEditor yaml={yaml} onChange={setYaml} integrations={integrations.data ?? []} />}
@@ -113,6 +161,19 @@ export function Editor({ name, initial, onSaved }: Props) {
           <h2 className="h3">Issues</h2>
           {issues.length ? <Issues issues={issues} /> : <p className="muted">No issues.</p>}
         </div>
+      </div>
+      {assistOpen && chatId && (
+        <AssistantPanel
+          chatId={chatId}
+          yaml={yaml}
+          onAccept={(y) => {
+            synced.current = y; // the chat's draft already holds it
+            setYaml(y);
+          }}
+          onClose={() => setAssistOpen(false)}
+          onSettled={onChatSettled}
+        />
+      )}
       </div>
     </div>
   );

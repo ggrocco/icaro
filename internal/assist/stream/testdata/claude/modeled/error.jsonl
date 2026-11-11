@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"c0ffee"}
+not json at all
+{"type":"some_future_event","x":1}
+{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":30}

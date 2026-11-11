@@ -1296,3 +1296,158 @@ main.login {
 .host-signin p {
   margin: 0;
 }
+
+/* ---------- Workflow assistant (ADR 0035) ---------- */
+.with-assistant {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1200px) {
+  .with-assistant {
+    grid-template-columns: 1fr;
+  }
+}
+.assistant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  position: sticky;
+  top: 16px;
+}
+.assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.assistant-panel .assistant-head > .icon {
+  color: var(--accent);
+}
+.assistant-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.assistant-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-title .muted {
+  font-size: 0.85em;
+}
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 160px;
+  max-height: 55vh;
+  flex: 0 0 auto;
+}
+.chat-log > li {
+  flex-shrink: 0;
+}
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.chat-msg.user {
+  background: var(--accent-soft);
+  margin-left: 24px;
+}
+.chat-msg.assistant {
+  margin-right: 8px;
+}
+.chat-who {
+  font-size: 0.78em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.chat-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-note,
+.chat-usage {
+  font-size: 0.85em;
+  margin: 0;
+}
+.chat-empty {
+  padding: 8px 2px;
+}
+.chat-msg .badge {
+  align-self: flex-start;
+}
+.tool-calls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tool-calls summary {
+  cursor: pointer;
+  font-size: 0.88em;
+  color: var(--text-2);
+}
+.code.small {
+  font-size: 0.8em;
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0 0;
+}
+.approval-card,
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.proposal {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.proposal .diff {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+}
+.proposal p,
+.approval-card p {
+  margin: 0;
+  font-size: 0.88em;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.composer textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+.composer .row {
+  justify-content: flex-end;
+}

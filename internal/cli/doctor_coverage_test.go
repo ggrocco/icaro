@@ -25,6 +25,7 @@ var doctorTableChecks = map[string]string{ //nolint:gosec // doctor check names,
 	"Dangerous compose":                                "preview compose lint",
 	"Injected credential unusable":                     "credential injection",
 	"A profile's `runtime` not registered with Docker": "container runtimes",
+	"Workflow assistant unavailable":                   "workflow assistant",
 }
 
 func TestDoctorCoversSecurityTable(t *testing.T) {

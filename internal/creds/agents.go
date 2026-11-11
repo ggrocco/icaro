@@ -2,8 +2,10 @@ package creds
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MCPSocket is where a session's memory MCP socket appears in its container.
@@ -22,6 +24,88 @@ type Agent struct {
 	Login []string
 	// configure writes the MCP entry and preamble into the session layer.
 	configure func(h HomeFiles, mcp bool, preamble string) error
+	// chat builds one headless assistant turn (ADR 0035); nil when the
+	// agent has no headless chat mode.
+	chat func(t ChatTurn) []string
+}
+
+// ChatTurn is one headless assistant turn. The user's message goes in on
+// stdin, never on the command line; the system prompt is the preamble
+// Configure writes into the session's home layer.
+type ChatTurn struct {
+	// ConversationID resumes a conversation; empty on the first turn.
+	ConversationID string
+	// NewID names a new conversation for CLIs that accept a caller-chosen
+	// id (Claude Code), so the id is known even if the stream is cut.
+	NewID string
+}
+
+// ErrNoChat reports an agent without a headless chat mode.
+var ErrNoChat = errors.New("this profile's agent has no headless chat mode (the assistant supports claude and codex)")
+
+// ChatCommand returns the command for one assistant turn.
+func (a Agent) ChatCommand(t ChatTurn) ([]string, error) {
+	if a.chat == nil {
+		return nil, ErrNoChat
+	}
+	return a.chat(t), nil
+}
+
+// CanChat reports whether the agent has a headless chat mode.
+func (a Agent) CanChat() bool { return a.chat != nil }
+
+// ChatTools is the allowlist pattern for the assistant's tools: the icaro
+// MCP server only, no built-in shell, file or web tools.
+const ChatTools = "mcp__icaro"
+
+// claudeBuiltins are Claude Code's built-in tools, all denied in an
+// assistant turn. The list is modeled on the documented tool names;
+// spike S11 checks it against each CLI version.
+var claudeBuiltins = []string{"Bash", "BashOutput", "KillShell", "Edit", "MultiEdit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "Task", "TodoWrite", "SlashCommand"}
+
+// chatClaude is `claude -p` with the stream-json output ADR 0035 parses.
+// The flags are modeled on Claude Code's documented headless mode;
+// spike S11 pins them per CLI version.
+func chatClaude(t ChatTurn) []string {
+	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"icaro": map[string]any{"type": "stdio", "command": MCPCommand[0], "args": MCPCommand[1:]},
+	}})
+	cmd := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"}
+	if t.ConversationID != "" {
+		cmd = append(cmd, "--resume", t.ConversationID)
+	} else if t.NewID != "" {
+		cmd = append(cmd, "--session-id", t.NewID)
+	}
+	return append(cmd,
+		"--strict-mcp-config", "--mcp-config", string(mcp),
+		"--allowedTools", ChatTools,
+		"--disallowedTools", strings.Join(claudeBuiltins, ","),
+	)
+}
+
+// chatCodex is `codex exec --json`, reading the prompt from stdin ("-").
+// Modeled on Codex's documented exec mode; spike S11 pins it.
+func chatCodex(t ChatTurn) []string {
+	cmd := []string{"codex", "exec"}
+	if t.ConversationID != "" {
+		cmd = append(cmd, "resume", t.ConversationID)
+	}
+	return append(cmd, "--json", "--skip-git-repo-check", "--sandbox", "read-only", "-c", `approval_policy="never"`,
+		"-c", fmt.Sprintf("mcp_servers.icaro.tool_timeout_sec=%d", int(ChatToolTimeout.Seconds())), "-")
+}
+
+// ChatToolTimeout is how long an assistant turn's CLI waits for one MCP
+// tool call. A gated call (run_workflow) waits for a person, so this must
+// outlast assistant.approval_timeout; the CLIs' defaults are much shorter
+// (Codex: 60 s).
+const ChatToolTimeout = 30 * time.Minute
+
+// ChatEnv is the environment of an assistant turn.
+func (a Agent) ChatEnv() []string {
+	if a.Name == "claude" {
+		return []string{fmt.Sprintf("MCP_TOOL_TIMEOUT=%d", ChatToolTimeout.Milliseconds())}
+	}
+	return nil
 }
 
 // HomeFiles reads and writes one session's home.
@@ -32,8 +116,8 @@ type HomeFiles interface {
 
 // Agents is the catalog, keyed by profiles' `agent` field.
 var Agents = map[string]Agent{
-	"claude": {Name: "claude", Run: []string{"claude"}, Login: []string{"claude"}, configure: configureClaude},
-	"codex":  {Name: "codex", Run: []string{"codex"}, Login: []string{"codex", "login"}, configure: configureCodex},
+	"claude": {Name: "claude", Run: []string{"claude"}, Login: []string{"claude"}, configure: configureClaude, chat: chatClaude},
+	"codex":  {Name: "codex", Run: []string{"codex"}, Login: []string{"codex", "login"}, configure: configureCodex, chat: chatCodex},
 	"":       {Name: "shell", Run: nil, Login: nil, configure: nil},
 }
 

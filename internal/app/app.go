@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"icaro/internal/api"
+	"icaro/internal/assist"
 	"icaro/internal/config"
 	"icaro/internal/container"
 	"icaro/internal/container/docker"
@@ -59,7 +60,8 @@ type App struct {
 	// session.PreviewHook for the session manager.
 	Previews *preview.Manager
 	Memory   *memory.Engine
-	MCP      *mcp.Server // host MCP server at /mcp; Phase 4 adds authoring tools
+	MCP      *mcp.Server     // host MCP server at /mcp; Phase 4 adds authoring tools
+	Assist   *assist.Service // the workflow assistant (ADR 0035)
 	// Workflows holds the workflow engine and the collaborators earlier
 	// wirers provide to it (see internal/app/workflows.go).
 	Workflows WorkflowWiring
@@ -242,7 +244,7 @@ func (d *dockerGated) Run(ctx context.Context) error {
 // interface (never a typed nil pointer) and the docker check reports it.
 func BaseChecks(cfg *config.Config, st *store.Store, eng interface{ Ping(context.Context) error }, engErr error) []doctor.Check {
 	l := cfg.Layout()
-	checks := []doctor.Check{doctor.DaemonCheck(l), doctor.PermissionsCheck(l)}
+	checks := []doctor.Check{doctor.DaemonCheck(l), doctor.PermissionsCheck(l), AssistantCheck(cfg)}
 	switch {
 	case engErr != nil:
 		checks = append(checks, doctor.Func("docker", func(context.Context) doctor.Result {

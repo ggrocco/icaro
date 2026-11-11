@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"icaro","tool":"list_integrations","arguments":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"icaro","tool":"list_integrations","arguments":{},"result":{"content":[{"type":"text","text":"{\"integrations\":[{\"name\":\"slack\"}]}"}]},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"mcp_tool_call","server":"icaro","tool":"propose_workflow","arguments":"{\"yaml\":\"name: x\"}","result":null,"error":{"message":"the draft has issues"},"status":"failed"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"bash -lc ls","aggregated_output":"permission denied","exit_code":1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Slack is installed; the draft needs a channel."}}
+{"type":"turn.completed","usage":{"input_tokens":9000,"cached_input_tokens":0,"output_tokens":420}}

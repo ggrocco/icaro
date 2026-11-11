@@ -5,11 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"icaro/internal/mcp"
@@ -230,58 +225,19 @@ func (e *Engine) ServeSession(ctx context.Context, id session.Identity, socketPa
 	if id.ProjectID == "" {
 		return nil, fmt.Errorf("%w: session %s has no project", ErrInvalid, id.SessionID)
 	}
-	if len(socketPath) >= MaxSocketPath {
-		return nil, fmt.Errorf("%w: socket path %q is %d bytes; Unix sockets need < %d (use a shorter ICARO_HOME)", ErrInvalid, socketPath, len(socketPath), MaxSocketPath)
-	}
-	srv := e.sessionServer
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
-		return nil, err
-	}
-	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(socketPath, 0o600); err != nil {
-		_ = ln.Close()
-		return nil, err
-	}
 	caller := mcp.Caller{
 		ProjectID: id.ProjectID, Branch: id.Branch, Agent: id.Agent, SessionID: id.SessionID,
 		Principal: "session:" + id.SessionID, Scope: "write",
 	}
-	h := srv.HTTPHandler(func(*http.Request) (mcp.Caller, error) { return caller, nil })
-	mux := http.NewServeMux()
-	mux.Handle("/mcp", h)
-	mux.Handle("/", h)
-	hs := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = hs.Serve(ln) }()
-
-	var once sync.Once
-	done := make(chan struct{})
-	stop := func() {
-		once.Do(func() {
-			close(done)
-			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = hs.Shutdown(sctx)
-			_ = os.Remove(socketPath)
-		})
+	stop, err := mcp.ServeUnix(ctx, e.sessionServer, caller, socketPath)
+	if errors.Is(err, mcp.ErrSocketPath) {
+		return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	go func() {
-		select {
-		case <-ctx.Done():
-			stop()
-		case <-done:
-		}
-	}()
-	return stop, nil
+	return stop, err
 }
 
 // MaxSocketPath is the portable limit for a Unix socket path (macOS
 // sun_path is 104 bytes including the terminator).
-const MaxSocketPath = 104
+const MaxSocketPath = mcp.MaxSocketPath
 
 var _ session.MemoryAttacher = (*Engine)(nil)

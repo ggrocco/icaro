@@ -1,0 +1,73 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "3f0c6b2e-8a51-4c1e-9d7a-0d9f1a2b3c4d"
+    },
+    {
+      "kind": "text",
+      "text": "Let me check the schema and integrations."
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "toolu_01",
+      "server": "icaro",
+      "tool": "get_workflow_schema",
+      "args": {}
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "toolu_01",
+      "server": "icaro",
+      "tool": "get_workflow_schema",
+      "result": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "toolu_02",
+      "server": "icaro",
+      "tool": "validate_workflow",
+      "args": {
+        "yaml": "name: bug-to-slack\nsteps: []\n"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "toolu_02",
+      "server": "icaro",
+      "tool": "validate_workflow",
+      "result": "{\"valid\":false,\"issues\":[{\"path\":\"/steps\",\"message\":\"at least one step is required\"}]}"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "toolu_03",
+      "tool": "Bash",
+      "args": {
+        "command": "ls"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "toolu_03",
+      "tool": "Bash",
+      "result": "Bash is not allowed",
+      "is_error": true
+    },
+    {
+      "kind": "text",
+      "text": "The draft needs a step; I proposed one."
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 5000,
+        "output": 300
+      }
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "done"
+}
