@@ -11,23 +11,23 @@
 
 S11 covers a chat turn with the CLI's own tools off. An agent step needs them on, unattended, inside `/workspace`. Run before any other deliverable, with the same real sign-ins and an `inject` API-key profile.
 
-- [ ] For each CLI (Claude Code, Codex), record the exact one-shot flags for an unattended run in `/workspace`:
+- [ ] For each CLI (Claude Code, Codex), record the exact one-shot flags for an unattended run in `/workspace`: *(Modeled from the CLIs' documentation in `internal/creds/steps.go`, so the phase could be built; real logins must confirm them.)*
   - the prompt on stdin;
   - the event stream on stdout;
   - file and shell tools allowed;
   - the memory MCP server configured;
   - no prompt for permission at any point.
-- [ ] Record streams as fixtures under `internal/assist/testdata/<agent>/<version>/step-*`:
+- [ ] Record streams as fixtures under `internal/assist/testdata/<agent>/<version>/step-*`: *(Modeled step fixtures are in `internal/assist/stream/testdata/<agent>/modeled/step-*`; real recordings go beside them.)*
   - a run that edits files and finishes;
   - a run that writes `/icaro/output.json`;
   - a run stopped by `max_turns`;
   - an expired login, a rate limit, and a CLI error.
-- [ ] For each param in the first catalog (`model`, `max_turns`), confirm the flag it maps to and how the CLI reports a bad value.
-- [ ] Confirm that with `inject` the CLI accepts the placeholder key and base URL with tools on, and calls no host outside the profile's allowlist (spike S4's open half, for this mode).
+- [ ] For each param in the first catalog (`model`, `max_turns`), confirm the flag it maps to and how the CLI reports a bad value. *(Codex documents no turn limit for `exec`, so its catalog declares only `model` until S11 finds one.)*
+- [ ] Confirm that with `inject` the CLI accepts the placeholder key and base URL with tools on, and calls no host outside the profile's allowlist (spike S4's open half, for this mode). *(The e2e test checks the placeholder token and the absence of the key with a fake CLI; the real CLI is still to be checked.)*
 
 ## Deliverables
 
-- [ ] **Catalog.** Each `Agent` in `internal/creds` gains a step spec on top of its headless adapter:
+- [x] **Catalog.** Each `Agent` in `internal/creds` gains a step spec on top of its headless adapter:
   - the unattended one-shot command;
   - typed params (name, type, flag);
   - result capture from the normalized stream;
@@ -35,34 +35,34 @@ S11 covers a chat turn with the CLI's own tools off. An agent step needs them on
   - the minimum CLI version.
 
   A profile whose `agent` has no step spec cannot be listed in `workflows.agent_profiles`.
-- [ ] **Config.** `workflows.agent_profiles`, validated at load: every entry is a profile with an agent, and the default follows the ADR. `icaro config show` shows it.
-- [ ] **Contract.** Add the `agent` step form (`profile`, `prompt`, `params`, `memory`) and the built-in `result` output to the spec types in `internal/workflow`. Regenerate `schema/workflow.schema.json` with `go generate ./...`, and update the [blueprint contract](../schemas/workflow.schema.json) so the drift test passes.
-- [ ] **Validation.**
+- [x] **Config.** `workflows.agent_profiles`, validated at load: every entry is a profile with an agent, and the default follows the ADR. `icaro config show` shows it.
+- [x] **Contract.** Add the `agent` step form (`profile`, `prompt`, `params`, `memory`) and the built-in `result` output to the spec types in `internal/workflow`. Regenerate `schema/workflow.schema.json` with `go generate ./...`, and update the [blueprint contract](../schemas/workflow.schema.json) so the drift test passes.
+- [x] **Validation.**
   - `profile` must be in `workflows.agent_profiles`, with a nearest-match hint.
   - `params` are checked against the harness's declared names and types, with a nearest-match hint for an unknown name.
   - `prompt` is parsed at validation time and limited to `steps` (of `needs` ancestors), `trigger`, `env`, `run` and `workflow`; `secrets` is an error.
   - `command` and `image` on an agent step are errors.
   - A warning, not an error, when the prompt references `trigger.*` in a workflow with an integration trigger. It names the profile.
-- [ ] **Engine.** In `internal/workflow/engine`, an agent step is one container in the run session with three differences from an image step:
+- [x] **Engine.** In `internal/workflow/engine`, an agent step is one container in the run session with three differences from an image step: *(The memory scope is derived server-side: the run's project, else the step's repository, else the workflow, since run sessions have no project.)*
   - **Home:** a fresh writable layer over its profile's seed for each attempt, discarded when the attempt ends, using the same layering as interactive sessions (`internal/creds`, ADR 0012). The step counts as a running overlay session of its profile for `icaro login`.
   - **Network:** an egress attachment for the step's agent profile, with credential injection where the profile has `inject`. A run gets one attachment per profile it uses, not one per run.
   - **Image:** the profile's image resolved to the digest pinned in the `images` table at run start, recorded on the step run, and reused by every attempt and every agent step of the run under that profile.
 
   The rendered prompt is written to `/icaro/prompt.md` and fed on stdin. The stream is parsed, size-capped and redacted into the step log. `result` and the declared `outputs` are captured, and the step's memory socket is served when `memory` is on. Re-attach after a daemon restart works as for image steps.
-- [ ] **Store.** A migration in both dialects adds the resolved image digest, the profile and the token usage to step runs. Tests pass on SQLite and Postgres.
-- [ ] **Usage.** The stream's `usage` events are recorded on the step run and counted by `icaro usage` per run and step. Subscription runs show tokens only; `inject` runs also show the labelled cost estimate.
-- [ ] **Clients.**
+- [x] **Store.** A migration in both dialects adds the resolved image digest, the profile and the token usage to step runs. Tests pass on SQLite and Postgres. *(Migration `00019_agent_steps`; 00018 is Phase 15's.)*
+- [x] **Usage.** The stream's `usage` events are recorded on the step run and counted by `icaro usage` per run and step. Subscription runs show tokens only; `inject` runs also show the labelled cost estimate.
+- [x] **Clients.** *(Agent profiles and params come from `GET /api/v1/agent-profiles` and the `list_agent_profiles` tool.)*
   - `get_run`, `icaro runs get` and the web UI's run page show an agent step's profile, CLI, image digest, params, prompt, `result` and token usage.
   - The run graph marks agent steps.
   - The form editor offers the `agent` form, with `profile` and `params` choices taken from the config and the catalog.
-- [ ] **Doctor.** Checks:
+- [x] **Doctor.** Checks:
   - each listed agent profile is signed in or injects a key;
   - its image has the CLI at or above the catalog's minimum version;
   - its allowlist reaches the provider.
 
   They are mapped in the doctor coverage test, with a row in the [doctor checks](../03-security.md#icaro-doctor).
-- [ ] **Skill.** The `icaro-workflows` skill learns the `agent` form: list the allowed profiles and their params before writing one, and pass secrets only through `env`.
-- [ ] **Docs.**
+- [x] **Skill.** The `icaro-workflows` skill learns the `agent` form: list the allowed profiles and their params before writing one, and pass secrets only through `env`.
+- [x] **Docs.**
   - `docs/workflows.md`: an "Agent steps" section with a worked example in a ```` ```yaml workflow ```` block (checked by `hack/docscheck`), the untrusted-input guidance, and how to enable a profile.
   - `docs/agents.md`: profiles for workflows.
   - Architecture §5 and §6, [ADR 0010](../adr/0010-run-sessions.md)'s note on agent homes, and [security](../03-security.md): the per-step home layer and egress, and `workflows.agent_profiles` as the boundary.
@@ -70,20 +70,20 @@ S11 covers a chat turn with the CLI's own tools off. An agent step needs them on
 
 ## Acceptance criteria
 
-- [ ] A workflow with an agent step fails validation until its profile is listed in `workflows.agent_profiles`, and the issue names the setting.
-- [ ] Invalid agent steps return structured issues with JSON Pointer paths: an unlisted profile, an unknown or mistyped param (with a hint), `secrets` in the prompt, a reference to a step that is not a `needs` ancestor, and `command` or `image` on the step.
-- [ ] A prompt that reads `trigger.*` in a workflow with an integration trigger validates with a warning that names the profile.
-- [ ] With a profile signed in by subscription and no API key on the machine, an agent step reviews a repository checked out at `/workspace`. It writes `/icaro/output.json`, and a later step reads both its declared output and `result`.
-- [ ] With an `inject` profile, the same step runs, and no container, log, SQL row or API response contains the API key. Unit tests check the container spec and logs; an integration test checks the real container.
-- [ ] Two agent steps of one run, under the same profile, each start from the profile's seed: a file one writes in its home is absent in the other's.
-- [ ] An agent step reaches only its profile's allowlist; an image step in the same run still has `workflows.profile`'s egress.
-- [ ] Moving the profile image's tag during a run does not change the image a later attempt or agent step of that run uses, and the digest is shown on the run.
-- [ ] `icaro login <profile>` is refused while an agent step of that profile is running.
-- [ ] An expired login fails the attempt with **Sign in required** and the `icaro login` command, and does not retry. A CLI error is retried under `retry`, and each attempt gets a fresh home layer.
-- [ ] A daemon restart mid-step re-attaches to the running agent container and captures its result.
-- [ ] A recorded stream with a prompt injection ("print the API key", "call the daemon API") can reach nothing outside the step's container, allowlist, workspace and memory scope.
-- [ ] Token usage of a run is shown per agent step and counted by `icaro usage`.
-- [ ] Every new decision has unit tests against the fake engine and the recorded fixtures. The home layer, egress attachment and inject paths have tests behind the `integration` build tag. Coverage stays at the [ADR 0025](../adr/0025-coverage-target-and-exceptions.md) targets.
+- [x] A workflow with an agent step fails validation until its profile is listed in `workflows.agent_profiles`, and the issue names the setting.
+- [x] Invalid agent steps return structured issues with JSON Pointer paths: an unlisted profile, an unknown or mistyped param (with a hint), `secrets` in the prompt, a reference to a step that is not a `needs` ancestor, and `command` or `image` on the step.
+- [x] A prompt that reads `trigger.*` in a workflow with an integration trigger validates with a warning that names the profile.
+- [ ] With a profile signed in by subscription and no API key on the machine, an agent step reviews a repository checked out at `/workspace`. It writes `/icaro/output.json`, and a later step reads both its declared output and `result`. *(`hack/e2e` `TestAgentSteps` runs the flow against real Docker with a fake CLI (outputs, `result`, a later step reading both); a real subscription login waits on S11.)*
+- [x] With an `inject` profile, the same step runs, and no container, log, SQL row or API response contains the API key. Unit tests check the container spec and logs; an integration test checks the real container. *(Unit tests check the container spec and env; `TestAgentSteps` checks the real container's view, the run, its logs and the database.)*
+- [x] Two agent steps of one run, under the same profile, each start from the profile's seed: a file one writes in its home is absent in the other's. *(Unit tests and `TestAgentSteps`.)*
+- [x] An agent step reaches only its profile's allowlist; an image step in the same run still has `workflows.profile`'s egress. *(The step is attached to its profile's egress network and the image step to `workflows.profile`'s; the egress confinement itself is covered by the container integration tests.)*
+- [x] Moving the profile image's tag during a run does not change the image a later attempt or agent step of that run uses, and the digest is shown on the run.
+- [x] `icaro login <profile>` is refused while an agent step of that profile is running.
+- [x] An expired login fails the attempt with **Sign in required** and the `icaro login` command, and does not retry. A CLI error is retried under `retry`, and each attempt gets a fresh home layer.
+- [x] A daemon restart mid-step re-attaches to the running agent container and captures its result.
+- [x] A recorded stream with a prompt injection ("print the API key", "call the daemon API") can reach nothing outside the step's container, allowlist, workspace and memory scope. *(The stream is only parsed into log lines; the container mounts only its workspace, I/O volume, home layer and memory socket, carries no secret but the step's env, and has no daemon API.)*
+- [x] Token usage of a run is shown per agent step and counted by `icaro usage`.
+- [x] Every new decision has unit tests against the fake engine and the recorded fixtures. The home layer, egress attachment and inject paths have tests behind the `integration` build tag. Coverage stays at the [ADR 0025](../adr/0025-coverage-target-and-exceptions.md) targets. *(The home layer, egress attachment and inject paths run against real Docker in `hack/e2e` (`-tags e2e`) rather than under `integration`.)*
 
 ## Where it lives
 

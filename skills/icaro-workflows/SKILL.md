@@ -6,9 +6,10 @@ description: Author, validate, run and debug Ícaro workflows through the icaro 
 # Authoring Ícaro workflows
 
 Ícaro workflows are YAML DAGs of steps. Each step is an `image` step (a
-container), a `uses` step (an integration action the daemon runs over
-HTTP), an `approval` step (a person approves or rejects) or a `wait` step
-(a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
+container), an `agent` step (an agent CLI such as Claude Code does a task
+under an operator-approved profile), a `uses` step (an integration action
+the daemon runs over HTTP), an `approval` step (a person approves or
+rejects) or a `wait` step (a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
 schema and the validator are the source of truth, not your memory.
 
 ## The loop
@@ -76,9 +77,22 @@ steps:
 
 ## Rules the validator enforces
 
-- A step has exactly one of `image`, `uses`, `approval` or `wait`.
-  `command`, `env` and `outputs` are for image steps only; a `uses` step's
-  outputs come from the action.
+- A step has exactly one of `image`, `agent`, `uses`, `approval` or
+  `wait`. `command` is for image steps only; `env` and `outputs` are for
+  image and agent steps; a `uses` step's outputs come from the action.
+- **Agent steps.** Before writing one, call `list_agent_profiles`: it
+  lists the profiles the operator allows (`workflows.agent_profiles`, the
+  first is the default) and each one's params. If it is empty, agent steps
+  are off; ask the human to list a profile, and do not work around it with
+  an image step that runs an agent CLI. Write
+  `agent: {profile: <name>, prompt: "...", params: {...}}`, using only the
+  listed params. The prompt may read `steps`, `trigger`, `env`, `run` and
+  `workflow`, never `secrets`: pass a secret the agent needs through the
+  step's `env`. Its final answer is the output `result`; declare other
+  outputs as `json:<path>` from `/icaro/output.json` and tell the agent to
+  write that file. A `validate_workflow` warning about trigger data means
+  the prompt carries text an outsider may have written; keep it, but say so
+  to the human.
 - `approval: {message: "..."}` outputs `approved_by` and `comment`; its
   `timeout` is the decision deadline, and the message cannot read secrets.
   A rejection or an expired deadline fails the step. `wait` takes a

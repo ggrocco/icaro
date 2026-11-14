@@ -508,3 +508,36 @@ func (s *Store) ActiveWorkflows(ctx context.Context) ([]*Workflow, error) {
 	}
 	return out, nil
 }
+
+// AgentStepUsage is one agent step run's token usage (ADR 0037).
+type AgentStepUsage struct {
+	RunID, StepID, Workflow, Profile string
+	StartedAt                        time.Time
+	Usage                            StepUsage
+}
+
+// ListAgentStepUsage returns the step runs that recorded token usage and
+// started at or after since.
+func (s *Store) ListAgentStepUsage(ctx context.Context, since time.Time) ([]*AgentStepUsage, error) {
+	rows, err := s.query(ctx, `SELECT sr.run_id, sr.step_id, r.workflow_name, sr.profile, sr.started_at,
+		sr.input_tokens, sr.output_tokens, sr.cache_read, sr.cache_write, sr.cost_micro
+		FROM step_runs sr JOIN runs r ON r.id = sr.run_id
+		WHERE sr.profile <> '' AND sr.started_at IS NOT NULL AND sr.started_at >= ?
+		ORDER BY sr.started_at, sr.run_id, sr.step_id`, ts(since))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*AgentStepUsage
+	for rows.Next() {
+		var u AgentStepUsage
+		var started string
+		if err := rows.Scan(&u.RunID, &u.StepID, &u.Workflow, &u.Profile, &started,
+			&u.Usage.Input, &u.Usage.Output, &u.Usage.CacheRead, &u.Usage.CacheWrite, &u.Usage.CostMicro); err != nil {
+			return nil, err
+		}
+		u.StartedAt = parseTS(started)
+		out = append(out, &u)
+	}
+	return out, rows.Err()
+}

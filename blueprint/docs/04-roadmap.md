@@ -77,7 +77,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
 | [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Built; S11 open | Every deliverable is built and tested end to end with a fake CLI. Open: spike S11 (real Claude/Codex logins: flags, recorded streams, start-up time), and the two acceptance runs that need a real subscription and a real API key |
 | [15 — Memory distiller](phases/15-memory-distiller.md) | Not started | Waits on Phase 14, [ADR 0036](adr/0036-local-memory-distiller.md) being accepted, and spike S12 |
-| [16 — Agent steps](phases/16-agent-steps.md) | In progress | [ADR 0037](adr/0037-agent-steps.md) is accepted; built on Phase 14's agent adapters with modeled streams, while spike S11 (step mode) waits for real logins |
+| [16 — Agent steps](phases/16-agent-steps.md) | Built; S11 open | Every deliverable is built and tested, end to end against Docker with a fake CLI. Open: spike S11 in step mode (real Claude/Codex logins: flags, recorded streams, inject) and the acceptance run with a real subscription |
 | [17 — Call steps](phases/17-call-steps.md) | Not started | Waits on [ADR 0038](adr/0038-call-workflow-steps.md) being accepted |
 | [18 — GitHub App mode](phases/18-github-app.md) | Not started | Waits on [ADR 0039](adr/0039-github-app-mode.md) being accepted; step access also on spike S13 |
 

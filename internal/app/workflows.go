@@ -77,6 +77,10 @@ func wireWorkflows(_ context.Context, a *App) error {
 		AgentProfiles: AgentOptions(cfg).Profiles,
 	}, deps)
 
+	for _, c := range AgentStepsChecks(context.Background(), cfg, a.Store, a.Docker) {
+		a.AddCheck(c)
+	}
+
 	a.Service.SetRunner(w.Engine)
 	a.Service.SetEvents(bus)
 	if a.Secrets != nil {

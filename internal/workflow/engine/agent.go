@@ -188,6 +188,7 @@ func (rx *runExec) agentAttempt(ctx context.Context, st *workflow.StepSpec, row 
 		as, err = e.d.Agents.StartAgentStep(ctx, session.AgentStepRequest{
 			RunSessionID: rx.ws.SessionID, RunID: rx.run.ID, StepID: st.ID, Attempt: attempt,
 			Profile: prof.Name, Workspace: r.dir, Memory: st.Agent.MemoryOn(),
+			Workflow: rx.run.WorkflowName, Repository: r.repoRef,
 		})
 		if err != nil {
 			row.Attempt = attempt

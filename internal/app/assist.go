@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"icaro/internal/api"
@@ -89,21 +88,7 @@ func AssistantCheck(cfg *config.Config) doctor.Check {
 		if len(prof.Inject) > 0 {
 			return doctor.Result{Severity: doctor.OK, Detail: fmt.Sprintf("profile %s (%s) with an injected API key; see the credential injection check", name, agent.Name)}
 		}
-		var probs []string
-		seed := (&creds.Homes{Layout: cfg.Layout()}).SeedDir(name)
-		signedIn := false
-		for _, rel := range assistantLogins[agent.Name] {
-			signedIn = signedIn || fileExists(filepath.Join(seed, rel))
-		}
-		if !signedIn {
-			probs = append(probs, fmt.Sprintf("profile %s is not signed in; run `icaro login %s`", name, name))
-		}
-		for _, host := range assistantHosts[agent.Name] {
-			if !slices.Contains(prof.Egress, host) {
-				probs = append(probs, fmt.Sprintf("profile %s's egress allowlist does not reach %s", name, host))
-			}
-		}
-		if len(probs) > 0 {
+		if probs := profileProblems(cfg, name, prof, agent); len(probs) > 0 {
 			return doctor.Result{Severity: doctor.Warning, Detail: strings.Join(probs, "; ")}
 		}
 		return doctor.Result{Severity: doctor.OK, Detail: fmt.Sprintf("profile %s (%s), signed in", name, agent.Name)}

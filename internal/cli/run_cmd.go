@@ -258,4 +258,51 @@ func printRun(w io.Writer, run *service.RunInfo) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\t%s\t%s\n", st.ID, needs, st.Status, st.Attempt, exit, out, st.Error)
 	}
 	_ = tw.Flush()
+	for _, st := range run.Steps {
+		if st.Agent != nil {
+			printAgentStep(w, st.ID, st.Agent)
+		}
+	}
+}
+
+// printAgentStep shows what ran an agent step and what it used (ADR 0037).
+func printAgentStep(w io.Writer, id string, a *service.AgentStepInfo) {
+	cli := a.CLI
+	if cli == "" {
+		cli = "?"
+	}
+	fmt.Fprintf(w, "\nagent step %s: profile %s (%s)", id, a.Profile, cli)
+	if a.ImageDigest != "" {
+		fmt.Fprintf(w, ", image %s", a.ImageDigest)
+	}
+	fmt.Fprintln(w)
+	if len(a.Params) > 0 {
+		keys := make([]string, 0, len(a.Params))
+		for k := range a.Params {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var ps []string
+		for _, k := range keys {
+			ps = append(ps, fmt.Sprintf("%s=%v", k, a.Params[k]))
+		}
+		fmt.Fprintf(w, "  params: %s\n", strings.Join(ps, " "))
+	}
+	if !a.Memory {
+		fmt.Fprintln(w, "  memory: off")
+	}
+	u := a.Usage
+	if u.Input+u.Output+u.CacheRead+u.CacheWrite > 0 {
+		fmt.Fprintf(w, "  tokens: %d input, %d output", u.Input+u.CacheRead, u.Output)
+		if u.CostUSD != nil {
+			fmt.Fprintf(w, ", ~$%.4f (estimate)", *u.CostUSD)
+		}
+		fmt.Fprintln(w)
+	}
+	if a.Prompt != "" {
+		fmt.Fprintln(w, "  prompt:")
+		for _, l := range strings.Split(strings.TrimRight(a.Prompt, "\n"), "\n") {
+			fmt.Fprintln(w, "    "+l)
+		}
+	}
 }

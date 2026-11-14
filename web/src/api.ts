@@ -94,6 +94,27 @@ export interface StepInfo {
   started_at?: string;
   finished_at?: string;
   approval?: ApprovalInfo;
+  agent?: AgentStepInfo;
+}
+
+// An agent step (ADR 0037): what ran it, what it was asked and what it
+// used. Its final answer is outputs.result.
+export interface AgentStepInfo {
+  profile: string;
+  cli?: string;
+  image_digest?: string;
+  params?: Record<string, unknown>;
+  memory: boolean;
+  prompt?: string;
+  usage: { input: number; output: number; cache_read?: number; cache_write?: number; cost_usd_estimate?: number };
+}
+
+// A profile agent steps may use, with its harness's declared params.
+export interface AgentProfileInfo {
+  name: string;
+  agent: string;
+  default?: boolean;
+  params: { name: string; type: "string" | "int" | "bool" | "enum"; enum?: string[]; min?: number; flag: string; description?: string }[];
 }
 
 // The request and decision of an approval step. decision is empty while it
@@ -279,6 +300,7 @@ export const api = {
   stepLogs: (id: string, step: string) => request<string>("GET", `/api/v1/runs/${id}/steps/${encodeURIComponent(step)}/logs`, undefined, true),
 
   integrations: () => request<{ integrations: IntegrationInfo[] }>("GET", "/api/v1/integrations").then((r) => r.integrations ?? []),
+  agentProfiles: () => request<{ profiles: AgentProfileInfo[] }>("GET", "/api/v1/agent-profiles").then((r) => r.profiles ?? []),
   integration: (name: string) => request<IntegrationInfo>("GET", `/api/v1/integrations/${encodeURIComponent(name)}`),
   // integrationDetails loads typed actions/events for every integration
   // (forms for uses: steps, event pickers for triggers).

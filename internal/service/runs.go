@@ -52,6 +52,67 @@ type StepInfo struct {
 	StartedAt  *string         `json:"started_at,omitempty"`
 	FinishedAt *string         `json:"finished_at,omitempty"`
 	Approval   *ApprovalInfo   `json:"approval,omitempty"`
+	Agent      *AgentStepInfo  `json:"agent,omitempty"`
+}
+
+// AgentStepInfo is the API view of an agent step (ADR 0037): what ran it,
+// what it was asked and what it used. Its final answer is outputs.result.
+type AgentStepInfo struct {
+	Profile     string         `json:"profile"`
+	CLI         string         `json:"cli,omitempty"`
+	ImageDigest string         `json:"image_digest,omitempty"`
+	Params      map[string]any `json:"params,omitempty"`
+	Memory      bool           `json:"memory"`
+	// Prompt is the rendered, secret-redacted prompt of the latest attempt.
+	Prompt string         `json:"prompt,omitempty"`
+	Usage  AgentUsageInfo `json:"usage"`
+}
+
+// AgentUsageInfo is an agent step's token usage over its attempts.
+// CostUSD is the CLI's own figure, an estimate, set only for inject
+// (API-key) profiles.
+type AgentUsageInfo struct {
+	Input      int64    `json:"input"`
+	Output     int64    `json:"output"`
+	CacheRead  int64    `json:"cache_read,omitempty"`
+	CacheWrite int64    `json:"cache_write,omitempty"`
+	CostUSD    *float64 `json:"cost_usd_estimate,omitempty"`
+}
+
+// maxPromptShown caps the prompt returned with a run.
+const maxPromptShown = 64 << 10
+
+// agentInfo describes an agent step from its row and its spec.
+func (s *Service) agentInfo(st *store.StepRun, spec *workflow.AgentSpec) *AgentStepInfo {
+	a := &AgentStepInfo{Profile: st.Profile, ImageDigest: st.ImageDigest, Memory: true,
+		Usage: AgentUsageInfo{Input: st.Usage.Input, Output: st.Usage.Output, CacheRead: st.Usage.CacheRead, CacheWrite: st.Usage.CacheWrite}}
+	if st.Usage.CostMicro > 0 {
+		c := float64(st.Usage.CostMicro) / 1e6
+		a.Usage.CostUSD = &c
+	}
+	if spec != nil {
+		a.Params, a.Memory = spec.Params, spec.MemoryOn()
+		if a.Profile == "" {
+			if p, ok := s.agents.AgentStepProfile(spec); ok {
+				a.Profile = p.Name
+			} else {
+				a.Profile = spec.Profile
+			}
+		}
+	}
+	for _, p := range s.agents.Profiles {
+		if p.Name == a.Profile {
+			a.CLI = p.Agent
+		}
+	}
+	if st.LogPath != "" {
+		if f, err := os.Open(strings.TrimSuffix(st.LogPath, ".log") + ".prompt.md"); err == nil {
+			b, _ := io.ReadAll(io.LimitReader(f, maxPromptShown))
+			_ = f.Close()
+			a.Prompt = string(b)
+		}
+	}
+	return a
 }
 
 // ApprovalInfo is the API view of an approval step's request and decision.
@@ -249,10 +310,11 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 	}
 	needs := map[string][]string{}
 	timeouts := map[string]string{}
+	agents := map[string]*workflow.AgentSpec{}
 	if v, err := s.store.GetWorkflowVersion(ctx, r.WorkflowID, r.WorkflowVersion); err == nil {
 		if spec, _, err := workflow.Parse([]byte(v.SpecYAML), workflow.Options{}); err == nil && spec != nil {
 			for _, st := range spec.Steps {
-				needs[st.ID], timeouts[st.ID] = st.Needs, st.Timeout
+				needs[st.ID], timeouts[st.ID], agents[st.ID] = st.Needs, st.Timeout, st.Agent
 			}
 		}
 	}
@@ -276,6 +338,9 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 			if d, err := time.ParseDuration(timeouts[st.StepID]); err == nil && st.StartedAt != nil && a.Decision == "" {
 				si.Approval.Deadline = tsp(new(st.StartedAt.Add(d)))
 			}
+		}
+		if st.Kind == workflow.KindAgent {
+			si.Agent = s.agentInfo(st, agents[st.StepID])
 		}
 		info.Steps = append(info.Steps, si)
 	}

@@ -144,6 +144,10 @@ func (fakeImages) Resolve(_ context.Context, ref string) (string, error) {
 type fakeMemory struct{ calls chan Identity }
 
 func (f fakeMemory) ServeSession(_ context.Context, id Identity, socket string) (func(), error) {
+	if id.ProjectID == "" {
+		// The memory engine refuses an unscoped session.
+		return nil, errors.New("session " + id.SessionID + " has no project")
+	}
 	f.calls <- id
 	return func() {}, os.WriteFile(socket, nil, 0o600)
 }

@@ -167,6 +167,17 @@ func TestAgentStep(t *testing.T) {
 	if mounts["/home/icaro"] != "icaro-home-step-1" || mounts["/icaro/mcp.sock"] != "/run/icaro/sessions/step-1/mcp.sock" || mounts["/icaro"] == "" {
 		t.Fatalf("mounts %v", mounts)
 	}
+	// An injected prompt has nothing else to reach: no Docker or daemon
+	// socket, no host directory but the workspace, and no secret but the
+	// one the step passed in env.
+	if len(mounts) != 4 || mounts["/workspace"] == "" {
+		t.Fatalf("an agent step mounts only its workspace, I/O, home and memory socket: %v", mounts)
+	}
+	for _, kv := range s.Env {
+		if strings.Contains(kv, "s3cr3t") && !strings.HasPrefix(kv, "TOKEN=") {
+			t.Fatalf("secret in %s", kv)
+		}
+	}
 	if s.Labels[LabelSession] != "step-1" {
 		t.Fatal("label")
 	}

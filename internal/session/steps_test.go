@@ -27,7 +27,7 @@ func TestAgentStepSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := AgentStepRequest{RunSessionID: ws.SessionID, RunID: "run-1", StepID: "review", Attempt: 1, Profile: "claude", Workspace: ws.Dir, Memory: true}
+	req := AgentStepRequest{RunSessionID: ws.SessionID, RunID: "run-1", StepID: "review", Attempt: 1, Profile: "claude", Workspace: ws.Dir, Memory: true, Workflow: "review"}
 	a, err := e.m.StartAgentStep(ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,8 @@ func TestAgentStepSessions(t *testing.T) {
 	if _, err := os.Stat(a.MCPSocket); err != nil {
 		t.Fatal("memory socket", err)
 	}
-	if id := <-e.mem.calls; id.SessionID != a.SessionID || id.Agent != "claude" {
+	// A run without a project scopes memory to its workflow.
+	if id := <-e.mem.calls; id.SessionID != a.SessionID || id.Agent != "claude" || id.ProjectID != "workflow:review" {
 		t.Fatalf("memory identity %+v", id)
 	}
 	// The provider key never reaches the step: only a capability token
@@ -77,7 +78,22 @@ func TestAgentStepSessions(t *testing.T) {
 	if err != nil || r.MCPSocket == "" || r.Home != a.Home {
 		t.Fatalf("%+v %v", r, err)
 	}
-	<-e.mem.calls
+	if id := <-e.mem.calls; id.ProjectID != "workflow:review" {
+		t.Fatalf("resumed in another scope %+v", id)
+	}
+	// A step with a repository shares memory with other runs on it.
+	repoReq := req
+	repoReq.StepID, repoReq.Memory, repoReq.Repository = "repo", true, "https://github.com/acme/app.git"
+	c, err := e.m.StartAgentStep(ctx, repoReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := <-e.mem.calls; id.ProjectID != "repo:"+repoKey(repoReq.Repository) {
+		t.Fatalf("repository scope %+v", id)
+	}
+	if err := e.m.FinishAgentStep(ctx, c.SessionID); err != nil {
+		t.Fatal(err)
+	}
 	if r, err := e.m.ResumeAgentStep(ctx, b.SessionID); err != nil || r.MCPSocket != "" {
 		t.Fatalf("%+v %v", r, err)
 	}

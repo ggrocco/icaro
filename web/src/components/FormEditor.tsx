@@ -1,11 +1,13 @@
 import { cloneElement, useId, useMemo } from "react";
-import type { ActionInfo, IntegrationInfo } from "../api";
+import type { ActionInfo, AgentProfileInfo, IntegrationInfo } from "../api";
 import { getIn, parse, setIn, stepCount } from "../yamldoc";
 
 interface Props {
   yaml: string;
   onChange: (yaml: string) => void;
   integrations: IntegrationInfo[];
+  // agentProfiles are the operator's workflows.agent_profiles (ADR 0037).
+  agentProfiles?: AgentProfileInfo[];
 }
 
 type KV = Record<string, string>;
@@ -13,7 +15,7 @@ type KV = Record<string, string>;
 // FormEditor edits a workflow through the YAML Document, so unknown
 // fields and comments survive every edit (Phase 4: "a round-trip does not
 // lose unknown fields").
-export function FormEditor({ yaml, onChange, integrations }: Props) {
+export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }: Props) {
   const doc = useMemo(() => parse(yaml), [yaml]);
   const actions = useMemo(() => {
     const m = new Map<string, ActionInfo>();
@@ -126,7 +128,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
         const p = (k: string) => ["steps", i, k];
         const uses = String(getIn(doc, p("uses")) ?? "");
         const isUses = doc.hasIn(p("uses"));
-        const kind = isUses ? "uses" : doc.hasIn(p("approval")) ? "approval" : doc.hasIn(p("wait")) ? "wait" : "image";
+        const kind = isUses ? "uses" : doc.hasIn(p("approval")) ? "approval" : doc.hasIn(p("wait")) ? "wait" : doc.hasIn(p("agent")) ? "agent" : "image";
         const pauses = kind === "approval" || kind === "wait";
         const action = actions.get(uses);
         const needs = (getIn<string[]>(doc, p("needs")) ?? []) as string[];
@@ -142,17 +144,19 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
                 onChange={(e) =>
                   mutate((d) => {
                     // Each form has its own fields; switching drops the old ones.
-                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait"]) d.deleteIn(["steps", i, k]);
+                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent"]) d.deleteIn(["steps", i, k]);
                     if (e.target.value === "approval" || e.target.value === "wait") d.deleteIn(["steps", i, "retry"]);
                     if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
                     if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
                     else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
                     else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
+                    else if (e.target.value === "agent") d.setIn(["steps", i, "agent"], { prompt: "Describe the task for the agent." });
                     else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                   })
                 }
               >
                 <option value="image">image (container)</option>
+                <option value="agent">agent (an agent CLI does the task)</option>
                 <option value="uses">uses (integration action)</option>
                 <option value="approval">approval (a person decides)</option>
                 <option value="wait">wait (pause for a time)</option>
@@ -170,6 +174,18 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
               <Field label="Duration" hint="e.g. 30m or 2h (at most 720h)">
                 <input value={String(getIn(doc, p("wait")) ?? "")} onChange={(e) => update(p("wait"), e.target.value)} />
               </Field>
+            ) : kind === "agent" ? (
+              <AgentFields
+                profiles={agentProfiles}
+                profile={String(getIn(doc, ["steps", i, "agent", "profile"]) ?? "")}
+                prompt={String(getIn(doc, ["steps", i, "agent", "prompt"]) ?? "")}
+                params={(getIn<Record<string, unknown>>(doc, ["steps", i, "agent", "params"]) ?? {}) as Record<string, unknown>}
+                memory={getIn(doc, ["steps", i, "agent", "memory"]) !== false}
+                env={(getIn<KV>(doc, p("env")) ?? {}) as KV}
+                outputs={(getIn<KV>(doc, p("outputs")) ?? {}) as KV}
+                update={(k, v) => update(["steps", i, "agent", ...k], v)}
+                updateStep={(k, v) => update(p(k), v)}
+              />
             ) : isUses ? (
               <>
                 <Field label="Action">
@@ -269,6 +285,81 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
         Add step
       </button>
     </form>
+  );
+}
+
+// AgentFields edits an agent step (ADR 0037): the profile among the
+// operator's workflows.agent_profiles, the prompt, the harness's params,
+// memory, env and outputs. The agent's final answer is outputs.result.
+function AgentFields(props: {
+  profiles: AgentProfileInfo[];
+  profile: string;
+  prompt: string;
+  params: Record<string, unknown>;
+  memory: boolean;
+  env: KV;
+  outputs: KV;
+  update: (path: string[], v: unknown) => void;
+  updateStep: (key: string, v: unknown) => void;
+}) {
+  const { profiles, profile, prompt, params, memory, env, outputs, update, updateStep } = props;
+  const chosen = profiles.find((x) => x.name === profile) ?? (profile ? undefined : profiles[0]);
+  if (profiles.length === 0) {
+    return (
+      <p className="notice warn" role="status">
+        Agent steps are off: no profile is listed in <code>workflows.agent_profiles</code>. An operator enables them in the config.
+      </p>
+    );
+  }
+  return (
+    <>
+      <Field label="Profile" hint="its login, egress allowlist and credentials are what the agent gets">
+        <select value={profile} onChange={(e) => update(["profile"], e.target.value || undefined)}>
+          <option value="">{`default (${profiles[0].name})`}</option>
+          {profile && !profiles.some((x) => x.name === profile) && <option value={profile}>{profile} (not listed)</option>}
+          {profiles.map((x) => (
+            <option key={x.name} value={x.name}>
+              {x.name} ({x.agent})
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Prompt" hint="fed on stdin; may use ${{ steps.*.outputs.* }} and ${{ trigger.* }}, never secrets">
+        <textarea rows={5} value={prompt} onChange={(e) => update(["prompt"], e.target.value)} />
+      </Field>
+      {(chosen?.params ?? []).map((pp) => {
+        const v = params[pp.name];
+        const set = (val: unknown) => update(["params", pp.name], val === "" ? undefined : val);
+        return (
+          <Field key={pp.name} label={pp.name} hint={pp.description}>
+            {pp.type === "bool" ? (
+              <input type="checkbox" checked={v === true} onChange={(e) => set(e.target.checked || undefined)} />
+            ) : pp.type === "enum" ? (
+              <select value={String(v ?? "")} onChange={(e) => set(e.target.value)}>
+                <option value="">(CLI default)</option>
+                {(pp.enum ?? []).map((o) => (
+                  <option key={o}>{o}</option>
+                ))}
+              </select>
+            ) : pp.type === "int" ? (
+              <input type="number" min={pp.min} value={v === undefined ? "" : String(v)} onChange={(e) => set(e.target.value === "" ? "" : Number(e.target.value))} />
+            ) : (
+              <input value={String(v ?? "")} placeholder="(CLI default)" onChange={(e) => set(e.target.value)} />
+            )}
+          </Field>
+        );
+      })}
+      <Field label="Memory" hint="the project memory tools, scoped by the daemon">
+        <input type="checkbox" checked={memory} onChange={(e) => update(["memory"], e.target.checked ? undefined : false)} />
+      </Field>
+      <KVEditor label="Environment" hint="pass secrets the agent needs here, not in the prompt" value={env} onChange={(v) => updateStep("env", Object.keys(v).length ? v : undefined)} />
+      <KVEditor
+        label="Outputs"
+        hint="besides the built-in result: name → json:<path> from /icaro/output.json, or file:<path>"
+        value={outputs}
+        onChange={(v) => updateStep("outputs", Object.keys(v).length ? v : undefined)}
+      />
+    </>
   );
 }
 

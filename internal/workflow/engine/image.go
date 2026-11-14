@@ -52,6 +52,7 @@ type rendered struct {
 	env     []string
 	input   map[string]any
 	dir     string // host directory mounted at /workspace
+	repoRef string // the rendered repository ref, if the step has one
 }
 
 func (rx *runExec) render(ctx context.Context, st *workflow.StepSpec, env expr.Env, attempt int) (*rendered, error) {
@@ -110,6 +111,7 @@ func (rx *runExec) render(ctx context.Context, st *workflow.StepSpec, env expr.E
 		if err != nil {
 			return nil, err
 		}
+		r.repoRef = ref
 		if r.dir, err = rx.e.d.Sessions.RepoWorktree(ctx, rx.ws.SessionID, ref, rev); err != nil {
 			return nil, fmt.Errorf("repository %s: %w", ref, err)
 		}
