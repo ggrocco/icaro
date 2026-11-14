@@ -137,3 +137,23 @@ func TestDistillClosedStore(t *testing.T) {
 		t.Error("removed")
 	}
 }
+
+// Errors inside the transactions: each statement's table is gone.
+func TestDistillMissingTables(t *testing.T) {
+	s := sqliteStore(t)
+	ctx := context.Background()
+	for _, tbl := range []string{"distill_jobs", "chat_stats", "distill_removed"} {
+		if _, err := s.exec(ctx, "DROP TABLE "+tbl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.EnqueueDistill(ctx, "c", time.Now()); err == nil {
+		t.Error("enqueue")
+	}
+	if err := s.DeleteDistill(ctx, "c"); err == nil {
+		t.Error("delete")
+	}
+	if err := s.PutChatStats(ctx, &ChatStats{ChatID: "c"}); err == nil {
+		t.Error("stats")
+	}
+}
