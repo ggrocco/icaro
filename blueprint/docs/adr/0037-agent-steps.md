@@ -16,7 +16,7 @@ The deferred-design row named the pieces: a **harness catalog** with **declared 
 
 ### The step form
 
-**`agent`**, a new step form. A step has exactly one of `image`, `uses`, `agent`, `approval` or `wait`, plus `await` if [ADR 0032](0032-await-event-steps.md) is accepted.
+**`agent`**, a new step form. A step has exactly one of `image`, `uses`, `agent`, `approval` or `wait`, plus `await` ([ADR 0032](0032-await-event-steps.md)).
 
 ```yaml
 - id: review
