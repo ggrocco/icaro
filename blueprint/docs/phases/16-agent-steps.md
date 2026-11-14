@@ -4,7 +4,7 @@
 
 **Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs:
 
-- ADR 0037 **accepted**, with its open questions settled: the default of `workflows.agent_profiles`, memory access for steps fed by untrusted triggers, a home layer per attempt or per run, and whether untrusted prompts get a warning or an opt-in field. A change to any of them is made in the ADR first, then here.
+- ADR 0037 **accepted**, with its open questions settled: the default of `workflows.agent_profiles`, memory access for steps fed by untrusted triggers, a home layer per attempt or per run, and whether untrusted prompts get a warning or an opt-in field. A change to any of them is made in the ADR first, then here. *(Done: empty by default; memory follows `memory` whatever the trigger; a layer per attempt; a warning.)*
 - Spike **S11** passed, and the **agent adapters** deliverable of [Phase 14](14-workflow-assistant.md): each `Agent` in `internal/creds` has a headless spec, and `internal/assist/stream` parses its event stream. If Phase 14 has not started, that deliverable moves here unchanged and Phase 14 reuses it.
 
 ## Spike S11, step mode

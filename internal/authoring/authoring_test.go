@@ -17,6 +17,7 @@ import (
 	"icaro/internal/secrets"
 	"icaro/internal/service"
 	"icaro/internal/store"
+	"icaro/internal/workflow"
 	"icaro/internal/workflow/engine"
 	"icaro/internal/workflow/events"
 )
@@ -265,5 +266,38 @@ func TestRegisterRead(t *testing.T) {
 	Register(all, Deps{Workflows: &fakeWorkflows{}})
 	if len(all.ToolNames()) != len(ReadTools)+3 {
 		t.Errorf("full set %v", all.ToolNames())
+	}
+}
+
+func TestAgentProfilesAndWarnings(t *testing.T) {
+	f := &fakeWorkflows{
+		agents:   []workflow.AgentProfile{{Name: "reviewer", Agent: "claude"}, {Name: "odd", Agent: "vim"}},
+		spec:     &workflow.Spec{Name: "w"},
+		warnings: workflow.Issues{{Path: "/steps/0/agent/prompt", Message: "untrusted"}},
+	}
+	srv := mcp.NewServer("icaro", "test", "")
+	RegisterRead(srv, Deps{Workflows: f})
+	c := mcp.InProcess(srv, mcp.Caller{Scope: "read"})
+	res, err := c.CallTool(context.Background(), ToolListAgents, map[string]any{})
+	if err != nil || res.IsError {
+		t.Fatal(err, res)
+	}
+	var out struct {
+		Profiles []AgentProfileInfo `json:"profiles"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Profiles) != 2 || !out.Profiles[0].Default || out.Profiles[1].Default || len(out.Profiles[0].Params) != 2 || len(out.Profiles[1].Params) != 0 {
+		t.Fatalf("%+v", out.Profiles)
+	}
+	res, err = c.CallTool(context.Background(), ToolValidate, map[string]any{"yaml": "x"})
+	if err != nil || !strings.Contains(res.Content[0].Text, `"path": "/steps/0/agent/prompt"`) {
+		t.Fatal(err, res.Content[0].Text)
+	}
+	f.spec = nil
+	res, _ = c.CallTool(context.Background(), ToolValidate, map[string]any{"yaml": "x"})
+	if !strings.Contains(res.Content[0].Text, `"warnings": []`) {
+		t.Fatal(res.Content[0].Text)
 	}
 }

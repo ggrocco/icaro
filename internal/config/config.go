@@ -152,6 +152,10 @@ type WorkflowsConfig struct {
 	Profile        string `yaml:"profile"`
 	// AllowHost permits image steps to run on the host (MVP cut 4: off).
 	AllowHost bool `yaml:"allow_host"`
+	// AgentProfiles are the profiles agent steps may run under (ADR 0037),
+	// empty by default: agent steps are off until the operator lists one.
+	// A step that names no profile uses the first entry.
+	AgentProfiles []string `yaml:"agent_profiles"`
 }
 
 // PreviewsConfig governs per-worktree previews.
@@ -473,6 +477,19 @@ func (c *Config) Validate() error {
 	}
 	if _, ok := c.Profiles[c.Workflows.Profile]; !ok {
 		errs = append(errs, fmt.Errorf("workflows.profile %q is not a profile", c.Workflows.Profile))
+	}
+	seen := map[string]bool{}
+	for _, p := range c.Workflows.AgentProfiles {
+		prof, ok := c.Profiles[p]
+		switch {
+		case !ok:
+			errs = append(errs, fmt.Errorf("workflows.agent_profiles: %q is not a profile", p))
+		case prof.Agent != "claude" && prof.Agent != "codex":
+			errs = append(errs, fmt.Errorf("workflows.agent_profiles: profile %q runs agent %q; agent steps need claude or codex", p, prof.Agent))
+		case seen[p]:
+			errs = append(errs, fmt.Errorf("workflows.agent_profiles: %q is listed twice", p))
+		}
+		seen[p] = true
 	}
 	if p := c.Assistant.Profile; p != "" {
 		if prof, ok := c.Profiles[p]; !ok {

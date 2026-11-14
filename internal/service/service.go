@@ -31,6 +31,7 @@ type Service struct {
 	onChange   []func()
 	logsDir    string
 	maxTimeout time.Duration
+	agents     *workflow.AgentOptions
 	log        *slog.Logger
 }
 
@@ -45,7 +46,10 @@ type Options struct {
 	Events     *events.Bus
 	LogsDir    string
 	MaxTimeout time.Duration
-	Log        *slog.Logger
+	// Agents are the profiles agent steps may use (workflows.agent_profiles,
+	// ADR 0037). Nil means none are listed: agent steps fail validation.
+	Agents *workflow.AgentOptions
+	Log    *slog.Logger
 }
 
 // New creates a Service.
@@ -56,9 +60,12 @@ func New(o Options) *Service {
 	if o.MaxTimeout <= 0 {
 		o.MaxTimeout = 30 * time.Minute
 	}
+	if o.Agents == nil {
+		o.Agents = &workflow.AgentOptions{}
+	}
 	return &Service{
 		store: o.Store, key: o.Key, runner: o.Runner, catalog: o.Catalog, secrets: o.Secrets, events: o.Events,
-		logsDir: o.LogsDir, maxTimeout: o.MaxTimeout, log: o.Log,
+		logsDir: o.LogsDir, maxTimeout: o.MaxTimeout, agents: o.Agents, log: o.Log,
 	}
 }
 

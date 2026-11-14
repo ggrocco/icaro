@@ -23,6 +23,7 @@ import (
 	"icaro/internal/secrets"
 	"icaro/internal/session"
 	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 // fakeDocker serves the slice of the Docker Engine API the app's doctor
@@ -662,5 +663,17 @@ func TestAssistantCheck(t *testing.T) {
 	cfg.Profiles = map[string]config.ProfileConfig{"shell": {}}
 	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "unavailable") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAgentOptions(t *testing.T) {
+	cfg := &config.Config{Profiles: map[string]config.ProfileConfig{"rev": {Agent: "claude"}, "dev": {Agent: "codex"}}}
+	if o := AgentOptions(cfg); o.Profiles == nil || len(o.Profiles) != 0 {
+		t.Fatalf("%+v", o)
+	}
+	cfg.Workflows.AgentProfiles = []string{"dev", "rev"}
+	o := AgentOptions(cfg)
+	if len(o.Profiles) != 2 || o.Profiles[0] != (workflow.AgentProfile{Name: "dev", Agent: "codex"}) || o.Profiles[1].Agent != "claude" {
+		t.Fatalf("%+v", o.Profiles)
 	}
 }

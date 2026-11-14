@@ -166,7 +166,7 @@ func TestStructValidation(t *testing.T) {
 	mustHave(t, issues, "/steps/0/retry", "between 0 and 5", "")
 	mustHave(t, issues, "/steps/1/timeout", "must be a positive duration", "")
 	mustHave(t, issues, "/steps/1/retry", "between 0 and 5", "")
-	mustHave(t, issues, "/steps/5", "exactly one of: image, uses", "")
+	mustHave(t, issues, "/steps/5", "exactly one of: image, agent, uses", "")
 	// A uses step without a catalog is not resolved, and a step with no
 	// form declares nothing to check against.
 	for _, is := range issues {

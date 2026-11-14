@@ -357,3 +357,26 @@ func TestAssistantConfig(t *testing.T) {
 		t.Errorf("shell profile accepted: %v", err)
 	}
 }
+
+func TestAgentProfilesConfig(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Workflows.AgentProfiles) != 0 {
+		t.Fatalf("agent steps are on by default: %v", cfg.Workflows.AgentProfiles)
+	}
+	cfg.Profiles["plain"] = ProfileConfig{Egress: []string{}}
+	cfg.Workflows.AgentProfiles = []string{"claude", "claude", "plain", "ghost"}
+	err = cfg.Validate()
+	for _, want := range []string{`"claude" is listed twice`, `profile "plain" runs agent ""`, `"ghost" is not a profile`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+	cfg.Workflows.AgentProfiles = []string{"claude"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

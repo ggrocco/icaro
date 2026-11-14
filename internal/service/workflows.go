@@ -45,7 +45,7 @@ type VersionInfo struct {
 const tsFormat = "2006-01-02T15:04:05Z"
 
 func (s *Service) validateOptions(ctx context.Context) workflow.Options {
-	opts := workflow.Options{MaxTimeout: s.maxTimeout, Catalog: s.catalog}
+	opts := workflow.Options{MaxTimeout: s.maxTimeout, Catalog: s.catalog, Agents: s.agents}
 	if s.secrets != nil {
 		if names, err := s.secrets.Names(ctx); err == nil {
 			set := map[string]bool{}
@@ -60,6 +60,17 @@ func (s *Service) validateOptions(ctx context.Context) workflow.Options {
 		}
 	}
 	return opts
+}
+
+// Warnings are what is valid in spec but worth a second look (ADR 0037:
+// an agent prompt that carries untrusted trigger text).
+func (s *Service) Warnings(ctx context.Context, spec *workflow.Spec) workflow.Issues {
+	return workflow.Warnings(spec, s.validateOptions(ctx))
+}
+
+// AgentProfiles lists the profiles agent steps may use, in config order.
+func (s *Service) AgentProfiles() []workflow.AgentProfile {
+	return append([]workflow.AgentProfile{}, s.agents.Profiles...)
 }
 
 // ValidateWorkflow parses and validates YAML without storing it. Decode

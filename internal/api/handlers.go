@@ -59,9 +59,12 @@ func (s *Server) handleValidateWorkflow(w http.ResponseWriter, r *http.Request) 
 		s.writeError(w, err)
 		return
 	}
-	resp := map[string]any{"valid": len(issues) == 0, "issues": issues}
+	resp := map[string]any{"valid": len(issues) == 0, "issues": issues, "warnings": []workflow.Issue{}}
 	if wf != nil {
 		resp["name"] = wf.Name
+		if ws := s.svc.Warnings(r.Context(), wf); len(ws) > 0 {
+			resp["warnings"] = ws
+		}
 	}
 	if issues == nil {
 		resp["issues"] = []workflow.Issue{}

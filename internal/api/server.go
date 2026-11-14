@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"icaro/internal/authoring"
 	"icaro/internal/service"
 	"icaro/internal/store"
 	"icaro/internal/workflow"
@@ -65,6 +66,9 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/schema/workflow", s.handleSchema)
 
 	m.Handle("GET /api/v1/workflows", s.auth(store.ScopeRead, s.handleListWorkflows))
+	m.Handle("GET /api/v1/agent-profiles", s.auth(store.ScopeRead, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"profiles": authoring.AgentProfileInfos(s.svc.AgentProfiles())})
+	}))
 	m.Handle("POST /api/v1/workflows", s.auth(store.ScopeWrite, s.handleApplyWorkflow))
 	m.Handle("POST /api/v1/workflows/validate", s.auth(store.ScopeRead, s.handleValidateWorkflow))
 	m.Handle("GET /api/v1/workflows/{name}", s.auth(store.ScopeRead, s.handleGetWorkflow))

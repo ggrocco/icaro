@@ -31,7 +31,13 @@ type fakeWorkflows struct {
 	runErr      error
 	logs        map[string]*service.LogPage
 	logTails    []int64
+	warnings    workflow.Issues
+	agents      []workflow.AgentProfile
 }
+
+func (f *fakeWorkflows) Warnings(context.Context, *workflow.Spec) workflow.Issues { return f.warnings }
+
+func (f *fakeWorkflows) AgentProfiles() []workflow.AgentProfile { return f.agents }
 
 func (f *fakeWorkflows) ValidateWorkflow(context.Context, string) (*workflow.Spec, workflow.Issues, error) {
 	return f.spec, f.issues, f.validateErr
