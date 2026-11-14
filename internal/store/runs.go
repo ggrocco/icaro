@@ -375,14 +375,17 @@ func (s *Store) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
 	return out, rows.Err()
 }
 
-const stepCols = `run_id, step_id, idx, kind, status, attempt, session_id, container_id, exit_code, outputs_json, log_path, log_size, log_lines, started_at, finished_at, error`
+const stepCols = `run_id, step_id, idx, kind, status, attempt, session_id, container_id, exit_code, outputs_json, log_path, log_size, log_lines, started_at, finished_at, error,
+	profile, image_digest, input_tokens, output_tokens, cache_read, cache_write, cost_micro`
 
 func scanStep(sc interface{ Scan(...any) error }) (*StepRun, error) {
 	var st StepRun
 	var exit sql.NullInt64
 	var started, finished sql.NullString
+	u := &st.Usage
 	err := sc.Scan(&st.RunID, &st.StepID, &st.Idx, &st.Kind, &st.Status, &st.Attempt, &st.SessionID, &st.ContainerID, &exit,
-		&st.OutputsJSON, &st.LogPath, &st.LogSize, &st.LogLines, &started, &finished, &st.Error)
+		&st.OutputsJSON, &st.LogPath, &st.LogSize, &st.LogLines, &started, &finished, &st.Error,
+		&st.Profile, &st.ImageDigest, &u.Input, &u.Output, &u.CacheRead, &u.CacheWrite, &u.CostMicro)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -429,11 +432,14 @@ func (s *Store) UpdateStepRun(ctx context.Context, st *StepRun) error {
 	if st.OutputsJSON == "" {
 		st.OutputsJSON = "{}"
 	}
+	u := st.Usage
 	res, err := s.exec(ctx, `UPDATE step_runs SET status = ?, attempt = ?, session_id = ?, container_id = ?, exit_code = ?, outputs_json = ?,
-		log_path = ?, log_size = ?, log_lines = ?, started_at = ?, finished_at = ?, error = ?
+		log_path = ?, log_size = ?, log_lines = ?, started_at = ?, finished_at = ?, error = ?,
+		profile = ?, image_digest = ?, input_tokens = ?, output_tokens = ?, cache_read = ?, cache_write = ?, cost_micro = ?
 		WHERE run_id = ? AND step_id = ?`,
 		st.Status, st.Attempt, st.SessionID, st.ContainerID, exit, st.OutputsJSON, st.LogPath, st.LogSize, st.LogLines,
-		tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error, st.RunID, st.StepID)
+		tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error,
+		st.Profile, st.ImageDigest, u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CostMicro, st.RunID, st.StepID)
 	if err != nil {
 		return err
 	}

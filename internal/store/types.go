@@ -116,6 +116,17 @@ type StepRun struct {
 	StartedAt   *time.Time
 	FinishedAt  *time.Time
 	Error       string
+	// Agent steps (ADR 0037): the profile, the image digest pinned for the
+	// run, and the token usage the agent's stream reported.
+	Profile     string
+	ImageDigest string
+	Usage       StepUsage
+}
+
+// StepUsage is an agent step's token count; CostMicro is the CLI's own
+// estimate in millionths of a dollar (inject profiles only).
+type StepUsage struct {
+	Input, Output, CacheRead, CacheWrite, CostMicro int64
 }
 
 // LogChunk indexes a step attempt's log file: after flush Seq the file

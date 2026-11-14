@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"icaro/internal/expr"
@@ -58,6 +59,8 @@ func (rx *runExec) afterAttempt(ctx context.Context, st *workflow.StepSpec, row 
 		return true, stepResult{id: st.ID, shutdown: true}
 	case cancelled(ctx):
 		return true, rx.finishStep(fctx, row, store.StepCancelled, nil, "cancelled")
+	case errors.Is(err, errNoRetry):
+		return true, rx.finishStep(fctx, row, store.StepFailed, nil, strings.TrimPrefix(err.Error(), errNoRetry.Error()+": "))
 	case attempt >= maxAttempts:
 		return true, rx.finishStep(fctx, row, store.StepFailed, outputs, err.Error())
 	}
@@ -128,13 +131,15 @@ func (rx *runExec) attempt(ctx context.Context, st *workflow.StepSpec, row *stor
 		return rx.imageAttempt(ctx, st, row, env, attempt, reattach)
 	case workflow.KindUses:
 		return rx.usesAttempt(ctx, st, row, env, attempt)
+	case workflow.KindAgent:
+		return rx.agentAttempt(ctx, st, row, env, attempt, reattach)
 	}
 	return nil, fmt.Errorf("step %s has no image or uses", st.ID)
 }
 
 // reattach resumes a step that was running when the daemon stopped.
 func (rx *runExec) reattach(ctx context.Context, st *workflow.StepSpec, row *store.StepRun, env expr.Env) (map[string]any, error) {
-	if st.Kind() != workflow.KindImage {
+	if st.Kind() != workflow.KindImage && st.Kind() != workflow.KindAgent {
 		// An in-daemon action cannot be resumed; it ran at most once and is
 		// retried per policy (at-least-once, ADR 0013).
 		return nil, errors.New("interrupted by a daemon restart")

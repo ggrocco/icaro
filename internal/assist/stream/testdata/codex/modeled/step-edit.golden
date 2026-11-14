@@ -1,0 +1,39 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "0199a2f4-11aa-7bcd-9e21-3f4a5b6c7d8e"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "item_1",
+      "tool": "shell",
+      "args": {
+        "command": "bash -lc 'git diff main --stat'"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "item_1",
+      "tool": "shell",
+      "result": " src/app.go | 4 ++--"
+    },
+    {
+      "kind": "text",
+      "text": "Fixed the off-by-one in src/app.go."
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 3100,
+        "output": 280,
+        "cache_read": 600
+      }
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "done"
+}

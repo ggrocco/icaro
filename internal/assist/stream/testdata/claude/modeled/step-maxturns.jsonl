@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"7c9f4e32-3d4a-4b5c-9e0f-9a8b7c6d5e4f"}
+{"type":"assistant","message":{"id":"msg_31","content":[{"type":"tool_use","id":"toolu_31","name":"Bash","input":{"command":"go test ./..."}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_31","content":"FAIL","is_error":false}]}}
+{"type":"result","subtype":"error_max_turns","is_error":true,"usage":{"input_tokens":900,"output_tokens":40}}

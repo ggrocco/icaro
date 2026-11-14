@@ -222,28 +222,11 @@ func (rx *runExec) imageAttempt(ctx context.Context, st *workflow.StepSpec, row 
 		lc.close()
 	}
 
-	timeout := e.stepTimeout(st)
-	wctx, wcancel := context.WithTimeout(ctx, timeout)
-	defer wcancel()
-	exitCode, werr := e.d.Docker.Wait(wctx, row.ContainerID)
-	var stepErr error
-	switch {
-	case werr == nil:
-		if exitCode != 0 {
-			stepErr = fmt.Errorf("exit code %d", exitCode)
-		}
-	case ctx.Err() != nil && !cancelled(ctx):
+	exitCode, stepErr := rx.waitContainer(ctx, st, row)
+	if errors.Is(stepErr, errShutdown) {
 		// Daemon stopping: leave the container running for re-attach.
 		finishLogs(0)
 		return nil, errShutdown
-	case ctx.Err() != nil:
-		_ = e.d.Docker.Kill(context.WithoutCancel(ctx), row.ContainerID)
-		exitCode, stepErr = 137, errCancelled
-	case errors.Is(werr, context.DeadlineExceeded):
-		_ = e.d.Docker.Kill(context.WithoutCancel(ctx), row.ContainerID)
-		exitCode, stepErr = -1, fmt.Errorf("timed out after %s", timeout)
-	default:
-		stepErr = fmt.Errorf("wait: %w", werr)
 	}
 	finishLogs(10 * time.Second)
 	row.ExitCode = &exitCode
@@ -255,6 +238,33 @@ func (rx *runExec) imageAttempt(ctx context.Context, st *workflow.StepSpec, row 
 	}
 	cleanup()
 	return outputs, stepErr
+}
+
+// waitContainer waits for a step container under the step's timeout. It
+// kills the container on a timeout or a cancel, and returns errShutdown
+// (leaving it running) when the daemon is stopping.
+func (rx *runExec) waitContainer(ctx context.Context, st *workflow.StepSpec, row *store.StepRun) (int, error) {
+	e := rx.e
+	timeout := e.stepTimeout(st)
+	wctx, wcancel := context.WithTimeout(ctx, timeout)
+	defer wcancel()
+	exitCode, werr := e.d.Docker.Wait(wctx, row.ContainerID)
+	switch {
+	case werr == nil:
+		if exitCode != 0 {
+			return exitCode, fmt.Errorf("exit code %d", exitCode)
+		}
+		return 0, nil
+	case ctx.Err() != nil && !cancelled(ctx):
+		return exitCode, errShutdown
+	case ctx.Err() != nil:
+		_ = e.d.Docker.Kill(context.WithoutCancel(ctx), row.ContainerID)
+		return 137, errCancelled
+	case errors.Is(werr, context.DeadlineExceeded):
+		_ = e.d.Docker.Kill(context.WithoutCancel(ctx), row.ContainerID)
+		return -1, fmt.Errorf("timed out after %s", timeout)
+	}
+	return exitCode, fmt.Errorf("wait: %w", werr)
 }
 
 func (rx *runExec) createContainer(ctx context.Context, st *workflow.StepSpec, row *store.StepRun, r *rendered, attempt int, ioVol string) error {

@@ -36,6 +36,8 @@ type runExec struct {
 	ws      session.RunWorkspace
 	attach  container.Attachment
 	resumed bool
+	// images are agent profiles' image digests pinned for the run.
+	images map[string]string
 }
 
 // stepResult is what a step goroutine reports back to the scheduler.
@@ -264,6 +266,10 @@ func (rx *runExec) prepare(ctx context.Context) error {
 		}
 	}
 	rx.redact = logs.NewRedactor(values)
+
+	if err := rx.pinAgentImages(ctx); err != nil {
+		return err
+	}
 
 	base := rx.baseEnv(1)
 	rx.env = map[string]string{}
