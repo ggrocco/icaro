@@ -61,7 +61,10 @@ type Options struct {
 	Workflows Workflows
 	Secrets   SecretValues // optional
 	Events    *events.Bus  // optional
-	Log       *slog.Logger
+	// Memories gives new conversations notes from earlier chats and
+	// stores what the distiller writes (ADR 0036); optional.
+	Memories Memories
+	Log      *slog.Logger
 	// LogsDir holds one append-only JSONL log per chat.
 	LogsDir string
 	// Now is the clock (tests).
@@ -85,6 +88,8 @@ type Service struct {
 	waiters *owned[chan string]
 	base    context.Context
 	started chan struct{}
+	// distiller is set by NewDistiller; chats are queued on it when idle.
+	distiller *Distiller
 }
 
 // New builds a Service; call Run before using it.
@@ -255,7 +260,7 @@ func (s *Service) CreateChat(ctx context.Context, req CreateRequest, actor strin
 		}
 		yaml = w.YAML
 	}
-	c := &store.Chat{Title: clip(strings.TrimSpace(req.Title), 120), Profile: profile, Agent: prof.Agent, ProjectID: req.ProjectID, Workflow: req.Workflow, CreatedBy: actor}
+	c := &store.Chat{Title: clip(strings.TrimSpace(s.redactor(ctx).RedactString(req.Title)), 120), Profile: profile, Agent: prof.Agent, ProjectID: req.ProjectID, Workflow: req.Workflow, CreatedBy: actor}
 	if err := s.o.Store.CreateChat(ctx, c); err != nil {
 		return nil, err
 	}
@@ -370,14 +375,16 @@ func (s *Service) Send(ctx context.Context, chatID, text, actor string) ([]Messa
 	if err != nil {
 		return nil, err
 	}
+	// Only redacted copies of the text are stored, the title included.
+	redacted := s.redactor(ctx).RedactString(text)
 	if c.Title == "" {
-		if err := s.o.Store.SetChatField(ctx, c.ID, store.ChatTitle, clip(firstLine(text), 80)); err != nil {
+		if err := s.o.Store.SetChatField(ctx, c.ID, store.ChatTitle, clip(firstLine(redacted), 80)); err != nil {
 			return nil, err
 		}
 	}
 	a := s.actor(chatID)
 	off := a.size()
-	u := &store.ChatMessage{ChatID: chatID, Role: store.RoleUser, Text: s.redactor(ctx).RedactString(text), Status: store.TurnDone, LogOffset: off}
+	u := &store.ChatMessage{ChatID: chatID, Role: store.RoleUser, Text: redacted, Status: store.TurnDone, LogOffset: off}
 	if err := s.o.Store.AddChatMessage(ctx, u); err != nil {
 		return nil, err
 	}
@@ -556,6 +563,8 @@ func (s *Service) Delete(ctx context.Context, chatID string) error {
 	if err := s.o.Store.DeleteChat(ctx, chatID); err != nil {
 		return err
 	}
+	// The memories it left stay: they are knowledge, not the chat.
+	_ = s.o.Store.DeleteDistill(ctx, chatID)
 	_ = os.Remove(s.logPath(chatID))
 	return nil
 }

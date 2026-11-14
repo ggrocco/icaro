@@ -133,3 +133,29 @@ func (c *Client) ChatEvents(ctx context.Context, id string, offset int64, fn fun
 	}
 	return ctx.Err()
 }
+
+// ChatMemories returns the memories a chat started with and the ones it
+// left (ADR 0036).
+func (c *Client) ChatMemories(ctx context.Context, id string) (*assist.ChatMemories, error) {
+	var out assist.ChatMemories
+	err := c.doJSON(ctx, http.MethodGet, chatPath(id, "memories"), nil, &out)
+	return &out, err
+}
+
+// ForgetChatMemory removes one of a chat's memories for good.
+func (c *Client) ForgetChatMemory(ctx context.Context, id, memoryID string) error {
+	return c.doJSON(ctx, http.MethodDelete, chatPath(id, "memories", memoryID), nil, nil)
+}
+
+// DistillChat queues a chat for the memory distiller now.
+func (c *Client) DistillChat(ctx context.Context, id string) error {
+	return c.doJSON(ctx, http.MethodPost, chatPath(id, "distill"), nil, nil)
+}
+
+// AssistantStats compares chats that started with memory and chats that
+// did not.
+func (c *Client) AssistantStats(ctx context.Context) (*assist.Stats, error) {
+	var out assist.Stats
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/assistant/stats", nil, &out)
+	return &out, err
+}

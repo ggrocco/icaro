@@ -36,4 +36,15 @@ test("ask the assistant for a workflow, accept its proposal and save it", async 
   const chat = decodeURIComponent(new URL(page.url()).hash.split("/").pop()!);
   const versions = await page.evaluate(async () => (await fetch("/api/v1/workflows/hello/versions")).json());
   expect(versions.versions[0].actor).toBe(`token:e2e via assistant ${chat}`);
+
+  // ADR 0036: the chat leaves exact memories (no model is pulled here) and
+  // the person can see and remove them.
+  const memory = panel.locator("details.memory-section");
+  await memory.locator("summary").click();
+  await memory.getByRole("button", { name: "Remember now" }).click();
+  const list = memory.getByRole("list", { name: "Memories from this chat" });
+  await expect(list.getByText(/Saved hello v1/)).toBeVisible({ timeout: 30_000 });
+  const before = await list.locator("li").count();
+  await list.getByRole("button", { name: /^Remove memory Saved hello v1/ }).click();
+  await expect(list.locator("li")).toHaveCount(before - 1);
 });

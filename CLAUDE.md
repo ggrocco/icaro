@@ -45,7 +45,7 @@ Other suites: `go test -tags e2e ./hack/quickstart` and `./hack/e2e` (real Docke
 - `ICARO_TEST_POSTGRES_DSN` makes the store tests also run against Postgres; every store change must pass on both SQLite and Postgres.
 - CI enforces **95% statement coverage per `internal/*` package** in the unit run via `hack/covercheck`; exceptions with reasons are in `hack/covercheck/thresholds.txt` (ADR 0025). New code without tests will fail CI.
 - Mock only the edges: clock, filesystem, process runner, external HTTP. Never mock the planner/executor to test them. Every bug fix gets a regression test first.
-- Parsers of untrusted input have fuzz targets (`FuzzParse` in `internal/expr`, `internal/workflow`, `internal/integration`, `internal/assist/stream`; `FuzzParseCompose` in `internal/preview`); commit crashers under `testdata/fuzz/`.
+- Parsers of untrusted input have fuzz targets (`FuzzParse` in `internal/expr`, `internal/workflow`, `internal/integration`, `internal/assist/stream`; `FuzzParseSummary` in `internal/assist/distill`; `FuzzParseCompose` in `internal/preview`); commit crashers under `testdata/fuzz/`.
 - `hack/docscheck` validates every workflow in `examples/` and every docs code block fenced as ```` ```yaml workflow ````; images there must be pinned by `@sha256:` digest.
 
 ## Architecture

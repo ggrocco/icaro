@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { api, type RunInfo, type VersionInfo } from "../api";
+import { assistApi, type WorkflowNote } from "../assist";
 import { Editor } from "./Editor";
 import { RunGraph } from "../components/lazy";
 import { Empty, ErrorBox, Loading, PageHeader, Status, When, useLoad } from "../components/common";
@@ -76,7 +77,12 @@ export function WorkflowDetail({ name, tab = "overview" }: { name: string; tab?:
           </a>
         ))}
       </nav>
-      {tab === "overview" && (spec ? <RunGraph spec={spec} /> : <p className="muted">No graph.</p>)}
+      {tab === "overview" && (
+        <>
+          <WorkflowNotes name={name} />
+          {spec ? <RunGraph spec={spec} /> : <p className="muted">No graph.</p>}
+        </>
+      )}
       {tab === "edit" && <Editor name={name} initial={w.yaml} onSaved={() => wf.reload()} />}
       {tab === "versions" && <Versions name={name} current={w.version} />}
       {tab === "runs" && (
@@ -86,6 +92,26 @@ export function WorkflowDetail({ name, tab = "overview" }: { name: string; tab?:
         </>
       )}
     </section>
+  );
+}
+
+// WorkflowNotes shows what assistant chats about the workflow were for and
+// where they left off (ADR 0036). Each note is a small model's summary.
+function WorkflowNotes({ name }: { name: string }) {
+  const notes = useLoad(() => assistApi.workflowNotes(name), [name]);
+  const list: WorkflowNote[] = notes.data ?? [];
+  if (list.length === 0) return null;
+  return (
+    <aside className="notice workflow-notes" aria-label="Notes from assistant chats">
+      {list.map((n) => (
+        <p key={n.type}>
+          <strong>{n.type === "intent" ? "Intent" : "Where the last chat left off"}:</strong> {n.memory.body || n.memory.title}{" "}
+          <a href={href("assistant", n.chat_id)} className="muted">
+            (from a chat, summarized by a small model)
+          </a>
+        </p>
+      ))}
+    </aside>
   );
 }
 

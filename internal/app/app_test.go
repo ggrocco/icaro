@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"icaro/internal/assist/distill"
 	"icaro/internal/config"
 	"icaro/internal/creds"
 	"icaro/internal/crypto"
@@ -370,7 +372,7 @@ func TestBaseChecks(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	if got := checkNames(BaseChecks(cfg, nil, nil, nil)); len(got) != 3 {
+	if got := checkNames(BaseChecks(cfg, nil, nil, nil)); len(got) != 4 {
 		t.Errorf("without store and engine: %v", got)
 	}
 
@@ -662,5 +664,63 @@ func TestAssistantCheck(t *testing.T) {
 	cfg.Profiles = map[string]config.ProfileConfig{"shell": {}}
 	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "unavailable") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestDistillCheck(t *testing.T) {
+	cfg := testConfig(t, "")
+	ctx := context.Background()
+	st, err := OpenStore(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run := func() doctor.Result { t.Helper(); return DistillCheck(cfg, st).Run(ctx) }
+	if r := run(); r.Severity != doctor.OK || !strings.Contains(r.Detail, "no model is pulled") {
+		t.Fatalf("%+v", r)
+	}
+	// A pulled file that does not match its pin.
+	m, _ := distill.Lookup("qwen3.5-0.8b")
+	dir := cfg.Layout().Models()
+	_ = os.MkdirAll(dir, 0o700)
+	f, _ := os.Create(filepath.Join(dir, m.File))
+	_ = f.Truncate(m.Size)
+	_ = f.Close()
+	if r := run(); r.Severity != doctor.Error || !strings.Contains(r.Detail, "does not match") {
+		t.Fatalf("%+v", r)
+	}
+	cfg.Memory.Distill.Model = "nope"
+	if r := run(); r.Severity != doctor.Error || !strings.Contains(r.Detail, "memory.distill.model") {
+		t.Fatalf("%+v", r)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
+	defer srv.Close()
+	cfg.Memory.Distill.Endpoint = srv.URL
+	if r := run(); r.Severity != doctor.OK || !strings.Contains(r.Detail, srv.URL) {
+		t.Fatalf("%+v", r)
+	}
+	cfg.Memory.Distill.Endpoint = "http://127.0.0.1:1"
+	if r := run(); r.Severity != doctor.Warning {
+		t.Fatalf("%+v", r)
+	}
+	cfg.Memory.Distill.Enabled = false
+	if r := run(); r.Severity != doctor.OK || !strings.Contains(r.Detail, "off") {
+		t.Fatalf("%+v", r)
+	}
+	// The last job failed.
+	if _, err := st.EnqueueDistill(ctx, "c", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := st.ClaimDistill(ctx, time.Now())
+	j.Status, j.Error = "failed", "model server gone"
+	_ = st.FinishDistill(ctx, j)
+	if r := run(); r.Severity != doctor.Warning || !strings.Contains(r.Detail, "model server gone") {
+		t.Fatalf("%+v", r)
+	}
+	if r := DistillCheck(cfg, nil).Run(ctx); r.Severity != doctor.OK {
+		t.Fatalf("without a store: %+v", r)
 	}
 }

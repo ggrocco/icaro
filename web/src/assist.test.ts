@@ -84,6 +84,16 @@ describe("applyEntry", () => {
     expect(applyEntry(v, { time: at, type: "status", message_id: "ghost", status: "done" }).messages).toEqual([]);
   });
 
+  it("records the notes a conversation started with", () => {
+    const refs = [{ id: "x", kind: "lesson", title: "steps need ids" }];
+    const v = replay([
+      { time: at, type: "memory", message_id: "m1", memories: refs },
+      { time: at, type: "memory", message_id: "m2", memories: [] },
+      { time: at, type: "memory", memories: refs },
+    ]);
+    expect(v.recalled).toEqual({ m1: refs });
+  });
+
   it("starts from the chat's detail", () => {
     const d: ChatDetail = {
       id: "c1",

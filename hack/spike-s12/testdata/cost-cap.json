@@ -1,0 +1,55 @@
+{
+ "name": "cost-cap",
+ "workflow": "triage",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "Our triage workflow is spending too much on the agent step. Can we cap it?"
+  },
+  {
+   "role": "assistant",
+   "text": "The step has no budget today. Options: limit the trigger to issues with the needs-triage label, or set `max_turns: 10` on the agent command."
+  },
+  {
+   "role": "user",
+   "text": "Do both."
+  },
+  {
+   "role": "assistant",
+   "text": "Added the label filter and `--max-turns 10`. Validated."
+  },
+  {
+   "role": "user",
+   "text": "Actually remove the max turns, it cut answers in half last time."
+  },
+  {
+   "role": "assistant",
+   "text": "Removed it; only the label filter stays."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "cost|spend|cap|budget"
+   ]
+  ],
+  "constraints": [
+   [
+    "needs-triage|label"
+   ]
+  ],
+  "preferences": [],
+  "rejected": [
+   [
+    "max.turns|max_turns|max turns"
+   ]
+  ],
+  "open": [],
+  "resume": [
+   [
+    "label|validat|max"
+   ]
+  ]
+ }
+}

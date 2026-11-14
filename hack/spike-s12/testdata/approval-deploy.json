@@ -1,0 +1,57 @@
+{
+ "name": "approval-deploy",
+ "workflow": "deploy-prod",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "Deploy to production after the staging tests pass, but someone has to approve it."
+  },
+  {
+   "role": "assistant",
+   "text": "I proposed deploy-prod: build, test-staging, then an approval step 'Ship to prod?' with timeout 24h, then deploy. The validator said the approval step needs `approvers`."
+  },
+  {
+   "role": "user",
+   "text": "Approvers are me and Ana."
+  },
+  {
+   "role": "assistant",
+   "text": "Added approvers [ops-lead, ana]. Now it validates."
+  },
+  {
+   "role": "user",
+   "text": "If nobody approves in a day, cancel the run instead of failing."
+  },
+  {
+   "role": "assistant",
+   "text": "Set `on_timeout: cancel` on the approval step."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "deploy"
+   ],
+   [
+    "prod"
+   ]
+  ],
+  "constraints": [
+   [
+    "approv"
+   ],
+   [
+    "cancel|24h|day"
+   ]
+  ],
+  "preferences": [],
+  "rejected": [],
+  "open": [],
+  "resume": [
+   [
+    "approv|cancel|validat"
+   ]
+  ]
+ }
+}

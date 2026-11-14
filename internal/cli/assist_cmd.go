@@ -191,7 +191,95 @@ func newAssistCmd(opts *rootOpts) *cobra.Command {
 	}
 	rm.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 
-	cmd.AddCommand(list, newChat, show, send, cancel, decide(true), decide(false), rm)
+	memories := &cobra.Command{
+		Use:   "memories CHAT",
+		Short: "Show the notes a chat started with and the memories it left",
+		Args:  cobra.ExactArgs(1),
+		RunE: withClient(func(ctx context.Context, c *apiclient.Client, cmd *cobra.Command, args []string) error {
+			m, err := c.ChatMemories(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), m)
+			}
+			w := cmd.OutOrStdout()
+			fmt.Fprintf(w, "Started with %d note(s) from earlier chats:\n", len(m.Used))
+			for _, u := range m.Used {
+				fmt.Fprintf(w, "  %s  %s\n", u.ID, u.Title)
+			}
+			fmt.Fprintf(w, "\nRemembered from this chat (%d):\n", len(m.Produced))
+			for _, p := range m.Produced {
+				conf, _ := p.Metadata["confidence"].(string)
+				fmt.Fprintf(w, "  %s  [%s, %s]  %s\n", p.ID, p.Kind, conf, p.Title)
+			}
+			if m.Job != nil {
+				fmt.Fprintf(w, "\nLast distill: %s, model stage %s", m.Job.Status, dash(m.Job.Stage2))
+				if m.Job.Error != "" {
+					fmt.Fprintf(w, ", error: %s", m.Job.Error)
+				}
+				fmt.Fprintln(w)
+			}
+			return nil
+		}),
+	}
+	distillCmd := &cobra.Command{
+		Use:   "distill CHAT",
+		Short: "Turn a chat into memories now (it also happens when the chat goes idle)",
+		Args:  cobra.ExactArgs(1),
+		RunE: withClient(func(ctx context.Context, c *apiclient.Client, cmd *cobra.Command, args []string) error {
+			if err := c.DistillChat(ctx, args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "queued; see icaro assist memories", args[0])
+			return nil
+		}),
+	}
+	var forgetYes bool
+	forget := &cobra.Command{
+		Use:   "forget CHAT MEMORY",
+		Short: "Remove one of a chat's memories for good",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !forgetYes {
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(), fmt.Sprintf("Remove memory %s? The chat will not write it again.", args[1]))
+				if err != nil || !ok {
+					return err
+				}
+			}
+			c, err := opts.client(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return c.ForgetChatMemory(cmd.Context(), args[0], args[1])
+		},
+	}
+	forget.Flags().BoolVar(&forgetYes, "yes", false, "do not ask for confirmation")
+	stats := &cobra.Command{
+		Use:   "stats",
+		Short: "Compare chats that started with memory and chats that did not",
+		Args:  cobra.NoArgs,
+		RunE: withClient(func(ctx context.Context, c *apiclient.Client, cmd *cobra.Command, _ []string) error {
+			st, err := c.AssistantStats(ctx)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), st)
+			}
+			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
+			fmt.Fprintln(tw, "\tCHATS\tCLEAN DRAFT\tCHECKS TO CLEAN\tSAVED\tTURNS TO SAVE\tMEDIAN TIME TO SAVE\tSAVES/PROPOSAL")
+			for _, g := range []struct {
+				name string
+				g    assist.StatsGroup
+			}{{"with memory", st.WithMemory}, {"without", st.WithoutMemory}} {
+				fmt.Fprintf(tw, "%s\t%d\t%d\t%.1f\t%d\t%.1f\t%s\t%.2f\n", g.name, g.g.Chats, g.g.Converged, g.g.AvgValidations, g.g.Saved,
+					g.g.AvgTurnsToSave, (time.Duration(g.g.MedianSecondsToSave) * time.Second).String(), g.g.AcceptRate)
+			}
+			return tw.Flush()
+		}),
+	}
+	cmd.AddCommand(list, newChat, show, send, cancel, decide(true), decide(false), rm, memories, distillCmd, forget, stats)
 	return cmd
 }
 

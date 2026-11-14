@@ -77,7 +77,7 @@ export interface StreamEvent {
 // LogEntry is one line of a chat's log.
 export interface LogEntry {
   time: string;
-  type: "message" | "status" | "event" | "draft" | "approval";
+  type: "message" | "status" | "event" | "draft" | "approval" | "memory";
   message_id?: string;
   status?: TurnStatus;
   note?: string;
@@ -85,6 +85,41 @@ export interface LogEntry {
   event?: StreamEvent;
   draft?: { version: number; source: "user" | "assistant"; issues: number };
   approval?: ChatApproval;
+  memories?: MemoryRef[];
+}
+
+// MemoryRef names a note from earlier chats a conversation started with.
+export interface MemoryRef {
+  id: string;
+  kind: string;
+  title: string;
+}
+
+// Memory is one memory a chat left (ADR 0036). confidence is "exact" for
+// what Ícaro recorded itself and "model" for the small model's summary.
+export interface Memory {
+  id: string;
+  kind: string;
+  title: string;
+  body?: string;
+  source?: string;
+  metadata?: { confidence?: string; [k: string]: unknown };
+  expires_at?: string;
+  created_at: string;
+}
+
+// WorkflowNote is the latest intent or resume note chats left about a
+// workflow.
+export interface WorkflowNote {
+  type: "intent" | "resume";
+  chat_id: string;
+  memory: Memory;
+}
+
+export interface ChatMemories {
+  used: MemoryRef[];
+  produced: Memory[];
+  job?: { status: "pending" | "running" | "done" | "failed"; stage2?: string; memories: number; error?: string };
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -104,8 +139,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     }
     throw new ApiError(res.status, msg, issues);
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // 204, and the 202 of a queued distill, carry no body.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 const chat = (id: string) => `/api/v1/chats/${encodeURIComponent(id)}`;
@@ -122,6 +158,11 @@ export const assistApi = {
   decide: (id: string, approval: string, approve: boolean) =>
     call<ChatApproval>("POST", `${chat(id)}/approvals/${encodeURIComponent(approval)}/${approve ? "approve" : "decline"}`),
   remove: (id: string) => call<void>("DELETE", chat(id)),
+  memories: (id: string) => call<ChatMemories>("GET", `${chat(id)}/memories`),
+  forget: (id: string, memory: string) => call<void>("DELETE", `${chat(id)}/memories/${encodeURIComponent(memory)}`),
+  distill: (id: string) => call<void>("POST", `${chat(id)}/distill`),
+  workflowNotes: (workflow: string) =>
+    call<{ notes: WorkflowNote[] }>("GET", `/api/v1/assistant/notes?workflow=${encodeURIComponent(workflow)}`).then((r) => r.notes ?? []),
 };
 
 // subscribeChat follows a chat's log over SSE from the start, so the view
@@ -179,6 +220,9 @@ export interface ChatView {
   draftSource?: "user" | "assistant";
   // chatNotes are notes about the chat itself (the container, a save).
   chatNotes: string[];
+  // recalled lists, per reply, the notes from earlier chats its
+  // conversation started with.
+  recalled: Record<string, MemoryRef[]>;
 }
 
 export function emptyView(d?: ChatDetail): ChatView {
@@ -191,6 +235,7 @@ export function emptyView(d?: ChatDetail): ChatView {
     draftVersion: d?.draft?.version ?? 0,
     draftSource: d?.draft?.source,
     chatNotes: [],
+    recalled: {},
   };
 }
 
@@ -240,6 +285,8 @@ export function applyEntry(v: ChatView, e: LogEntry): ChatView {
     }
     case "draft":
       return e.draft ? { ...v, draftVersion: Math.max(v.draftVersion, e.draft.version), draftSource: e.draft.source } : v;
+    case "memory":
+      return id && e.memories?.length ? { ...v, recalled: { ...v.recalled, [id]: e.memories } } : v;
     case "approval": {
       const a = e.approval;
       if (!a) return v;

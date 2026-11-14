@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assistApi, applyEntry, blocker, busy, emptyView, shownText, subscribeChat, type ChatDetail, type ChatView, type ToolCall } from "../assist";
+import {
+  assistApi,
+  applyEntry,
+  blocker,
+  busy,
+  emptyView,
+  shownText,
+  subscribeChat,
+  type ChatDetail,
+  type ChatMemories,
+  type ChatView,
+  type MemoryRef,
+  type ToolCall,
+} from "../assist";
 import type { Issue } from "../api";
 import { diffLines } from "../diff";
 import { href } from "../router";
@@ -52,7 +65,7 @@ export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: P
         setDetail(d);
         // The editor opened on the current draft: nothing to propose yet.
         handled.current = d.draft?.version ?? 0;
-        setView((v) => ({ ...emptyView(d), live: v.live, tools: v.tools }));
+        setView((v) => ({ ...emptyView(d), live: v.live, tools: v.tools, recalled: v.recalled }));
       })
       .catch(setError);
     const stop = subscribeChat(chatId, (e) => !closed && setView((v) => applyEntry(v, e)), setLive);
@@ -170,6 +183,7 @@ export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: P
             {view.messages.map((m) => (
               <li key={m.id} className={`chat-msg ${m.role}`}>
                 <span className="chat-who">{m.role === "user" ? "You" : "Assistant"}</span>
+                {(view.recalled[m.id] ?? []).length > 0 && <Recalled refs={view.recalled[m.id]} />}
                 {(view.tools[m.id] ?? []).length > 0 && <ToolCalls calls={view.tools[m.id]} />}
                 <div className="chat-text">{shownText(view, m) || (m.status === "running" ? "…" : "")}</div>
                 {view.notes[m.id] && <p className="muted chat-note">{view.notes[m.id]}</p>}
@@ -239,6 +253,8 @@ export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: P
             </div>
           )}
 
+          <MemorySection chatId={chatId} settled={settledCount} />
+
           {stuck && <Blocker chatId={chatId} profile={detail.profile} status={stuck.status} error={stuck.error} resetAt={stuck.reset_at} messageId={stuck.id} onError={setActionError} />}
           {actionError && <ErrorBox error={actionError} />}
 
@@ -272,6 +288,115 @@ export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: P
         </>
       )}
     </aside>
+  );
+}
+
+function Recalled({ refs }: { refs: MemoryRef[] }) {
+  return (
+    <details className="recalled">
+      <summary className="muted">Started with {refs.length === 1 ? "1 note" : `${refs.length} notes`} from earlier chats</summary>
+      <ul>
+        {refs.map((r) => (
+          <li key={r.id}>
+            <span className="badge">{r.kind}</span> {r.title}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+const distillLabel: Record<string, string> = {
+  pending: "Waiting to be remembered",
+  running: "Remembering…",
+  done: "Remembered",
+  failed: "Remembering failed",
+};
+
+// MemorySection shows what the chat left for later chats (ADR 0036): the
+// exact facts Ícaro recorded and, with a model pulled, its summary. The
+// person can remove any of them or ask for it to be remembered now.
+export function MemorySection({ chatId, settled }: { chatId: string; settled: number }) {
+  const [open, setOpen] = useState(false);
+  const [mem, setMem] = useState<ChatMemories | undefined>();
+  const [error, setError] = useState<Error | undefined>();
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let closed = false;
+    let timer: number | undefined;
+    assistApi
+      .memories(chatId)
+      .then((m) => {
+        if (closed) return;
+        setMem(m);
+        // Follow a job still in the queue until it ends.
+        if (m.job && (m.job.status === "pending" || m.job.status === "running")) timer = window.setTimeout(() => setTick((t) => t + 1), 1500);
+      })
+      .catch((e) => !closed && setError(e as Error));
+    return () => {
+      closed = true;
+      window.clearTimeout(timer);
+    };
+  }, [chatId, open, settled, tick]);
+  const act = (fn: () => Promise<unknown>) => {
+    setError(undefined);
+    fn()
+      .then(() => setTick((t) => t + 1))
+      .catch((e) => setError(e as Error));
+  };
+  const job = mem?.job;
+  return (
+    <details className="memory-section" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>
+        <Icon name="memory" />
+        Memory
+        {mem && <span className="muted"> · {mem.produced.length} remembered</span>}
+      </summary>
+      {error && <ErrorBox error={error} />}
+      {open && !mem && !error && <Loading what="memories" />}
+      {mem && (
+        <>
+          <p className="muted">
+            What this chat leaves for later chats in the same scope. Exact facts are what Ícaro recorded itself; summaries come from the local model, if one is
+            pulled, and expire.
+            {job && (
+              <>
+                {" "}
+                {distillLabel[job.status] ?? job.status}
+                {job.stage2 ? ` (summary by ${job.stage2})` : ""}.{job.error ? ` ${job.error}` : ""}
+              </>
+            )}
+          </p>
+          {mem.produced.length === 0 ? (
+            <p className="muted">Nothing yet. A chat is remembered once it has been idle for a while.</p>
+          ) : (
+            <ul className="memory-list" aria-label="Memories from this chat">
+              {mem.produced.map((m) => (
+                <li key={m.id}>
+                  <div>
+                    <span className="badge">{m.kind}</span>{" "}
+                    <span className={m.metadata?.confidence === "model" ? "badge warn" : "badge succeeded"}>{m.metadata?.confidence === "model" ? "summary" : "exact"}</span>{" "}
+                    <strong>{m.title}</strong>
+                    {m.expires_at && (
+                      <span className="muted">
+                        {" "}
+                        · expires <When ts={m.expires_at} />
+                      </span>
+                    )}
+                  </div>
+                  {m.body && m.body !== m.title && <p className="muted memory-body">{m.body}</p>}
+                  <button className="ghost" onClick={() => act(() => assistApi.forget(chatId, m.id))} aria-label={`Remove memory ${m.title}`}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button onClick={() => act(() => assistApi.distill(chatId))}>Remember now</button>
+        </>
+      )}
+    </details>
   );
 }
 

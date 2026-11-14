@@ -28,6 +28,10 @@ func TestChatEndpoints(t *testing.T) {
 		{"approve", "POST", "/api/v1/chats/c1/approvals/a1/approve", "", func(c *Client) error { _, err := c.DecideChat(ctx, "c1", "a1", true); return err }},
 		{"decline", "POST", "/api/v1/chats/c1/approvals/a1/decline", "", func(c *Client) error { _, err := c.DecideChat(ctx, "c1", "a1", false); return err }},
 		{"delete", "DELETE", "/api/v1/chats/c1", "", func(c *Client) error { return c.DeleteChat(ctx, "c1") }},
+		{"memories", "GET", "/api/v1/chats/c1/memories", "", func(c *Client) error { _, err := c.ChatMemories(ctx, "c1"); return err }},
+		{"forget", "DELETE", "/api/v1/chats/c1/memories/m1", "", func(c *Client) error { return c.ForgetChatMemory(ctx, "c1", "m1") }},
+		{"distill", "POST", "/api/v1/chats/c1/distill", "", func(c *Client) error { return c.DistillChat(ctx, "c1") }},
+		{"stats", "GET", "/api/v1/assistant/stats", "", func(c *Client) error { _, err := c.AssistantStats(ctx); return err }},
 	} {
 		c, rec := fakeServer(t, `{}`)
 		if err := tc.call(c); err != nil {

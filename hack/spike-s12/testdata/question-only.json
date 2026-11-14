@@ -1,0 +1,31 @@
+{
+ "name": "question-only",
+ "workflow": "",
+ "note": "No workflow work: most fields should stay empty.",
+ "turns": [
+  {
+   "role": "user",
+   "text": "What is the difference between uses and image steps?"
+  },
+  {
+   "role": "assistant",
+   "text": "An image step runs a container as an Ícaro session; a uses step calls an integration action from a manifest inside the daemon, with no container. uses steps never see the integration's credentials in a container."
+  },
+  {
+   "role": "user",
+   "text": "Thanks, that's all."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "uses|image|difference|step"
+   ]
+  ],
+  "constraints": [],
+  "preferences": [],
+  "rejected": [],
+  "open": [],
+  "resume": []
+ }
+}

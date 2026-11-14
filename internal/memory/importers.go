@@ -26,6 +26,8 @@ type ImportItem struct {
 	SourceLine int
 	Metadata   map[string]any
 	CreatedAt  *time.Time
+	// TTL expires the memory that long after it is written (0: never).
+	TTL time.Duration `json:",omitempty"`
 }
 
 // ImportEdge links two imported items by key.
@@ -78,7 +80,27 @@ func (e *Engine) Import(ctx context.Context, scope Scope, format string, data []
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrInvalid, format, err)
 	}
-	origin := "import:" + imp.Name()
+	rep, err := e.put(ctx, scope, "import:"+imp.Name(), items, edges)
+	if rep != nil {
+		rep.Format = format
+	}
+	return rep, err
+}
+
+// Put writes items under origin, idempotently by key: an item whose
+// content did not change is left alone and a changed one is replaced
+// (ADR 0036 uses origin "distill:<chat>").
+func (e *Engine) Put(ctx context.Context, scope Scope, origin string, items []ImportItem) (*ImportReport, error) {
+	if err := scope.check(); err != nil {
+		return nil, err
+	}
+	if origin == "" {
+		return nil, fmt.Errorf("%w: an origin is required", ErrInvalid)
+	}
+	return e.put(ctx, scope, origin, items, nil)
+}
+
+func (e *Engine) put(ctx context.Context, scope Scope, origin string, items []ImportItem, edges []ImportEdge) (*ImportReport, error) {
 	existing, err := e.db.ListMemoryKeys(ctx, scope.ProjectID, origin)
 	if err != nil {
 		return nil, err
@@ -100,7 +122,7 @@ func (e *Engine) Import(ctx context.Context, scope Scope, format string, data []
 		}
 		edgesFrom[ed.FromKey] = append(edgesFrom[ed.FromKey], store.MemoryEdge{ToRef: to, Kind: orDefault(ed.Kind, "related")})
 	}
-	rep := &ImportReport{Format: format}
+	rep := &ImportReport{}
 	now := e.now()
 	var bundles []store.MemoryBundle
 	for _, it := range items {
@@ -134,6 +156,10 @@ func (e *Engine) Import(ctx context.Context, scope Scope, format string, data []
 		}
 		if it.Kind == KindHandoff {
 			row.Status = StatusPending
+		}
+		if it.TTL > 0 {
+			exp := now.Add(it.TTL)
+			row.ExpiresAt = &exp
 		}
 		b := bundle(row)
 		b.Edges = edgesFrom[it.Key]
