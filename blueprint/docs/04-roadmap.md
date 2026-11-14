@@ -23,7 +23,8 @@ SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 6 + 14 + ADR 0036 accepted + S12 ──> 15  (post-GA)
 2 + 14 (agent adapters) + ADR 0037 accepted + S11 ──> 16  (post-GA)
 2 + ADR 0038 accepted ──> 17  (post-GA)
-3 + ADR 0039 accepted (+ S13 for step access) ──> 18  (post-GA)
+3 + ADR 0041 accepted (+ S13 for step access) ──> 18  (post-GA)
+2 + ADR 0040 accepted ──> 19  (post-GA)
 ```
 
 | Phase | Track | Depends on |
@@ -44,7 +45,8 @@ SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 | [13 — Workflow library](phases/13-workflow-library.md) | Automation (post-GA) | 2; [ADR 0033](adr/0033-workflow-library.md) accepted |
 | [16 — Agent steps](phases/16-agent-steps.md) | Automation (post-GA) | 2; Phase 14's agent adapters; [ADR 0037](adr/0037-agent-steps.md) accepted; spike S11 |
 | [17 — Call steps](phases/17-call-steps.md) | Automation (post-GA) | 2; [ADR 0038](adr/0038-call-workflow-steps.md) accepted |
-| [18 — GitHub App mode](phases/18-github-app.md) | Automation (post-GA) | 3; [ADR 0039](adr/0039-github-app-mode.md) accepted; spike S13 before step access |
+| [18 — GitHub App mode](phases/18-github-app.md) | Automation (post-GA) | 3; [ADR 0041](adr/0041-github-app-mode.md) accepted; spike S13 before step access |
+| [19 — Multi-runner scale-out](phases/19-multi-runner.md) | Platform (post-GA) | 2; [ADR 0040](adr/0040-multi-runner-scale-out.md) accepted |
 
 ## Rules for every phase
 
@@ -73,13 +75,14 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [9 — Usage](phases/09-usage.md) (optional) | Done | Only Claude Code transcripts are parsed; other CLIs wait on spike S10 |
 | [10 — Docs and landing page](phases/10-docs-landing.md) | Done | — |
 | [11 — Hardening and GA](phases/11-hardening.md) | Done on Linux | macOS/Docker Desktop smoke tests and the public beta; a real Docker daemon restart is simulated, not exercised ([ADR 0024](adr/0024-hardening-budget.md) records the budget) |
-| [12 — Await steps](phases/12-await-steps.md) | Not started | Waits on [ADR 0032](adr/0032-await-event-steps.md) being accepted |
+| [12 — Await steps](phases/12-await-steps.md) | Not started | Ready to start: [ADR 0032](adr/0032-await-event-steps.md) is accepted |
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
 | [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Not started | Waits on [ADR 0035](adr/0035-workflow-assistant-chat.md) being accepted and spike S11 |
 | [15 — Memory distiller](phases/15-memory-distiller.md) | Not started | Waits on Phase 14, [ADR 0036](adr/0036-local-memory-distiller.md) being accepted, and spike S12 |
 | [16 — Agent steps](phases/16-agent-steps.md) | Not started | Waits on [ADR 0037](adr/0037-agent-steps.md) being accepted, spike S11, and Phase 14's agent adapters |
 | [17 — Call steps](phases/17-call-steps.md) | Not started | Waits on [ADR 0038](adr/0038-call-workflow-steps.md) being accepted |
-| [18 — GitHub App mode](phases/18-github-app.md) | Not started | Waits on [ADR 0039](adr/0039-github-app-mode.md) being accepted; step access also on spike S13 |
+| [18 — GitHub App mode](phases/18-github-app.md) | Not started | Waits on [ADR 0041](adr/0041-github-app-mode.md) being accepted; step access also on spike S13 |
+| [19 — Multi-runner scale-out](phases/19-multi-runner.md) | Not started | Waits on [ADR 0040](adr/0040-multi-runner-scale-out.md) being accepted |
 
 Open spikes:
 

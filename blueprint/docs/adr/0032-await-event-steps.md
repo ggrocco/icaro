@@ -1,6 +1,6 @@
 # ADR 0032 — Steps that wait for an integration event
 
-**Status:** Proposed. Would lift [MVP cut 8](../02-decisions-risks.md#mandatory-mvp-cuts) for one more step form, the last pause listed under [deferred designs](../02-decisions-risks.md#deferred-designs). Builds on [ADR 0030](0030-approval-wait-steps.md) (parking) and [ADR 0015](0015-manifest-schema-webhook-pipeline.md) (the webhook pipeline).
+**Status:** Accepted. Lifts [MVP cut 8](../02-decisions-risks.md#mandatory-mvp-cuts) for one more step form, the last pause listed under [deferred designs](../02-decisions-risks.md#deferred-designs). Builds on [ADR 0030](0030-approval-wait-steps.md) (parking) and [ADR 0015](0015-manifest-schema-webhook-pipeline.md) (the webhook pipeline).
 
 ## Context
 
@@ -78,6 +78,15 @@ Inbound webhooks need a reachable daemon (cut 9), so on a laptop an `await` step
 - `icaro runs deliver RUN STEP --payload FILE` and a form on the run page in the web UI call it.
 - As with approvals, **no MCP tool resolves an `await` step**, and step containers cannot reach the daemon API, so a run cannot release itself.
 
+## Settled at acceptance
+
+The draft left four questions open. They were accepted as drafted:
+
+1. **`key` and `match` stay required.** A workflow that wants any event of a type writes the same constant on both sides, so the choice is visible in the file.
+2. **The lookback starts at the run's start**, not the step's. An event caused by an earlier step, which can arrive before that step finishes, is still found. The cost is that a retried earlier step can produce an event that matches; a `filter` on the event's fields narrows that when it matters.
+3. **Normalized events are stored** in `delivery_events` for every verified delivery, within `webhooks.retention`.
+4. **Validation warns** when a workflow awaits an integration event and `daemon.public_url` is unset.
+
 ## Alternatives considered
 
 - **Poll from an image step.** Works today, but holds a run slot and a container for hours, and every workflow re-implements the same API loop.
@@ -92,5 +101,5 @@ Inbound webhooks need a reachable daemon (cut 9), so on a laptop an `await` step
 - Every verified delivery now also stores its normalized events, which grows the database within the existing retention window.
 - A manifest edit that removes an event or a payload field fails validation of the workflows that await it, as it already does for triggers. Steps already waiting keep their row and expire on their deadline if the event no longer arrives.
 - `await` is a new step kind for API clients and the generated schema (with a drift test against [the contract](../schemas/workflow.schema.json)), the CLI and the web UI's step views.
-- On a daemon no provider can reach, `await` steps only finish by hand or by expiring. Validation should warn, not fail, when a workflow awaits an integration event and `daemon.public_url` is not set.
+- On a daemon no provider can reach, `await` steps only finish by hand or by expiring. Validation warns, without failing, when a workflow awaits an integration event and `daemon.public_url` is not set.
 - Implementation is [Phase 12](../phases/12-await-steps.md), after Phase 11, since every existing phase is closed.

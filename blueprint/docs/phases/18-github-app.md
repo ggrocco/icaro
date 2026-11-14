@@ -1,8 +1,8 @@
 # Phase 18 — GitHub App mode
 
-**Objective:** the `github` integration authenticates as a GitHub App instead of a personal token: actions use per-call installation tokens, setup uses the App Manifest flow, and steps get scoped GitHub access through the injection relay without holding a token. As proposed in [ADR 0039](../adr/0039-github-app-mode.md).
+**Objective:** the `github` integration authenticates as a GitHub App instead of a personal token: actions use per-call installation tokens, setup uses the App Manifest flow, and steps get scoped GitHub access through the injection relay without holding a token. As proposed in [ADR 0041](../adr/0041-github-app-mode.md).
 
-**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0039 **accepted**, with its open questions settled:
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0041 **accepted**, with its open questions settled:
 
 - how PAT or App is chosen (an ordered `auth` list, or one setting per integration);
 - the default `integrations.github.step_permissions` ceiling;
@@ -23,7 +23,7 @@ Run before Part C, with a test App installed on a scratch repository and a step 
 - [ ] git: `clone`, `fetch` and `push` over smart HTTP with the `insteadOf` rewrite from `GIT_CONFIG_COUNT`/`KEY`/`VALUE`, including a large pack and an authenticated push.
 - [ ] `gh` (with `GH_TOKEN`, `GH_HOST` and an API URL override), Octokit (with `baseUrl`) and `curl` against `GITHUB_API_URL`: one read and one write each.
 - [ ] Check that the installation token never appears in the container's environment, files, process list or the responses it receives.
-- [ ] Record what works, with versions, in ADR 0039. Pass: git and at least one API client. Otherwise the fallback the ADR settles applies.
+- [ ] Record what works, with versions, in ADR 0041. Pass: git and at least one API client. Otherwise the fallback the ADR settles applies.
 
 ## Deliverables
 
@@ -106,7 +106,7 @@ Run before Part C, with a test App installed on a scratch repository and a step 
   - `docs/integrations.md`: "GitHub App mode" (setup, permissions, installations, fallback to a PAT).
   - `docs/workflows.md`: the `github` step field, with an example in a ```` ```yaml workflow ```` block, and the pull-request guidance.
   - [Security](../03-security.md): the App key as a credential, the relay's second target, and the step ceiling.
-  - The blueprint: ADR 0039 marked Accepted, a decision-index row, cut 9's wording, the deferred-designs row removed, and S13's result.
+  - The blueprint: ADR 0041 marked Accepted, a decision-index row, cut 9's wording, the deferred-designs row removed, and S13's result.
 
 ## Acceptance criteria
 

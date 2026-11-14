@@ -104,7 +104,7 @@ The key never crosses the network through Ícaro. A runner is therefore **as tru
   - columns: the claiming runner on runs and step runs, chunk bodies in `log_chunks`.
 - New commands: `icaro serve --role runner`, `icaro runners`, and `icaro cluster key export|import`.
 - The engine's startup recovery, the claim loop, log writing and the SSE source change for every user, including single-node ones. A single node must behave exactly as today, and its tests say so.
-- Implementation would be a new phase: roles and the primary lease, runner registration and claims, recovery by owner, the published configuration, key export and import, logs in the store, SSE over the store, lost-node handling, version gating, draining, docs, and a multi-node test environment in CI.
+- Implementation is [Phase 19](../phases/19-multi-runner.md), built so a single node keeps behaving as today at every step.
 
 ## Open questions
 
