@@ -12,6 +12,7 @@ const (
 	KindUses     = "uses"
 	KindApproval = "approval"
 	KindWait     = "wait"
+	KindAwait    = "await"
 )
 
 // Kind returns the step form, or "" when none or more than one is set.
@@ -20,7 +21,7 @@ func (s *StepSpec) Kind() string {
 	for _, f := range []struct {
 		set  bool
 		kind string
-	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}} {
+	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}, {s.Await != nil, KindAwait}} {
 		if f.set {
 			kind, n = f.kind, n+1
 		}
@@ -32,12 +33,16 @@ func (s *StepSpec) Kind() string {
 }
 
 // Pauses reports whether the step runs no container or action: it waits
-// for a person (approval) or for time to pass (wait), and its run is
-// parked meanwhile (ADR 0030).
+// for a person (approval), for time to pass (wait) or for an integration
+// event (await), and its run is parked meanwhile (ADRs 0030, 0032).
 func (s *StepSpec) Pauses() bool {
 	k := s.Kind()
-	return k == KindApproval || k == KindWait
+	return k == KindApproval || k == KindWait || k == KindAwait
 }
+
+// AwaitOutputs are the outputs an await step adds to its event's payload
+// fields: the delivery that resumed it ("manual:<id>" when a person did).
+var AwaitOutputs = []string{"delivery_id"}
 
 // ApprovalOutputs are the outputs an approval step produces.
 var ApprovalOutputs = []string{"approved_by", "comment"}
