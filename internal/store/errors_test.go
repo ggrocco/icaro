@@ -130,6 +130,22 @@ func TestClosedDatabase(t *testing.T) {
 		},
 		"DeleteRemoteHost": func() error { return s.DeleteRemoteHost(ctx, "a") },
 		"WakeRun":          func() error { return s.WakeRun(ctx, "r") },
+		"OpenAwait": func() error {
+			_, err := s.OpenAwait(ctx, &StepAwait{RunID: "r", StepID: "s"})
+			return err
+		},
+		"ListAwaits": func() error {
+			_, err := s.ListAwaits(ctx, "r")
+			return err
+		},
+		"ResolveAwait": func() error {
+			_, err := s.ResolveAwait(ctx, "r", "s", AwaitMatched, "d", "{}", "")
+			return err
+		},
+		"ListDeliveryEventsSince": func() error {
+			_, err := s.ListDeliveryEventsSince(ctx, "i", "e", "", time.Time{})
+			return err
+		},
 		"OpenApproval": func() error {
 			_, err := s.OpenApproval(ctx, "r", "s", "m")
 			return err
