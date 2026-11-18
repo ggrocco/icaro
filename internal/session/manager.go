@@ -596,11 +596,14 @@ func (m *Manager) identity(row *store.SessionRow, proj *store.Project, agent str
 
 func (m *Manager) icaroDir(id string) string { return filepath.Dir(MemorySocketPath(m.layout, id)) }
 
+// daemonUID is the daemon's uid; tests stand in a root daemon with it.
+var daemonUID = os.Getuid
+
 // chownForContainer hands session-owned host paths to the container user
 // when the daemon runs as root (a root daemon must not make the agent
 // root to write its own worktree). It is a no-op for a normal user daemon.
 func (m *Manager) chownForContainer(paths ...string) {
-	if os.Getuid() != 0 || m.o.UID == 0 {
+	if daemonUID() != 0 || m.o.UID == 0 {
 		return
 	}
 	for _, p := range paths {
