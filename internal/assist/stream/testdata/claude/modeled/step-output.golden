@@ -1,0 +1,39 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "6b8e3d21-2c3f-4a4b-8d9e-8f7a6b5c4d3e"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "toolu_21",
+      "tool": "Write",
+      "args": {
+        "file_path": "/icaro/output.json",
+        "content": "{\"summary\":\"one risk: the retry loop never backs off\"}"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "toolu_21",
+      "tool": "Write",
+      "result": "File created successfully at: /icaro/output.json"
+    },
+    {
+      "kind": "text",
+      "text": "Wrote the summary to /icaro/output.json."
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 1800,
+        "output": 95
+      }
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "done"
+}

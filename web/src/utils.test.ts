@@ -54,6 +54,13 @@ describe("graph", () => {
       ["image", "a/b:1"],
     ]);
   });
+  it("marks agent steps with their profile", () => {
+    const steps = stepsFromSpec({ steps: [{ id: "review", agent: { profile: "reviewer", prompt: "x" } }, { id: "fix", agent: { prompt: "y" } }] });
+    expect(steps.map((s) => [s.kind, s.label])).toEqual([
+      ["agent", "agent · reviewer"],
+      ["agent", "agent"],
+    ]);
+  });
   it("survives cycles", () => {
     const placed = layout([
       { id: "a", needs: ["b"], kind: "image", label: "" },

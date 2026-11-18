@@ -144,6 +144,10 @@ func (fakeImages) Resolve(_ context.Context, ref string) (string, error) {
 type fakeMemory struct{ calls chan Identity }
 
 func (f fakeMemory) ServeSession(_ context.Context, id Identity, socket string) (func(), error) {
+	if id.ProjectID == "" {
+		// The memory engine refuses an unscoped session.
+		return nil, errors.New("session " + id.SessionID + " has no project")
+	}
 	f.calls <- id
 	return func() {}, os.WriteFile(socket, nil, 0o600)
 }
@@ -537,5 +541,11 @@ func TestCreateFailsFastWhileDockerIsDown(t *testing.T) {
 	s, err := e.m.Create(ctx, CreateRequest{RepoPath: e.repo, Name: "down"})
 	if err != nil || s.Status != StatusRunning {
 		t.Fatalf("after Docker is back: %+v %v", s, err)
+	}
+}
+
+func TestTotalRAM(t *testing.T) {
+	if TotalRAM() != totalRAM() {
+		t.Fatal("TotalRAM differs from the probe it wraps")
 	}
 }

@@ -1,0 +1,35 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "7c9f4e32-3d4a-4b5c-9e0f-9a8b7c6d5e4f"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "toolu_31",
+      "tool": "Bash",
+      "args": {
+        "command": "go test ./..."
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "toolu_31",
+      "tool": "Bash",
+      "result": "FAIL"
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 900,
+        "output": 40
+      }
+    },
+    {
+      "kind": "error",
+      "text": "error max turns"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "error"
+}

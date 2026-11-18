@@ -375,14 +375,17 @@ func (s *Store) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
 	return out, rows.Err()
 }
 
-const stepCols = `run_id, step_id, idx, kind, status, attempt, session_id, container_id, exit_code, outputs_json, log_path, log_size, log_lines, started_at, finished_at, error`
+const stepCols = `run_id, step_id, idx, kind, status, attempt, session_id, container_id, exit_code, outputs_json, log_path, log_size, log_lines, started_at, finished_at, error,
+	profile, image_digest, input_tokens, output_tokens, cache_read, cache_write, cost_micro`
 
 func scanStep(sc interface{ Scan(...any) error }) (*StepRun, error) {
 	var st StepRun
 	var exit sql.NullInt64
 	var started, finished sql.NullString
+	u := &st.Usage
 	err := sc.Scan(&st.RunID, &st.StepID, &st.Idx, &st.Kind, &st.Status, &st.Attempt, &st.SessionID, &st.ContainerID, &exit,
-		&st.OutputsJSON, &st.LogPath, &st.LogSize, &st.LogLines, &started, &finished, &st.Error)
+		&st.OutputsJSON, &st.LogPath, &st.LogSize, &st.LogLines, &started, &finished, &st.Error,
+		&st.Profile, &st.ImageDigest, &u.Input, &u.Output, &u.CacheRead, &u.CacheWrite, &u.CostMicro)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -429,11 +432,14 @@ func (s *Store) UpdateStepRun(ctx context.Context, st *StepRun) error {
 	if st.OutputsJSON == "" {
 		st.OutputsJSON = "{}"
 	}
+	u := st.Usage
 	res, err := s.exec(ctx, `UPDATE step_runs SET status = ?, attempt = ?, session_id = ?, container_id = ?, exit_code = ?, outputs_json = ?,
-		log_path = ?, log_size = ?, log_lines = ?, started_at = ?, finished_at = ?, error = ?
+		log_path = ?, log_size = ?, log_lines = ?, started_at = ?, finished_at = ?, error = ?,
+		profile = ?, image_digest = ?, input_tokens = ?, output_tokens = ?, cache_read = ?, cache_write = ?, cost_micro = ?
 		WHERE run_id = ? AND step_id = ?`,
 		st.Status, st.Attempt, st.SessionID, st.ContainerID, exit, st.OutputsJSON, st.LogPath, st.LogSize, st.LogLines,
-		tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error, st.RunID, st.StepID)
+		tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error,
+		st.Profile, st.ImageDigest, u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CostMicro, st.RunID, st.StepID)
 	if err != nil {
 		return err
 	}
@@ -501,4 +507,37 @@ func (s *Store) ActiveWorkflows(ctx context.Context) ([]*Workflow, error) {
 		}
 	}
 	return out, nil
+}
+
+// AgentStepUsage is one agent step run's token usage (ADR 0037).
+type AgentStepUsage struct {
+	RunID, StepID, Workflow, Profile string
+	StartedAt                        time.Time
+	Usage                            StepUsage
+}
+
+// ListAgentStepUsage returns the step runs that recorded token usage and
+// started at or after since.
+func (s *Store) ListAgentStepUsage(ctx context.Context, since time.Time) ([]*AgentStepUsage, error) {
+	rows, err := s.query(ctx, `SELECT sr.run_id, sr.step_id, r.workflow_name, sr.profile, sr.started_at,
+		sr.input_tokens, sr.output_tokens, sr.cache_read, sr.cache_write, sr.cost_micro
+		FROM step_runs sr JOIN runs r ON r.id = sr.run_id
+		WHERE sr.profile <> '' AND sr.started_at IS NOT NULL AND sr.started_at >= ?
+		ORDER BY sr.started_at, sr.run_id, sr.step_id`, ts(since))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*AgentStepUsage
+	for rows.Next() {
+		var u AgentStepUsage
+		var started string
+		if err := rows.Scan(&u.RunID, &u.StepID, &u.Workflow, &u.Profile, &started,
+			&u.Usage.Input, &u.Usage.Output, &u.Usage.CacheRead, &u.Usage.CacheWrite, &u.Usage.CostMicro); err != nil {
+			return nil, err
+		}
+		u.StartedAt = parseTS(started)
+		out = append(out, &u)
+	}
+	return out, rows.Err()
 }

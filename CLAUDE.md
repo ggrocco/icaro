@@ -58,7 +58,7 @@ Request path: `cmd/icaro` → `internal/cli` (Cobra; each command file self-regi
 
 Domain packages:
 
-- `internal/session` — the core primitive (ADR 0002). Only owner of worktrees; manages the container, preview and memory facets, the `sessions` table, and **startup reconciliation** (non-terminal sessions are re-probed; unrecoverable ones become `orphaned`). A workflow `image` step runs as a session (ADR 0010).
+- `internal/session` — the core primitive (ADR 0002). Only owner of worktrees; manages the container, preview and memory facets, the `sessions` table, and **startup reconciliation** (non-terminal sessions are re-probed; unrecoverable ones become `orphaned`). A workflow `image` step runs as a session (ADR 0010); each attempt of an `agent` step gets a child session of kind `step` under its agent profile: a fresh home layer, inject token and memory socket (ADR 0037, `steps.go`).
 - `internal/container` — images, mount policy, egress allowlist (`egress*.go`, `egressproxy/`), sandbox/gVisor runtime; `container/docker` is the Docker SDK adapter (covered only by integration tests).
 - `internal/creds` — per-profile persistent agent homes under `~/.icaro/home/<profile>`: a read-mostly golden seed plus a per-session writable overlay (ADR 0005). The host's real `~/.claude` is never mounted.
 - `internal/workflow` — spec/schema/validation (structured issues with JSON Pointer + nearest-match hints), DAG planner; `workflow/engine` executes runs (retries, timeouts, cancellation, pause/approval, log capture, re-attach after restart). `internal/expr` is the `${{ }}` / `when` expression language (ADR 0009); `internal/scheduler` handles persisted cron.

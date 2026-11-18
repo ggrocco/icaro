@@ -21,13 +21,13 @@ export function RunGraph({ spec, steps, selected, onSelect }: Props) {
       const st = status.get(p.id);
       const state = st?.status ?? (steps ? "pending" : "");
       // Image references are pinned by digest; the tag is what reads.
-      const label = p.kind === "uses" ? p.label : (p.label.split("/").pop() ?? "").replace(/@sha256:[0-9a-f]+$/, "");
+      const label = p.kind === "uses" || p.kind === "agent" ? p.label : (p.label.split("/").pop() ?? "").replace(/@sha256:[0-9a-f]+$/, "");
       return {
         id: p.id,
         position: { x: p.x, y: p.y },
         data: {
           label: (
-            <div className={`node ${state}`} aria-label={`${p.id} ${state}`}>
+            <div className={`node ${state} kind-${p.kind}`} aria-label={`${p.id} ${state}`}>
               <strong title={p.id}>{p.id}</strong>
               <span className="muted small" title={p.label}>
                 {label}

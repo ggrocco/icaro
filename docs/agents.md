@@ -143,6 +143,23 @@ An explicit project path is useful for clients launched outside a repository. It
 
 The client launches `icaro mcp` itself. Running it in a terminal waits for JSON-RPC on stdin; it does not open an interactive chat.
 
+## Profiles for workflows
+
+A workflow can run an agent as an [agent step](workflows.md#agent-steps) only under a profile you list in `workflows.agent_profiles`, which is empty by default:
+
+```yaml
+workflows:
+  agent_profiles: [reviewer]   # the first is the default for agent steps
+profiles:
+  reviewer:
+    agent: claude
+    egress: [api.anthropic.com]
+```
+
+- A listed profile must run `claude` or `codex`. Sign it in once with `icaro login reviewer`, or give it an `inject` key; every agent step reuses that login from a fresh copy of the profile's home.
+- Listing a profile is a decision about which credentials and network an automated, possibly untrusted prompt gets. Prefer a dedicated profile with a narrow allowlist over your interactive one.
+- `icaro doctor` reports a listed profile that is not signed in, whose allowlist does not reach the provider, or whose image's CLI is older than the version agent steps were built against.
+
 ## Troubleshooting
 
 | Symptom | What to check |
