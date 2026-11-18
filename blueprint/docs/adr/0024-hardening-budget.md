@@ -18,6 +18,7 @@ Phase 11 asks for load and chaos tests, a memory/CPU budget, profiling, and a de
   | Goroutines after load | back to baseline (±5) | baseline + 5 |
   | Idle daemon | 62 MiB RSS, ~0.1 % CPU, 21 goroutines, 36 MiB heap | recorded, not asserted |
   | Memory search, 10k documents | p95 34 ms ([ADR 0020](0020-portable-memory-search.md)) | p95 < 50 ms |
+  | One webhook delivery checked against 1,000 waiting `await` steps, one of which it resumes ([ADR 0032](0032-await-event-steps.md)) | ~8 ms, SQLite | < 500 ms; the small size (100 steps) < 5 s under `-race` |
 
   The small sizes run in every `go test -race`; `-tags load` runs the full sizes in CI.
 - **Profiling stays local.** `icaro serve --pprof` (or `daemon.pprof: true`) mounts `net/http/pprof` under `/debug/pprof` on the **Unix socket only**. TCP listeners, including the UI listener, never serve it, because profiles expose memory contents.

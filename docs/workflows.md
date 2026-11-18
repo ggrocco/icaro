@@ -50,12 +50,13 @@ steps:
 
 ## Steps
 
-A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of four forms.
+A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of five forms.
 
 - An **`image` step** runs a container. `command` runs as `/bin/sh -c <command>`; without it, the image's entrypoint runs. An agent step is an image step whose image is the agent base image and whose command runs the agent CLI headless.
 - A **`uses` step** calls an integration action, such as `uses: slack.post-message`, inside the daemon over HTTP. No container runs. `input` is checked against the action's typed inputs, and its outputs come from the manifest. Use `icaro integration show <name>` to list them.
 - An **`approval` step** waits until a person approves or rejects it; see [Approvals and waits](#approvals-and-waits).
 - A **`wait` step** waits for a duration, such as `wait: 2h`.
+- An **`await` step** waits for an integration event that matches it, such as the CI result for a commit an earlier step pushed; see [Await steps](#await-steps).
 
 Every form takes the same scheduling fields, except as noted:
 
@@ -63,8 +64,8 @@ Every form takes the same scheduling fields, except as noted:
 |---|---|
 | `needs` | Step ids that must finish first. Independent steps run in parallel, within the [parallelism limits](#parallelism). |
 | `when` | A boolean expression; false records the step as `skipped`. It is evaluated once, after every need is final. |
-| `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. Not on approval or wait steps. |
-| `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). On an approval step it is the decision deadline instead, with no ceiling; a wait step has none. |
+| `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. Not on approval, wait or await steps. |
+| `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). On an approval step it is the decision deadline instead, with no ceiling; on an await step it is the required deadline for the event, at most `720h`; a wait step has none. |
 | `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. Both fields may use `${{ }}` (for example `https://github.com/${{ trigger.repo }}.git`) with the same root and `needs` rules as other fields, but not `secrets`. A rendered value that is empty (ref), starts with `-`, contains whitespace or carries a secret fails the step before git runs. |
 | `env` | Image steps only. Merged over the workflow `env`. |
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
@@ -131,7 +132,45 @@ steps:
 - **Outcomes.** An approval outputs `approved_by` and `comment` to the steps after it. A rejection fails the step with `rejected by <who>: <comment>`, and the steps that need it are skipped. An approval left undecided past its `timeout` fails with `approval expired`; without a `timeout` it waits until it is decided or the run is cancelled. A decision is final.
 - **Message.** `approval.message` (at most 2000 characters) may use `trigger.*`, `env`, `run`, `workflow` and the outputs of the step's `needs` ancestors, but not `secrets`: the message is shown to whoever can read runs. The default is `Approve step <id>?`.
 - **Waits.** `wait` takes `s`, `m` or `h` units, at most `720h` (30 days). It ends on time even across a daemon restart: the step's start time is stored.
-- **Parked runs.** While a run has only approval and wait steps left, its status is `waiting` and it holds no `workflows.max_runs` slot, so other runs go ahead. It still counts as active for its workflow's [concurrency](#concurrency) policy. A decision, the end of a wait, or `icaro runs cancel` resumes it. Steps that do not depend on a pending approval keep running while it waits.
+- **Parked runs.** While a run has only approval, wait and [await](#await-steps) steps left, its status is `waiting` and it holds no `workflows.max_runs` slot, so other runs go ahead. It still counts as active for its workflow's [concurrency](#concurrency) policy. A decision, the end of a wait, or `icaro runs cancel` resumes it. Steps that do not depend on a pending approval keep running while it waits.
+
+## Await steps
+
+An await step stops the run until an integration delivers an event that belongs to it ([ADR 0032](../blueprint/docs/adr/0032-await-event-steps.md)). Like an approval, it runs no container and holds no run slot while it waits.
+
+```yaml workflow
+version: 1
+name: push-and-wait-for-ci
+triggers:
+  - type: manual
+steps:
+  - id: push
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    command: echo '{"sha":"6dcb09b5b57875f334f61aebed695e2e4193db5e"}' > /icaro/output.json
+    outputs: {sha: "json:sha"}
+  - id: ci
+    needs: [push]
+    await:
+      integration: github
+      event: check_suite.completed
+      key: ${{ steps.push.outputs.sha }}
+      match: event.head_sha
+      filter: event.conclusion != 'neutral'
+    timeout: 2h
+  - id: report
+    needs: [ci]
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    env:
+      CONCLUSION: ${{ steps.ci.outputs.conclusion }}
+    command: echo "CI finished with $CONCLUSION"
+```
+
+- **Correlation.** `integration` and `event` name an event a loaded manifest declares, as an integration trigger does. `key` is rendered once, when the step starts, from `trigger.*`, `env`, `run`, `workflow` and the outputs of the step's `needs` ancestors, but not `secrets`: the key is stored and shown. A key that renders empty fails the step. For each candidate event, `match` is evaluated over its payload under the root `event`; the event belongs to the step when the result, as a string, equals the key, and `filter` (optional) is true. `match` and `filter` may only read fields the event declares. Two runs of the same workflow waiting on the same kind of event are told apart by their keys; a workflow that wants any event writes the same constant on both sides.
+- **Timing.** Every verified delivery's events are stored, so an event that arrives after the run started but before the step starts waiting (often caused by an earlier step, such as `push` above) still resumes it as soon as it starts. Events from before the run started never do. The first event that matches wins; later ones are ignored for that step.
+- **Generic webhooks.** For `integration: webhook`, only deliveries on the workflow's own URL token count. Awaiting a generic webhook gives the workflow a token, shown by `icaro integration webhook-tokens`.
+- **Outcomes.** A matched step outputs every field the event declares, as strings, plus `delivery_id`, so later steps read `${{ steps.ci.outputs.conclusion }}`. The payload is as untrusted as `trigger.*` in an integration-triggered run. `timeout` is required, at most `720h`, and not capped by `limits.timeout`. Past it the step fails with `no matching <integration>.<event> before <deadline>`, and the steps that need it are skipped, also when the daemon was stopped across the deadline. Cancelling the run records the step `cancelled`.
+- **Watching.** `icaro runs get RUN` and the run page show each await step's event, rendered key, deadline and state, and `icaro runs logs RUN -f` says when the run starts waiting. Each delivery record lists the steps it resumed ([Integrations](integrations.md)).
+- **Resolving by hand.** A provider can only deliver to a daemon it can reach, so `icaro workflow validate`, `apply` and `icaro doctor` warn when a workflow awaits an event and `daemon.public_url` is unset. On a laptop, resolve the step yourself: `icaro runs deliver RUN STEP --payload FILE`, where FILE (`-` for stdin) holds a JSON object of the event's declared fields, or the form on the run page. `key`, `match` and `filter` are not applied, the caller is recorded, and `delivery_id` is `manual:<id>`. It needs a `write` token, and no MCP tool can do it.
 
 ## Expressions
 
@@ -182,7 +221,7 @@ Write multi-line commands, and any command that contains ` #`, as a block scalar
 ## Runs
 
 - **Manual runs.** `icaro run NAME` takes the `trigger.*` payload from `--set key=value` (numbers, booleans and JSON are parsed), `--trigger-json` or `--trigger-file`. Fields the workflow reads outside `has()` are required, unless the read sits behind a `has()` check of the same field (`has(trigger.label) && trigger.label == 'bug'`, `!has(trigger.x) || trigger.x == 1`): the CLI prompts for missing ones (unless `--no-prompt`), and the API answers 400 with the list. `icaro workflow apply` prints them as `manual runs need: --set who=...`.
-- **Watching.** `--wait` streams the logs and exits non-zero unless the run succeeds; with `--json` it prints only the final run, and the exit status is the same. `icaro workflow validate --json` likewise prints the issues and exits non-zero for an invalid file. `icaro runs get ID`, `icaro runs logs ID [STEP] [-f]` and `icaro runs cancel ID` inspect and stop runs, and `icaro runs approve` / `reject` decide [approval steps](#approvals-and-waits). Cancelling kills the step containers. `icaro runs rerun ID` runs a run again on the workflow version it used, with the same trigger payload, even after the workflow has changed.
+- **Watching.** `--wait` streams the logs and exits non-zero unless the run succeeds; with `--json` it prints only the final run, and the exit status is the same. `icaro workflow validate --json` likewise prints the issues and exits non-zero for an invalid file. `icaro runs get ID`, `icaro runs logs ID [STEP] [-f]` and `icaro runs cancel ID` inspect and stop runs, `icaro runs approve` / `reject` decide [approval steps](#approvals-and-waits), and `icaro runs deliver` resolves [await steps](#await-steps) by hand. Cancelling kills the step containers. `icaro runs rerun ID` runs a run again on the workflow version it used, with the same trigger payload, even after the workflow has changed.
 - **Streaming API.** `GET /api/v1/runs/{id}/events?logs=1` is a Server-Sent Events stream with one stream per run. It sends a `snapshot` (with the log backlog), then `step` and `log` events, and finally `end`. The web UI uses it, so it never polls.
 - **Restarts.** A step's container id is recorded before the container starts. After a daemon restart, a running step re-attaches to its container. If the container is gone, the attempt fails and `retry` decides. `uses` steps are therefore at-least-once across restarts.
 - **Versions.** Every apply stores a version (`icaro workflow versions NAME [N]`), and a run always executes the version it was started with.

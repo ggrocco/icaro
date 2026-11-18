@@ -293,3 +293,24 @@ steps:
 		t.Fatalf("%+v", rx2.rows["hook"])
 	}
 }
+
+// A run parked on an await resumes on its event after a daemon restart.
+func TestAwaitResumesAfterRestart(t *testing.T) {
+	f := newFixture(t)
+	f.docker.OnStart = pushed("abc", nil)
+	run := f.enqueue(awaitYAML, nil)
+	_, stop := f.start()
+	f.wait(run.ID, store.RunWaiting)
+	stop()
+	if _, err := f.st.ResolveAwait(f.ctx, run.ID, "ci", store.AwaitMatched, "d1", `{"head_sha":"abc","conclusion":"success"}`, "integration:github"); err != nil {
+		t.Fatal(err)
+	}
+	_, stop = f.start()
+	defer stop()
+	if got := f.wait(run.ID, store.RunSucceeded, store.RunFailed); got.Status != store.RunSucceeded {
+		t.Fatalf("%s %s", got.Status, got.Error)
+	}
+	if cmd := strings.Join(f.containersForStep("report")[0].Spec.Cmd, " "); !strings.Contains(cmd, "ci success via d1") {
+		t.Fatalf("%q", cmd)
+	}
+}
