@@ -736,7 +736,7 @@ Inspect runs
       --json   print JSON
 ```
 
-Subcommands: `approve` `cancel` `get` `list` `logs` `reject` `rerun`
+Subcommands: `approve` `cancel` `deliver` `get` `list` `logs` `reject` `rerun`
 
 ## `icaro runs approve`
 
@@ -756,6 +756,20 @@ Cancel a run
 
 ```text
 icaro runs cancel ID
+```
+
+## `icaro runs deliver`
+
+Resolve a run's waiting await step by hand, for a daemon its integration cannot reach.
+FILE (- for stdin) holds a JSON object of the event's declared payload fields; key, match
+and filter are not applied. The step's delivery_id output is manual:<id>.
+
+```text
+icaro runs deliver ID STEP --payload FILE [flags]
+```
+
+```text
+      --payload string   JSON file with the event payload (- for stdin)
 ```
 
 ## `icaro runs get`

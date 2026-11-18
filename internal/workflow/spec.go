@@ -104,6 +104,17 @@ func (s *Spec) IntegrationTriggers() []TriggerSpec {
 // delivered on their own workflow's token (ADR 0032).
 const GenericWebhook = "webhook"
 
+// Awaits returns the workflow's await steps, in declaration order.
+func (s *Spec) Awaits() []*StepSpec {
+	var out []*StepSpec
+	for i := range s.Steps {
+		if s.Steps[i].Await != nil {
+			out = append(out, &s.Steps[i])
+		}
+	}
+	return out
+}
+
 // UsesGenericWebhook reports whether the workflow is triggered by, or
 // awaits, the generic webhook integration, and so needs a URL token.
 func (s *Spec) UsesGenericWebhook() bool {

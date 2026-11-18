@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"icaro/internal/store"
@@ -26,6 +27,8 @@ type WorkflowInfo struct {
 	UpdatedAt     string          `json:"updated_at"`
 	YAML          string          `json:"yaml,omitempty"`
 	Spec          json.RawMessage `json:"spec,omitempty"`
+	// Warnings do not fail validation (see Service.Warnings); set on apply.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // TriggerFields lists referenced trigger payload keys.
@@ -62,6 +65,21 @@ func (s *Service) validateOptions(ctx context.Context) workflow.Options {
 	return opts
 }
 
+// Warnings are findings about a valid workflow that do not fail
+// validation: an await step on a daemon with no daemon.public_url, which
+// no provider can reach (ADR 0032).
+func (s *Service) Warnings(spec *workflow.Spec) []string {
+	if spec == nil || s.publicURL != "" {
+		return nil
+	}
+	var out []string
+	for _, st := range spec.Awaits() {
+		out = append(out, fmt.Sprintf("step %s awaits %s.%s, but daemon.public_url is unset, so no provider can reach this daemon: "+
+			"the step finishes only by hand (icaro runs deliver) or at its deadline", st.ID, st.Await.Integration, st.Await.Event))
+	}
+	return out
+}
+
 // ValidateWorkflow parses and validates YAML without storing it. Decode
 // errors are reported as an issue at "/".
 func (s *Service) ValidateWorkflow(ctx context.Context, yaml string) (*workflow.Spec, workflow.Issues, error) {
@@ -91,7 +109,9 @@ func (s *Service) ApplyWorkflow(ctx context.Context, yaml, actor string) (*Workf
 	}
 	s.log.Info("workflow applied", "name", w.Name, "version", w.Version, "actor", actor)
 	s.changed()
-	return s.info(w, spec, true), nil
+	info := s.info(w, spec, true)
+	info.Warnings = s.Warnings(spec)
+	return info, nil
 }
 
 func (s *Service) lookup(ctx context.Context, name string) (*store.Workflow, error) {

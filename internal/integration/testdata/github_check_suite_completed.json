@@ -1,0 +1,1 @@
+{"action":"completed","check_suite":{"id":5,"head_branch":"fix-flux","head_sha":"6dcb09b5b57875f334f61aebed695e2e4193db5e","status":"completed","conclusion":"success","url":"https://api.github.com/repos/acme/app/check-suites/5","app":{"slug":"github-actions"}},"repository":{"id":1296269,"full_name":"acme/app"},"sender":{"login":"octocat"}}

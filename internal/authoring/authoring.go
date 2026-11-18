@@ -354,6 +354,11 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 				if a := st.Approval; a != nil {
 					entry["approval"] = map[string]any{"message": a.Message, "decision": a.Decision, "decide_with": "icaro runs approve " + run.ID + " " + st.ID}
 				}
+				// Likewise only a person resolves an await by hand.
+				if a := st.Await; a != nil {
+					entry["await"] = map[string]any{"integration": a.Integration, "event": a.Event, "key": a.Key, "state": a.State,
+						"deadline": a.Deadline, "delivery_id": a.DeliveryID, "deliver_with": "icaro runs deliver " + run.ID + " " + st.ID + " --payload FILE"}
+				}
 				if tail > 0 && st.LogSize > 0 && (in.OnlyStep == "" || in.OnlyStep == st.ID) {
 					if page, err := d.Workflows.StepLogs(ctx, run.ID, st.ID, 0, 0, tail); err == nil {
 						entry["log_tail"] = string(page.Data)

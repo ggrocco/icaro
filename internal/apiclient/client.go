@@ -61,6 +61,8 @@ type ValidateResult struct {
 	Valid  bool            `json:"valid"`
 	Name   string          `json:"name,omitempty"`
 	Issues workflow.Issues `json:"issues"`
+	// Warnings do not make the workflow invalid.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Validate validates YAML without saving.
@@ -181,6 +183,14 @@ func (c *Client) DecideApproval(ctx context.Context, id, step string, approve bo
 	var out service.RunInfo
 	err := c.doJSON(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(id)+"/steps/"+url.PathEscape(step)+"/"+verb,
 		map[string]string{"comment": comment}, &out)
+	return &out, err
+}
+
+// DeliverAwait resolves a run's waiting await step with an event payload.
+func (c *Client) DeliverAwait(ctx context.Context, id, step string, payload map[string]any) (*service.RunInfo, error) {
+	var out service.RunInfo
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(id)+"/steps/"+url.PathEscape(step)+"/deliver",
+		map[string]any{"payload": payload}, &out)
 	return &out, err
 }
 
