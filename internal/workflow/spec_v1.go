@@ -76,6 +76,7 @@ type StepSpec struct {
 	Wait       string            `json:"wait,omitempty" yaml:"wait,omitempty"`
 	Agent      *AgentSpec        `json:"agent,omitempty" yaml:"agent,omitempty"`
 	Call       *CallSpec         `json:"call,omitempty" yaml:"call,omitempty"`
+	Await      *AwaitSpec        `json:"await,omitempty" yaml:"await,omitempty"`
 }
 
 // CallSpec runs another workflow as a child run and waits for it
@@ -116,6 +117,19 @@ type ApprovalSpec struct {
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
+// AwaitSpec makes a step wait for a verified integration event (ADR
+// 0032). Key is rendered once when the step starts; an event correlates
+// when Match, evaluated over its normalized payload as event.*, equals
+// the key, and Filter (if set) holds. The step's timeout is required and
+// is the deadline.
+type AwaitSpec struct {
+	Integration string `json:"integration" yaml:"integration"`
+	Event       string `json:"event" yaml:"event"`
+	Key         string `json:"key" yaml:"key"`
+	Match       string `json:"match" yaml:"match"`
+	Filter      string `json:"filter,omitempty" yaml:"filter,omitempty"`
+}
+
 // Expression roots available to workflows (ADR 0009).
 var (
 	// RootsStep are the names a step's env/input/command/when may reference.
@@ -133,6 +147,12 @@ var (
 	RootsCall = []string{"steps", "trigger", "env", "run", "workflow"}
 	// RootsFilter are the names a trigger filter may reference.
 	RootsFilter = []string{"trigger"}
+	// RootsAwaitKey are the names an await step's key may reference: no
+	// secrets, since the rendered key is stored and shown.
+	RootsAwaitKey = RootsApproval
+	// RootsAwaitEvent are the names an await step's match and filter may
+	// reference: the incoming event's normalized payload.
+	RootsAwaitEvent = []string{"event"}
 )
 
 // ActionInfo describes an integration action for validation and for
