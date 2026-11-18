@@ -100,7 +100,11 @@ type Deps struct {
 	Events   *events.Bus
 	// Agents runs agent steps' sessions (ADR 0037); nil fails them.
 	Agents session.AgentSteps
-	Log    *slog.Logger
+	// Calls enqueues call steps' child runs (ADR 0038): the workflow
+	// service, which applies the callee's policy, the depth cap and the
+	// per-root budget. Nil fails call steps.
+	Calls workflow.Enqueuer
+	Log   *slog.Logger
 }
 
 // RunnerID is the claim owner recorded on runs (one daemon, ADR 0001).

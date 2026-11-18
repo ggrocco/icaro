@@ -32,7 +32,11 @@ type Service struct {
 	logsDir    string
 	maxTimeout time.Duration
 	agents     *workflow.AgentOptions
-	log        *slog.Logger
+	// maxCallDepth and maxRunsPerRoot are the call-step brakes
+	// (ADR 0038).
+	maxCallDepth   int
+	maxRunsPerRoot int
+	log            *slog.Logger
 }
 
 // Options configure a Service. Runner, Catalog, Secrets and Events may be
@@ -49,7 +53,11 @@ type Options struct {
 	// Agents are the profiles agent steps may use (workflows.agent_profiles,
 	// ADR 0037). Nil means none are listed: agent steps fail validation.
 	Agents *workflow.AgentOptions
-	Log    *slog.Logger
+	// MaxCallDepth and MaxRunsPerRoot are workflows.max_call_depth and
+	// workflows.max_runs_per_root (ADR 0038); zero takes the defaults.
+	MaxCallDepth   int
+	MaxRunsPerRoot int
+	Log            *slog.Logger
 }
 
 // New creates a Service.
@@ -63,9 +71,16 @@ func New(o Options) *Service {
 	if o.Agents == nil {
 		o.Agents = &workflow.AgentOptions{}
 	}
+	if o.MaxCallDepth <= 0 {
+		o.MaxCallDepth = 4
+	}
+	if o.MaxRunsPerRoot <= 0 {
+		o.MaxRunsPerRoot = 64
+	}
 	return &Service{
 		store: o.Store, key: o.Key, runner: o.Runner, catalog: o.Catalog, secrets: o.Secrets, events: o.Events,
 		logsDir: o.LogsDir, maxTimeout: o.MaxTimeout, agents: o.Agents, log: o.Log,
+		maxCallDepth: o.MaxCallDepth, maxRunsPerRoot: o.MaxRunsPerRoot,
 	}
 }
 

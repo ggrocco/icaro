@@ -60,7 +60,7 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 		cancel(errCancelled)
 	}
 	e.publish(events.Event{Type: events.TypeRun, RunID: run.ID, Status: store.RunRunning})
-	status, errMsg, keep := e.runToEnd(ctx, run, resumed)
+	status, errMsg, keep, outputs := e.runToEnd(ctx, run, resumed)
 	if status == "" {
 		log.Info("leaving run for re-attach after restart")
 		return
@@ -71,6 +71,10 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 	}
 	fctx, fcancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer fcancel()
+	if status == store.RunCancelled && e.waitForChildren(fctx, run.ID) {
+		log.Info("cancelled run waits for its child runs to stop")
+		return
+	}
 	// Finish the session (workspace cleanup) before the run turns terminal,
 	// so a terminal run never has a live session or workspace behind it. A
 	// crash in between leaves a running run with finished steps, which the
@@ -82,7 +86,7 @@ func (e *Engine) executeRun(ctx context.Context, cancel context.CancelCauseFunc,
 			log.Warn("finish run session", "err", err)
 		}
 	}
-	if err := e.d.Store.FinishRun(fctx, run.ID, status, errMsg); err != nil {
+	if err := e.d.Store.FinishRunOutputs(fctx, run.ID, status, errMsg, outputs); err != nil {
 		log.Error("finish run", "err", err)
 	}
 	log.Info("run finished", "status", status, "error", errMsg)
@@ -149,20 +153,21 @@ func (e *Engine) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, 
 }
 
 // runToEnd drives the DAG. It returns "" as status when the daemon is
-// shutting down and the run must stay running for re-attach.
-func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (status, errMsg string, keep bool) {
-	fail := func(format string, args ...any) (string, string, bool) {
+// shutting down and the run must stay running for re-attach, and the
+// workflow outputs of a run that succeeded.
+func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (status, errMsg string, keep bool, outputs string) {
+	fail := func(format string, args ...any) (string, string, bool, string) {
 		if cancelled(ctx) {
 			// A cancel while the run is starting surfaces as whatever
 			// call it interrupted; it is still a cancel.
-			return store.RunCancelled, "cancelled", false
+			return store.RunCancelled, "cancelled", false, ""
 		}
-		return store.RunFailed, fmt.Sprintf(format, args...), e.cfg.KeepWorkspaceOnFailure
+		return store.RunFailed, fmt.Sprintf(format, args...), e.cfg.KeepWorkspaceOnFailure, ""
 	}
 	ver, err := e.d.Store.GetWorkflowVersion(ctx, run.WorkflowID, run.WorkflowVersion)
 	if err != nil {
 		if ctx.Err() != nil && !cancelled(ctx) {
-			return "", "", false
+			return "", "", false, ""
 		}
 		return fail("load workflow version: %v", err)
 	}
@@ -195,11 +200,17 @@ func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (st
 	}
 	if err := rx.prepare(ctx); err != nil {
 		if ctx.Err() != nil && !cancelled(ctx) {
-			return "", "", false
+			return "", "", false, ""
 		}
 		return fail("%v", err)
 	}
-	return rx.schedule(ctx)
+	status, errMsg, keep = rx.schedule(ctx)
+	if status == store.RunSucceeded {
+		if outputs, err = rx.workflowOutputs(); err != nil {
+			return store.RunFailed, err.Error(), e.cfg.KeepWorkspaceOnFailure, ""
+		}
+	}
+	return status, errMsg, keep, outputs
 }
 
 func cancelled(ctx context.Context) bool { return errors.Is(context.Cause(ctx), errCancelled) }

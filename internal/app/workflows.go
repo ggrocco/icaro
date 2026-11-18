@@ -56,6 +56,8 @@ func wireWorkflows(_ context.Context, a *App) error {
 	if a.Sessions != nil {
 		deps.Agents = a.Sessions
 	}
+	// Call steps enqueue their children through the service (ADR 0038).
+	deps.Calls = a.Service
 	w.Engine = engine.New(engine.Config{
 		Concurrency:    cfg.Workflows.Concurrency,
 		MaxRuns:        cfg.Workflows.MaxRuns,
