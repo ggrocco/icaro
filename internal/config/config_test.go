@@ -357,3 +357,23 @@ func TestAssistantConfig(t *testing.T) {
 		t.Errorf("shell profile accepted: %v", err)
 	}
 }
+
+func TestDistillConfig(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := cfg.Memory.Distill
+	if !d.Enabled || d.Model != "auto" || d.CPUs != 2 || d.TTL != 90*24*time.Hour || d.Timeout != 10*time.Minute || cfg.Assistant.MemoryBudget != 2000 {
+		t.Fatalf("defaults %+v %d", d, cfg.Assistant.MemoryBudget)
+	}
+	cfg.Memory.Distill = DistillConfig{Endpoint: "localhost:11434"}
+	cfg.Assistant.MemoryBudget = -1
+	err = cfg.Validate()
+	for _, want := range []string{"memory.distill.cpus", "must be an http(s) URL", "assistant.memory_budget"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+}

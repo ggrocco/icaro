@@ -7,15 +7,20 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"icaro/internal/api"
 	"icaro/internal/assist"
+	"icaro/internal/assist/distill"
 	"icaro/internal/authoring"
 	"icaro/internal/config"
+	"icaro/internal/container"
 	"icaro/internal/creds"
 	"icaro/internal/doctor"
 	"icaro/internal/mcp"
 	"icaro/internal/memory"
+	"icaro/internal/session"
+	"icaro/internal/store"
 	"icaro/skills"
 )
 
@@ -34,7 +39,24 @@ func init() {
 		if a.Secrets != nil {
 			o.Secrets = a.Secrets
 		}
+		if a.Memory != nil {
+			o.Memories = a.Memory
+		}
 		a.Assist = assist.New(o)
+		// The memory distiller (ADR 0036): exact memories always, a small
+		// local model when one is pulled or an endpoint is set.
+		dcfg := a.Cfg.Memory.Distill
+		models := distill.Store{Dir: a.Layout.Models()}
+		ns := container.Namespace(a.Cfg.Home)
+		src := distill.Source{
+			Enabled: dcfg.Enabled, Endpoint: dcfg.Endpoint, EndpointModel: dcfg.EndpointModel,
+			Model: dcfg.Model, Tier: distill.AutoTier(int64(min(session.TotalRAM(), 1<<62))), Store: models,
+			Managed: distill.Managed{
+				Docker: a.Docker, Models: models, SocketDir: filepath.Join(a.Layout.RunDir(), "distill"),
+				User: a.Sessions.User(), CPUs: dcfg.CPUs, Name: "icaro-distill-" + ns, Key: ns,
+			},
+		}
+		a.Add(assist.NewDistiller(a.Assist, a.Service, src))
 		deps := authoring.Deps{Workflows: a.Service}
 		if hub := IntegrationHub(a); hub != nil {
 			deps.Integrations = hub
@@ -107,5 +129,48 @@ func AssistantCheck(cfg *config.Config) doctor.Check {
 			return doctor.Result{Severity: doctor.Warning, Detail: strings.Join(probs, "; ")}
 		}
 		return doctor.Result{Severity: doctor.OK, Detail: fmt.Sprintf("profile %s (%s), signed in", name, agent.Name)}
+	})
+}
+
+// DistillCheck reports whether the memory distiller's model stage can run
+// (ADR 0036): off, an endpoint that answers, or a pulled model whose
+// SHA-256 matches its pin; and whether the last job failed.
+func DistillCheck(cfg *config.Config, st *store.Store) doctor.Check {
+	return doctor.Func("memory distiller", func(ctx context.Context) doctor.Result {
+		d := cfg.Memory.Distill
+		res := doctor.Result{Severity: doctor.OK}
+		switch {
+		case !d.Enabled:
+			res.Detail = "the model stage is off; chats leave exact memories only"
+		case d.Endpoint != "":
+			c := &distill.Client{BaseURL: d.Endpoint, Model: d.EndpointModel}
+			rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := c.Ready(rctx)
+			cancel()
+			if err != nil {
+				return doctor.Result{Severity: doctor.Warning, Detail: fmt.Sprintf("memory.distill.endpoint %s does not answer: %v", d.Endpoint, err)}
+			}
+			res.Detail = "model server at " + d.Endpoint
+		default:
+			s := distill.Store{Dir: cfg.Layout().Models()}
+			m, ok, err := s.Pick(d.Model, distill.AutoTier(int64(min(session.TotalRAM(), 1<<62))))
+			switch {
+			case err != nil:
+				return doctor.Result{Severity: doctor.Error, Detail: "memory.distill.model: " + err.Error()}
+			case !ok:
+				res.Detail = "no model is pulled; chats leave exact memories only (icaro memory model pull adds the summaries)"
+			default:
+				if err := s.Verify(m); err != nil {
+					return doctor.Result{Severity: doctor.Error, Detail: fmt.Sprintf("model %s: %v; run icaro memory model rm %s --yes, then pull it again", m.Name, err, m.Name)}
+				}
+				res.Detail = fmt.Sprintf("model %s (%s), pinned SHA-256 verified", m.Name, m.Tier)
+			}
+		}
+		if st != nil {
+			if j, err := st.LastDistill(ctx); err == nil && j.Status == store.DistillFailed {
+				return doctor.Result{Severity: doctor.Warning, Detail: res.Detail + "; the last distill job failed: " + j.Error}
+			}
+		}
+		return res
 	})
 }

@@ -1,0 +1,54 @@
+{
+ "name": "handoff-midway",
+ "workflow": "weekly-report",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "Every Monday, build a report of last week's merged PRs and email it to the team."
+  },
+  {
+   "role": "assistant",
+   "text": "I proposed weekly-report with a schedule `0 9 * * 1` and a github.list_pulls step. There is no email integration installed; I left a TODO for the send step."
+  },
+  {
+   "role": "user",
+   "text": "We use Resend for email. I'll install it tomorrow."
+  },
+  {
+   "role": "assistant",
+   "text": "Understood. When resend is installed I will replace the TODO with resend.send_email to team@example.com."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "report|merged|pr"
+   ],
+   [
+    "email|mail"
+   ]
+  ],
+  "constraints": [
+   [
+    "monday|0 9 \\* \\* 1|weekly"
+   ]
+  ],
+  "preferences": [
+   [
+    "resend"
+   ]
+  ],
+  "rejected": [],
+  "open": [
+   [
+    "resend|email|todo"
+   ]
+  ],
+  "resume": [
+   [
+    "resend|todo|email"
+   ]
+  ]
+ }
+}

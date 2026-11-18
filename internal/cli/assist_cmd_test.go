@@ -86,3 +86,26 @@ func TestReplyError(t *testing.T) {
 		t.Error("done is not an error")
 	}
 }
+
+func TestAssistMemoryCommands(t *testing.T) {
+	fakeAPI(t, map[string]string{
+		"GET /api/v1/chats/c1/memories": `{"used":[{"id":"m1","kind":"lesson","title":"steps need ids"}],
+			"produced":[{"id":"p1","kind":"decision","title":"Posts to #bugs","metadata":{"confidence":"model"}}],
+			"job":{"status":"done","stage2":"qwen3.5-2b","memories":1,"error":"x"}}`,
+		"GET /api/v1/chats/c2/memories":       `{"used":[],"produced":[]}`,
+		"POST /api/v1/chats/c1/distill":       ``,
+		"DELETE /api/v1/chats/c1/memories/p1": ``,
+		"GET /api/v1/assistant/stats":         `{"with_memory":{"chats":3,"converged":2,"avg_validations":1.5,"saved":2,"avg_turns_to_save":2,"median_seconds_to_save":90,"proposals":4,"accept_rate":0.5},"without_memory":{"chats":1}}`,
+	})
+	wantCLI(t, []string{"assist", "memories", "c1"}, "Started with 1 note(s)", "m1  steps need ids", "p1  [decision, model]  Posts to #bugs", "Last distill: done, model stage qwen3.5-2b, error: x")
+	wantCLI(t, []string{"assist", "memories", "c2"}, "Started with 0 note(s)", "Remembered from this chat (0)")
+	wantCLI(t, []string{"assist", "memories", "c1", "--json"}, `"stage2": "qwen3.5-2b"`)
+	wantCLI(t, []string{"assist", "distill", "c1"}, "queued")
+	wantCLI(t, []string{"assist", "forget", "c1", "p1"}, "Remove memory p1?") // no answer: kept
+	mustCLI(t, "assist", "forget", "c1", "p1", "--yes")
+	wantCLI(t, []string{"assist", "stats"}, "with memory", "1m30s", "0.50", "without")
+	wantCLI(t, []string{"assist", "stats", "--json"}, `"accept_rate": 0.5`)
+	failCLI(t, "not found", "assist", "memories", "nope")
+	failCLI(t, "not found", "assist", "distill", "nope")
+	failCLI(t, "not found", "assist", "forget", "nope", "x", "--yes")
+}

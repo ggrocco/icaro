@@ -25,7 +25,17 @@ const (
 	EntryDraft = "draft"
 	// EntryApproval is a gated call that waits or was decided.
 	EntryApproval = "approval"
+	// EntryMemory lists the notes from earlier chats a conversation
+	// started with (ADR 0036).
+	EntryMemory = "memory"
 )
+
+// MemoryRef names a memory in the log.
+type MemoryRef struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+}
 
 // DraftEntry describes a draft change in the log; clients fetch the draft.
 type DraftEntry struct {
@@ -45,6 +55,7 @@ type entry struct {
 	Event     *stream.Event `json:"event,omitempty"`
 	Draft     *DraftEntry   `json:"draft,omitempty"`
 	Approval  *ApprovalInfo `json:"approval,omitempty"`
+	Memories  []MemoryRef   `json:"memories,omitempty"`
 }
 
 // job is one queued turn.
@@ -255,6 +266,11 @@ func (a *actor) idleExpired() {
 		return
 	}
 	a.append(entry{Type: EntryStatus, Note: "The assistant's container stopped after a quiet period; the next message starts it again."})
+	if d := a.s.distiller; d != nil {
+		if err := d.Enqueue(ctx, a.chatID); err != nil {
+			a.s.o.Log.Warn("assistant: queue for memory", "chat", a.chatID, "err", err)
+		}
+	}
 }
 
 // cancel stops the running turn and cancels the queued ones.

@@ -1,0 +1,59 @@
+{
+ "name": "flaky-test-retry",
+ "workflow": "ci-nightly",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "The nightly CI workflow fails every few days on the e2e step. Why?"
+  },
+  {
+   "role": "assistant",
+   "text": "Looking at the last 10 runs, the e2e step failed 3 times, each with a timeout waiting for the browser after 300s. The other steps passed."
+  },
+  {
+   "role": "user",
+   "text": "Add retries to that step only."
+  },
+  {
+   "role": "assistant",
+   "text": "I set `retries: 2` on the e2e step and kept `timeout: 10m`."
+  },
+  {
+   "role": "user",
+   "text": "Make the backoff longer, like a minute between attempts."
+  },
+  {
+   "role": "assistant",
+   "text": "The schema has no backoff field for steps; retries are immediate. I can add a sleep in the step's command instead if you want."
+  },
+  {
+   "role": "user",
+   "text": "Leave it for now, I will ask the team."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "e2e|flaky|retr|fail"
+   ]
+  ],
+  "constraints": [
+   [
+    "e2e"
+   ]
+  ],
+  "preferences": [],
+  "rejected": [],
+  "open": [
+   [
+    "backoff|team|sleep"
+   ]
+  ],
+  "resume": [
+   [
+    "retr|backoff|e2e"
+   ]
+  ]
+ }
+}

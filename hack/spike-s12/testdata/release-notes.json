@@ -1,0 +1,65 @@
+{
+ "name": "release-notes",
+ "workflow": "release-notes",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "When we push a tag v*, generate release notes with an agent and create a GitHub release."
+  },
+  {
+   "role": "assistant",
+   "text": "Proposed release-notes: github.push trigger filtered to refs/tags/v*, an image step with the codex profile writing notes.md, and github.create_release with the body from that step's output."
+  },
+  {
+   "role": "user",
+   "text": "Use claude, not codex."
+  },
+  {
+   "role": "assistant",
+   "text": "Switched the profile to claude."
+  },
+  {
+   "role": "user",
+   "text": "Write the notes in Portuguese and English."
+  },
+  {
+   "role": "assistant",
+   "text": "Updated the prompt to write both languages. Validated clean."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "release"
+   ],
+   [
+    "notes|tag"
+   ]
+  ],
+  "constraints": [
+   [
+    "v\\*|tag"
+   ],
+   [
+    "portugu"
+   ]
+  ],
+  "preferences": [
+   [
+    "claude"
+   ]
+  ],
+  "rejected": [
+   [
+    "codex"
+   ]
+  ],
+  "open": [],
+  "resume": [
+   [
+    "release|validat"
+   ]
+  ]
+ }
+}

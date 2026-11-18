@@ -59,11 +59,17 @@ func (s *Service) runTurn(ctx context.Context, a *actor, j job) {
 	a.append(entry{Type: EntryStatus, MessageID: m.ID, Status: store.TurnRunning})
 
 	turn := creds.ChatTurn{ConversationID: c.ConversationID}
+	text := j.text
 	if turn.ConversationID == "" {
 		turn.NewID = newUUID()
+		// A new conversation starts with notes from earlier chats.
+		if notes, refs := s.recall(ctx, c, j.text); notes != "" {
+			text = notes + "\n\n---\n\n" + j.text
+			a.append(entry{Type: EntryMemory, MessageID: m.ID, Memories: refs})
+		}
 	}
 	cmd, _ := agent.ChatCommand(turn)
-	r := s.execTurn(ctx, a, m.ID, sid, agent, cmd, j.text)
+	r := s.execTurn(ctx, a, m.ID, sid, agent, cmd, text)
 	if r.conversation != "" && r.conversation != c.ConversationID {
 		if err := s.o.Store.SetChatField(bg, c.ID, store.ChatConversationID, r.conversation); err != nil {
 			s.o.Log.Warn("assistant: record conversation", "chat", c.ID, "err", err)

@@ -244,7 +244,7 @@ func (d *dockerGated) Run(ctx context.Context) error {
 // interface (never a typed nil pointer) and the docker check reports it.
 func BaseChecks(cfg *config.Config, st *store.Store, eng interface{ Ping(context.Context) error }, engErr error) []doctor.Check {
 	l := cfg.Layout()
-	checks := []doctor.Check{doctor.DaemonCheck(l), doctor.PermissionsCheck(l), AssistantCheck(cfg)}
+	checks := []doctor.Check{doctor.DaemonCheck(l), doctor.PermissionsCheck(l), AssistantCheck(cfg), DistillCheck(cfg, st)}
 	switch {
 	case engErr != nil:
 		checks = append(checks, doctor.Func("docker", func(context.Context) doctor.Result {
