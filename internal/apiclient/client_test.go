@@ -16,6 +16,8 @@ import (
 	"icaro/internal/hosts"
 	"icaro/internal/memory"
 	"icaro/internal/session"
+
+	"icaro/internal/service"
 )
 
 // recorded is what the fake server saw for the last request.
@@ -67,6 +69,10 @@ func TestEndpoints(t *testing.T) {
 		{"GetRun", func(ctx context.Context, c *Client) error { _, err := c.GetRun(ctx, "r1"); return err }, "GET", "/api/v1/runs/r1", ""},
 		{"ListRuns all", func(ctx context.Context, c *Client) error { _, err := c.ListRuns(ctx, "", "", 0); return err }, "GET", "/api/v1/runs?", ""},
 		{"ListRuns filtered", func(ctx context.Context, c *Client) error { _, err := c.ListRuns(ctx, "w", "failed", 5); return err }, "GET", "/api/v1/runs?limit=5&status=failed&workflow=w", ""},
+		{"ListRuns tree", func(ctx context.Context, c *Client) error {
+			_, err := c.ListRunsQuery(ctx, service.RunQuery{Root: "r1"})
+			return err
+		}, "GET", "/api/v1/runs?root=r1", ""},
 		{"CancelRun", func(ctx context.Context, c *Client) error { _, err := c.CancelRun(ctx, "r1"); return err }, "POST", "/api/v1/runs/r1/cancel", ""},
 		{"Rerun", func(ctx context.Context, c *Client) error { _, err := c.Rerun(ctx, "r1"); return err }, "POST", "/api/v1/runs/r1/rerun", ""},
 		{"StepLogs", func(ctx context.Context, c *Client) error { _, err := c.StepLogs(ctx, "r1", "s", 2, 100); return err }, "GET", "/api/v1/runs/r1/steps/s/logs?attempt=2&tail=100", ""},

@@ -153,3 +153,49 @@ test("the usage page shows transcript usage with its source and an estimated cos
   await expect(detail.getByRole("row").filter({ hasText: "claude-future-9" })).toContainText("n/a");
   await expect(page.getByRole("table", { name: "Usage by day" }).getByRole("row").nth(1)).toContainText("≥ ~$");
 });
+
+// Phase 17 acceptance: a caller runs a callee as a child run, reads its
+// output, and the run page links the two.
+test("a call step links the caller's run and the child run", async ({ page }) => {
+  await login(page);
+  const callee = [
+    "version: 1",
+    "name: e2e-callee",
+    "triggers: [{type: call}]",
+    "outputs:",
+    "  line: ${{ steps.say.outputs.line }}",
+    "steps:",
+    "  - id: say",
+    "    image: mirror.gcr.io/library/alpine:3.24",
+    "    command: echo from-callee",
+    "    outputs: {line: stdout}",
+    "",
+  ].join("\n");
+  const caller = [
+    "version: 1",
+    "name: e2e-caller",
+    "steps:",
+    "  - id: sub",
+    "    call: {workflow: e2e-callee}",
+    "  - id: after",
+    "    needs: [sub]",
+    "    image: mirror.gcr.io/library/alpine:3.24",
+    '    command: echo "got ${{ steps.sub.outputs.line }}"',
+    "",
+  ].join("\n");
+  for (const y of [callee, caller]) {
+    const r = await apiCall(page, "POST", "/api/v1/workflows", y);
+    expect([200, 201]).toContain(r.status);
+  }
+  await page.goto("/ui/#/workflows/e2e-callee");
+  await expect(page.getByLabel("Calls")).toContainText("e2e-caller");
+  await page.goto("/ui/#/workflows/e2e-caller");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(page.locator("h1 .badge")).toHaveText("succeeded", { timeout: 90_000 });
+  await page.getByRole("button", { name: /after/ }).first().click();
+  await expect(page.getByLabel("Logs for after")).toContainText("got from-callee", { timeout: 15_000 });
+  await page.getByRole("button", { name: /sub/ }).first().click();
+  await page.getByLabel("Call step").getByRole("link", { name: /.+/ }).last().click();
+  await expect(page.getByText("Called by")).toBeVisible();
+  await expect(page.getByRole("link", { name: "e2e-callee" })).toBeVisible();
+});

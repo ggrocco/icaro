@@ -80,7 +80,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Built; S11 open | Every deliverable is built and tested end to end with a fake CLI. Open: spike S11 (real Claude/Codex logins: flags, recorded streams, start-up time), and the two acceptance runs that need a real subscription and a real API key |
 | [15 — Memory distiller](phases/15-memory-distiller.md) | In progress | [ADR 0036](adr/0036-local-memory-distiller.md) is accepted. Spike S12 passed on the build machine's CPU; the 8 GB laptop, Mac, GPU and person-graded set are still open |
 | [16 — Agent steps](phases/16-agent-steps.md) | Built; S11 open | Every deliverable is built and tested, end to end against Docker with a fake CLI. Open: spike S11 in step mode (real Claude/Codex logins: flags, recorded streams, inject) and the acceptance run with a real subscription |
-| [17 — Call steps](phases/17-call-steps.md) | Not started | Waits on [ADR 0038](adr/0038-call-workflow-steps.md) being accepted |
+| [17 — Call steps](phases/17-call-steps.md) | Built | Every deliverable is built and tested: the engine and service end to end with a fake Docker, and the store on SQLite and Postgres. [ADR 0038](adr/0038-call-workflow-steps.md) is accepted |
 | [18 — GitHub App mode](phases/18-github-app.md) | Not started | Waits on [ADR 0041](adr/0041-github-app-mode.md) being accepted; step access also on spike S13 |
 | [19 — Multi-runner scale-out](phases/19-multi-runner.md) | Not started | Waits on [ADR 0040](adr/0040-multi-runner-scale-out.md) being accepted |
 

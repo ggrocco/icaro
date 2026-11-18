@@ -3,6 +3,7 @@ import { ReactFlow, Background, Controls, Position, type Edge, type Node } from 
 import "@xyflow/react/dist/style.css";
 import type { StepInfo } from "../api";
 import { layout, stepsFromSpec } from "../graph";
+import { href } from "../router";
 
 interface Props {
   spec: unknown;
@@ -21,7 +22,9 @@ export function RunGraph({ spec, steps, selected, onSelect }: Props) {
       const st = status.get(p.id);
       const state = st?.status ?? (steps ? "pending" : "");
       // Image references are pinned by digest; the tag is what reads.
-      const label = p.kind === "uses" || p.kind === "agent" ? p.label : (p.label.split("/").pop() ?? "").replace(/@sha256:[0-9a-f]+$/, "");
+      const label = p.kind === "uses" || p.kind === "agent" || p.kind === "call" ? p.label : (p.label.split("/").pop() ?? "").replace(/@sha256:[0-9a-f]+$/, "");
+      // A call step opens its child run's graph (ADR 0038).
+      const child = p.kind === "call" ? st?.call?.run_id : undefined;
       return {
         id: p.id,
         position: { x: p.x, y: p.y },
@@ -37,6 +40,11 @@ export function RunGraph({ spec, steps, selected, onSelect }: Props) {
                   {state}
                   {st && st.attempt > 1 ? ` · attempt ${st.attempt}` : ""}
                 </span>
+              )}
+              {child && (
+                <a className="small" href={href("runs", child)} onClick={(e) => e.stopPropagation()}>
+                  Open child run
+                </a>
               )}
             </div>
           ),

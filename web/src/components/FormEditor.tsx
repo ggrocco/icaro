@@ -1,5 +1,5 @@
 import { cloneElement, useId, useMemo } from "react";
-import type { ActionInfo, AgentProfileInfo, IntegrationInfo } from "../api";
+import type { ActionInfo, AgentProfileInfo, IntegrationInfo, WorkflowInfo } from "../api";
 import { getIn, parse, setIn, stepCount } from "../yamldoc";
 
 interface Props {
@@ -8,6 +8,9 @@ interface Props {
   integrations: IntegrationInfo[];
   // agentProfiles are the operator's workflows.agent_profiles (ADR 0037).
   agentProfiles?: AgentProfileInfo[];
+  // workflows are the stored workflows; call steps offer the callable
+  // ones, with their trigger fields as inputs (ADR 0038).
+  workflows?: WorkflowInfo[];
 }
 
 type KV = Record<string, string>;
@@ -15,7 +18,7 @@ type KV = Record<string, string>;
 // FormEditor edits a workflow through the YAML Document, so unknown
 // fields and comments survive every edit (Phase 4: "a round-trip does not
 // lose unknown fields").
-export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }: Props) {
+export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], workflows = [] }: Props) {
   const doc = useMemo(() => parse(yaml), [yaml]);
   const actions = useMemo(() => {
     const m = new Map<string, ActionInfo>();
@@ -128,7 +131,17 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }:
         const p = (k: string) => ["steps", i, k];
         const uses = String(getIn(doc, p("uses")) ?? "");
         const isUses = doc.hasIn(p("uses"));
-        const kind = isUses ? "uses" : doc.hasIn(p("approval")) ? "approval" : doc.hasIn(p("wait")) ? "wait" : doc.hasIn(p("agent")) ? "agent" : "image";
+        const kind = isUses
+          ? "uses"
+          : doc.hasIn(p("approval"))
+            ? "approval"
+            : doc.hasIn(p("wait"))
+              ? "wait"
+              : doc.hasIn(p("agent"))
+                ? "agent"
+                : doc.hasIn(p("call"))
+                  ? "call"
+                  : "image";
         const pauses = kind === "approval" || kind === "wait";
         const action = actions.get(uses);
         const needs = (getIn<string[]>(doc, p("needs")) ?? []) as string[];
@@ -144,13 +157,14 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }:
                 onChange={(e) =>
                   mutate((d) => {
                     // Each form has its own fields; switching drops the old ones.
-                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent"]) d.deleteIn(["steps", i, k]);
+                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent", "call", "repository"]) d.deleteIn(["steps", i, k]);
                     if (e.target.value === "approval" || e.target.value === "wait") d.deleteIn(["steps", i, "retry"]);
                     if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
                     if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
                     else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
                     else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
                     else if (e.target.value === "agent") d.setIn(["steps", i, "agent"], { prompt: "Describe the task for the agent." });
+                    else if (e.target.value === "call") d.setIn(["steps", i, "call"], { workflow: workflows.find((w) => w.callable)?.name ?? "" });
                     else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                   })
                 }
@@ -158,6 +172,7 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }:
                 <option value="image">image (container)</option>
                 <option value="agent">agent (an agent CLI does the task)</option>
                 <option value="uses">uses (integration action)</option>
+                <option value="call">call (run another workflow)</option>
                 <option value="approval">approval (a person decides)</option>
                 <option value="wait">wait (pause for a time)</option>
               </select>
@@ -185,6 +200,14 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }:
                 outputs={(getIn<KV>(doc, p("outputs")) ?? {}) as KV}
                 update={(k, v) => update(["steps", i, "agent", ...k], v)}
                 updateStep={(k, v) => update(p(k), v)}
+              />
+            ) : kind === "call" ? (
+              <CallFields
+                workflows={workflows}
+                self={String(getIn(doc, ["name"]) ?? "")}
+                workflow={String(getIn(doc, ["steps", i, "call", "workflow"]) ?? "")}
+                input={(getIn<Record<string, unknown>>(doc, ["steps", i, "call", "input"]) ?? {}) as Record<string, unknown>}
+                update={(k, v) => update(["steps", i, "call", ...k], v)}
               />
             ) : isUses ? (
               <>
@@ -250,7 +273,10 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }:
             </Field>
             <div className="row">
               {kind !== "wait" && (
-                <Field label={kind === "approval" ? "Deadline" : "Timeout"} hint={kind === "approval" ? "undecided after this, it fails" : undefined}>
+                <Field
+                  label={kind === "approval" ? "Deadline" : "Timeout"}
+                  hint={kind === "approval" ? "undecided after this, it fails" : kind === "call" ? "the child run is cancelled after this" : undefined}
+                >
                   <input placeholder={kind === "approval" ? "24h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
                 </Field>
               )}
@@ -285,6 +311,52 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [] }:
         Add step
       </button>
     </form>
+  );
+}
+
+// CallFields edits a call step (ADR 0038): the callee among the callable
+// workflows, and its input, one field per trigger.* field it reads. The
+// step's outputs are the callee's workflow outputs.
+function CallFields(props: {
+  workflows: WorkflowInfo[];
+  self: string;
+  workflow: string;
+  input: Record<string, unknown>;
+  update: (path: string[], v: unknown) => void;
+}) {
+  const { workflows, self, workflow, input, update } = props;
+  const callable = workflows.filter((w) => w.callable && w.name !== self);
+  const chosen = workflows.find((w) => w.name === workflow);
+  const required = chosen?.trigger_fields?.required ?? [];
+  const optional = chosen?.trigger_fields?.optional ?? [];
+  const extra = Object.keys(input).filter((k) => !required.includes(k) && !optional.includes(k));
+  return (
+    <>
+      <Field label="Workflow" hint="a workflow with a call trigger; it runs as a child run">
+        <select value={workflow} onChange={(e) => update(["workflow"], e.target.value)}>
+          {!chosen && <option value={workflow}>{workflow || "choose…"}</option>}
+          {chosen && !chosen.callable && <option value={workflow}>{workflow} (not callable)</option>}
+          {callable.map((w) => (
+            <option key={w.name} value={w.name} title={w.description}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {callable.length === 0 && (
+        <p className="muted">No workflow is callable yet: give one a <code>- type: call</code> trigger.</p>
+      )}
+      {[...required, ...optional, ...extra].map((k) => (
+        <Field key={k} label={`${k}${required.includes(k) ? " *" : ""}`} hint={extra.includes(k) ? `${workflow} does not read trigger.${k}` : `trigger.${k} of the child`}>
+          <input value={toText(input[k])} onChange={(e) => update(["input", k], fromText(e.target.value, "string"))} />
+        </Field>
+      ))}
+      {chosen && (
+        <p className="muted small">
+          Outputs: {chosen.outputs?.length ? chosen.outputs.map((o) => `steps.<id>.outputs.${o}`).join(", ") : "none (declare them under the callee's outputs)"}
+        </p>
+      )}
+    </>
   );
 }
 
