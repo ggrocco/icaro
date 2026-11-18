@@ -1,0 +1,65 @@
+{
+ "name": "pr-review-agent",
+ "workflow": "pr-review",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "Make a workflow that runs a review agent on every pull request opened in the web repo."
+  },
+  {
+   "role": "assistant",
+   "text": "I proposed pr-review with a github.pull_request trigger (opened, synchronize) and an image step using the claude profile that reviews the diff and posts a comment through github.create_comment."
+  },
+  {
+   "role": "user",
+   "text": "Only on opened, not on every push. Pushes would cost too much."
+  },
+  {
+   "role": "assistant",
+   "text": "Removed synchronize; it triggers on opened only."
+  },
+  {
+   "role": "user",
+   "text": "Skip drafts."
+  },
+  {
+   "role": "assistant",
+   "text": "Added `when: ${{ !trigger.pull_request.draft }}`. Validation passed and you saved it as pr-review v1."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "review"
+   ],
+   [
+    "pull request|pr"
+   ]
+  ],
+  "constraints": [
+   [
+    "opened"
+   ],
+   [
+    "draft"
+   ]
+  ],
+  "preferences": [
+   [
+    "cost|push"
+   ]
+  ],
+  "rejected": [
+   [
+    "synchronize|push"
+   ]
+  ],
+  "open": [],
+  "resume": [
+   [
+    "saved|v1|pr-review"
+   ]
+  ]
+ }
+}

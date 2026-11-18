@@ -60,6 +60,12 @@ const paths: Record<string, React.ReactNode> = {
       <path d="M9 11h.01M12 11h.01M15 11h.01" />
     </>
   ),
+  memory: (
+    <>
+      <path d="M12 5a3 3 0 0 0-5.8-1A3 3 0 0 0 4 9a3 3 0 0 0 0 5 3 3 0 0 0 3 5 3 3 0 0 0 5 1z" />
+      <path d="M12 5a3 3 0 0 1 5.8-1A3 3 0 0 1 20 9a3 3 0 0 1 0 5 3 3 0 0 1-3 5 3 3 0 0 1-5 1z" />
+    </>
+  ),
   close: <path d="M6 6l12 12M18 6 6 18" />,
   send: <path d="M4 12 20 4l-6 16-3-7z" />,
   commit: (

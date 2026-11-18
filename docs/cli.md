@@ -12,7 +12,7 @@ The workflow assistant runs your profile's own agent CLI (claude or codex) under
       --json   print JSON
 ```
 
-Subcommands: `approve` `cancel` `decline` `list` `new` `rm` `send` `show`
+Subcommands: `approve` `cancel` `decline` `distill` `forget` `list` `memories` `new` `rm` `send` `show` `stats`
 
 ## `icaro assist approve`
 
@@ -38,12 +38,40 @@ Decline a run the assistant asked for
 icaro assist decline CHAT APPROVAL
 ```
 
+## `icaro assist distill`
+
+Turn a chat into memories now (it also happens when the chat goes idle)
+
+```text
+icaro assist distill CHAT
+```
+
+## `icaro assist forget`
+
+Remove one of a chat's memories for good
+
+```text
+icaro assist forget CHAT MEMORY [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
+```
+
 ## `icaro assist list`
 
 List chats
 
 ```text
 icaro assist list
+```
+
+## `icaro assist memories`
+
+Show the notes a chat started with and the memories it left
+
+```text
+icaro assist memories CHAT
 ```
 
 ## `icaro assist new`
@@ -91,6 +119,14 @@ Show a chat's messages, draft and pending approvals
 
 ```text
 icaro assist show CHAT
+```
+
+## `icaro assist stats`
+
+Compare chats that started with memory and chats that did not
+
+```text
+icaro assist stats
 ```
 
 ## `icaro claude`
@@ -439,7 +475,7 @@ MCP-capable agents use it through `icaro mcp`; these commands are the HTTP/CLI f
       --project-id string   project id (overrides --project)
 ```
 
-Subcommands: `handoff` `import` `ingest` `project` `query` `show` `write`
+Subcommands: `handoff` `import` `ingest` `model` `project` `query` `show` `write`
 
 ## `icaro memory handoff`
 
@@ -493,6 +529,40 @@ icaro memory ingest [PATH] [flags]
 
 ```text
       --commits int   recent commits to index (default 200, -1 for none)
+```
+
+## `icaro memory model`
+
+Without a model, assistant chats leave exact memories only (validator lessons, integration facts, run and save outcomes). A pulled model also summarizes each chat's intent, constraints and where it left off. It runs on the CPU in a container with no network; GPU users can set memory.distill.endpoint to their own llama-server or Ollama instead.
+
+Subcommands: `list` `pull` `rm`
+
+## `icaro memory model list`
+
+List the models you can pull, and which are pulled
+
+```text
+icaro memory model list
+```
+
+## `icaro memory model pull`
+
+Download a model (default: the one for this machine's tier) and check its pinned SHA-256
+
+```text
+icaro memory model pull [NAME]
+```
+
+## `icaro memory model rm`
+
+Delete a pulled model
+
+```text
+icaro memory model rm NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro memory project`

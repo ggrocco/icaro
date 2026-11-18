@@ -55,3 +55,6 @@ func totalRAM() uint64 {
 	}
 	return 0
 }
+
+// TotalRAM is the machine's physical memory in bytes, 0 when unknown.
+func TotalRAM() uint64 { return totalRAM() }

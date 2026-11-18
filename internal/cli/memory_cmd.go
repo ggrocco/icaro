@@ -341,7 +341,7 @@ func newMemoryCmd(opts *rootOpts) *cobra.Command {
 	imp.Flags().StringVar(&format, "format", "", "export format: "+strings.Join(memory.ImportFormats(), " | "))
 	_ = imp.MarkFlagRequired("format")
 
-	cmd.AddCommand(project, write, query, show, handoff, ingest, imp)
+	cmd.AddCommand(project, write, query, show, handoff, ingest, imp, newMemoryModelCmd(opts, &asJSON))
 	return cmd
 }
 

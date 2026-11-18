@@ -543,3 +543,9 @@ func TestCreateFailsFastWhileDockerIsDown(t *testing.T) {
 		t.Fatalf("after Docker is back: %+v %v", s, err)
 	}
 }
+
+func TestTotalRAM(t *testing.T) {
+	if TotalRAM() != totalRAM() {
+		t.Fatal("TotalRAM differs from the probe it wraps")
+	}
+}

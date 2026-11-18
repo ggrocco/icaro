@@ -1,8 +1,8 @@
 # Phase 12 — Await steps
 
-**Objective:** a workflow step that parks the run until a matching integration event arrives, as proposed in [ADR 0032](../adr/0032-await-event-steps.md).
+**Objective:** a workflow step that parks the run until a matching integration event arrives, as decided in [ADR 0032](../adr/0032-await-event-steps.md).
 
-**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. Entry also needs ADR 0032 **accepted**, with its open questions settled: whether `key`/`match` stay required, where the lookback starts, and whether validation warns when `daemon.public_url` is unset. A change to any of them is made in the ADR first, then here.
+**Depends on:** see the [roadmap](../04-roadmap.md#dependencies), which also defines the entry, test, and exit rules every phase follows. ADR 0032 is **accepted**, and its open questions are settled in its "Settled at acceptance" section. A later change to any of them is made in the ADR first, then here.
 
 ## Deliverables
 
@@ -13,12 +13,12 @@
 - [ ] **Engine.** In `internal/workflow/engine`: start an `await` step by rendering `key` (an empty key fails the step), committing the `waiting` row, then looking back through `delivery_events` from the run's start, oldest first. Park and wake as for the other pause steps ([ADR 0030](../adr/0030-approval-wait-steps.md)). Record `expired` past the deadline (failing the step and skipping its dependents), and `cancelled` on run cancel, `replace` or workflow delete. On resume, write the matched payload to the step's outputs.
 - [ ] **Resolving by hand.** `POST /api/v1/runs/{id}/steps/{step}/deliver` (`write` scope; payload checked against the event's declared fields; actor `token:<name>`, `delivery_id` `manual:<id>`), `icaro runs deliver RUN STEP --payload FILE`, and a form on the web UI's run page. No MCP tool for it. `get_run` and `icaro runs get` show the integration, event, rendered key, deadline and state of each `await` step.
 - [ ] **Clients.** The web UI's step views, the run graph and the desktop tray know the `await` kind, and list runs parked on it among the waiting ones.
-- [ ] **Laptop warning**, if ADR 0032 keeps it: validation warns, without failing, when a workflow awaits an integration event and `daemon.public_url` is unset. `icaro doctor` reports the same.
+- [ ] **Laptop warning:** validation warns, without failing, when a workflow awaits an integration event and `daemon.public_url` is unset. `icaro doctor` reports the same.
 - [ ] **Docs.**
   - `docs/workflows.md`: an "Await steps" section with a worked example, checked by `hack/docscheck`.
   - `docs/integrations.md`: delivery outcomes now list resumed steps.
   - [Architecture §6](../01-architecture.md#6-workflow-engine) and §9.
-  - The blueprint: ADR 0032 marked Accepted, a decision-index row, cut 8's wording, and the deferred-designs row removed.
+  - The blueprint: the "not built yet" notes in the decision index and cut 8 removed.
 
 ## Acceptance criteria
 

@@ -77,11 +77,66 @@ Run logs, integration manifests and memory can contain text written by someone e
 
 Each reply shows the tokens the CLI reported. A subscription reply shows tokens only. An API-key profile also shows the CLI's cost figure, labelled an estimate. The assistant's transcripts sit in the profile home, so `icaro usage` counts them too.
 
+## Memory
+
+The assistant learns from earlier chats. When a chat has been idle for `assistant.idle_timeout`, or you click **Remember now** in its Memory section, Ícaro turns it into memories that later chats in the same scope start with: the chat's project, or a global assistant scope for chats without one.
+
+Two kinds of memory come out of a chat:
+
+- **Exact facts**, recorded by Ícaro itself with no model: a validator mistake and the change that fixed it, the integration actions a clean draft used, how its runs went, which versions were saved, and the workflow as a working example once it ran green. They do not expire.
+- **Summaries**, only if you pull a local model: what the chat was for, its constraints and preferences, what you turned down and why, open questions, and where it left off. A small model writes them, so they are labelled as summaries, may be wrong, and expire after `memory.distill.ttl` (90 days by default).
+
+A new chat's first message is sent with the matching notes and the validator mistakes seen most often, within `assistant.memory_budget` tokens (2000 by default). The notes tell the agent they are data that may be out of date. Each reply that started with notes lists them, and a workflow's page shows the latest intent and where its last chat left off.
+
+### The local model (optional)
+
+Without a model you still get the exact facts. To add summaries, pull one:
+
+```sh
+icaro memory model list          # the catalog, this machine's tier and what is pulled
+icaro memory model pull          # the default for this machine's RAM
+icaro memory model pull qwen3.5-0.8b
+icaro memory model rm qwen3.5-2b --yes
+```
+
+Downloads come from Hugging Face, go to `~/.icaro/models`, and must match a pinned SHA-256. With `memory.distill.model: auto` (the default), the daemon uses the pulled model of this machine's tier (from its RAM), or else any pulled model; name one to pin it.
+
+The daemon runs the model with llama.cpp's server in a container with **no network at all**, on `memory.distill.cpus` cores (2 by default), only while there are chats to summarize. It listens on a Unix socket only the daemon can reach. This is CPU-only. On a Mac or a machine with a GPU, run your own llama-server or Ollama and point Ícaro at it instead:
+
+```yaml
+memory:
+  distill:
+    endpoint: http://127.0.0.1:11434   # Ollama or llama-server (no /v1)
+    endpoint_model: qwen3.5:4b          # for endpoints that serve several models
+```
+
+To turn summaries off, set `memory.distill.enabled: false`. Exact facts are still written.
+
+### Privacy
+
+- Everything stays on your machine: the model runs locally and its container has no network.
+- The model reads only the messages you and the assistant wrote, secret-redacted as they were stored. It never reads run logs, tool results or step output, so a prompt injection in a log cannot steer a summary.
+- Memories are ordinary Ícaro memories. `icaro memory query` finds them; they carry `origin: distill:<chat>` and link back to the chat.
+
+### Removing memories
+
+In a chat's Memory section, **Remove** deletes one memory, and the chat will not write it again. From the CLI:
+
+```sh
+icaro assist memories CHAT        # the notes it started with and the memories it left
+icaro assist forget CHAT MEMORY   # remove one (asks first; --yes skips the question)
+icaro assist distill CHAT         # remember it now
+icaro assist stats                # chats with memory compared with chats without
+```
+
+Deleting a chat keeps its memories; remove them first if you want them gone. `icaro doctor` reports a pulled model whose hash no longer matches, an endpoint that does not answer, and the last failed job.
+
 ## Where things are
 
 - Chats, messages, drafts and run requests: the database (`chats`, `chat_messages`, `chat_drafts`, `chat_approvals`).
 - Each chat's event log, secret-redacted as it is written: `~/.icaro/logs/assist/<chat>.jsonl`.
 - Each chat's scratch workspace: `~/.icaro/assist/<chat>/workspace`. Its container is a session of kind `assist` (`icaro session list --kind assist`).
+- Memory jobs and metrics: the database (`distill_jobs`, `chat_stats`, `distill_removed`). Local models: `~/.icaro/models`.
 
 Deleting a chat removes its container, workspace, rows and log.
 

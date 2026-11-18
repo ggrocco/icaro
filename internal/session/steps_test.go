@@ -182,3 +182,19 @@ func TestCheckLoginRefusesDuringAgentStep(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The memory scope follows ADR 0037's order: the run's project, else the
+// step's repository, else the workflow.
+func TestMemoryScope(t *testing.T) {
+	req := AgentStepRequest{Workflow: "review", Repository: "https://example.com/acme/app.git"}
+	if s := memoryScope(&store.SessionRow{ProjectID: "p1"}, req); s != "p1" {
+		t.Fatalf("project: %q", s)
+	}
+	if s := memoryScope(&store.SessionRow{}, req); s != "repo:"+repoKey(req.Repository) {
+		t.Fatalf("repository: %q", s)
+	}
+	req.Repository = ""
+	if s := memoryScope(&store.SessionRow{}, req); s != "workflow:review" {
+		t.Fatalf("workflow: %q", s)
+	}
+}
