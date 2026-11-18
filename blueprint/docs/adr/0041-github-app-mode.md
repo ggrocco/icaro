@@ -1,4 +1,4 @@
-# ADR 0039 — GitHub App mode: one install for triggers, actions and step access
+# ADR 0041 — GitHub App mode: one install for triggers, actions and step access
 
 **Status:** Proposed. Would amend [MVP cut 9](../02-decisions-risks.md#mandatory-mvp-cuts) ("token/PAT first") for the `github` integration only, and take the "GitHub App mode" row out of the [deferred designs](../02-decisions-risks.md#deferred-designs). Extends [ADR 0028](0028-credential-injection.md) (the injection relay) to a second kind of credential. Gated by a new spike, S13.
 
