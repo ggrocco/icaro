@@ -10,7 +10,8 @@ container), an `agent` step (an agent CLI such as Claude Code does a task
 under an operator-approved profile), a `uses` step (an integration action
 the daemon runs over HTTP), a `call` step (another workflow runs as a
 child run and returns its outputs), an `approval` step (a person approves
-or rejects) or a `wait` step (a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
+or rejects), a `wait` step (a pause, such as `wait: 2h`) or an `await`
+step (a matching integration event, such as CI finishing on a commit). You work through the `icaro` MCP server's tools; the
 schema and the validator are the source of truth, not your memory.
 
 ## The loop
@@ -78,8 +79,8 @@ steps:
 
 ## Rules the validator enforces
 
-- A step has exactly one of `image`, `agent`, `uses`, `call`, `approval`
-  or `wait`. `command` is for image steps only; `env` and `outputs` are for
+- A step has exactly one of `image`, `agent`, `uses`, `call`, `approval`,
+  `wait` or `await`. `command` is for image steps only; `env` and `outputs` are for
   image and agent steps; a `uses` step's outputs come from the action, and
   a `call` step's from the called workflow.
 - **Reuse before you copy.** Before writing a sequence of steps another
@@ -114,7 +115,19 @@ steps:
 - `approval: {message: "..."}` outputs `approved_by` and `comment`; its
   `timeout` is the decision deadline, and the message cannot read secrets.
   A rejection or an expired deadline fails the step. `wait` takes a
-  duration up to `720h` and has no outputs. Neither takes `retry`.
+  duration up to `720h` and has no outputs. None of them takes `retry`.
+- `await: {integration, event, key, match, filter}` waits for an event
+  the integration declares (`get_integration` lists them). `key` is
+  rendered when the step starts, from `trigger`, `env`, `run`, `workflow`
+  and `needs` ancestors' outputs, never `secrets`; `match` (and the
+  optional `filter`) read the payload under `event`, and the event
+  belongs to the step when `match` equals the key. `timeout` is required
+  (at most `720h`). Its outputs are the event's fields plus
+  `delivery_id`. Events since the run started count, so an event an
+  earlier step caused is not missed.
+- **You cannot deliver.** No tool resolves an await step by hand; when
+  `get_run` shows one `waiting`, tell the human its key and the
+  `deliver_with` command.
 - **You cannot approve.** No tool decides an approval: that is the point
   of the step. When `get_run` shows a step `waiting` with an `approval`,
   tell the human its message and the `decide_with` command.

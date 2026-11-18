@@ -142,6 +142,16 @@ func TestClosedDatabase(t *testing.T) {
 			_, err := s.ResolveAwait(ctx, "r", "s", AwaitMatched, "d", "{}", "")
 			return err
 		},
+		"GetAwait": func() error {
+			_, err := s.GetAwait(ctx, "r", "s")
+			return err
+		},
+		"ListWaitingAwaits": func() error {
+			_, err := s.ListWaitingAwaits(ctx, "i", "e")
+			return err
+		},
+		"CancelAwaits":      func() error { return s.CancelAwaits(ctx, "r") },
+		"AddDeliveryEvents": func() error { return s.AddDeliveryEvents(ctx, []DeliveryEvent{{DeliveryID: "d"}}) },
 		"ListDeliveryEventsSince": func() error {
 			_, err := s.ListDeliveryEventsSince(ctx, "i", "e", "", time.Time{})
 			return err

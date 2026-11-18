@@ -77,7 +77,7 @@ The binding defaults to the manifest's `hosts` plus the host of a `base_url` you
 
 ## Webhooks
 
-Each integration has one endpoint: `POST /hooks/<integration>`. The generic `webhook` integration uses `POST /hooks/webhook/<token>`, with one random token per subscribed workflow (`icaro integration webhook-tokens`, `--rotate WORKFLOW`). The daemon must be reachable by the provider. The supported way is a TLS-terminating reverse proxy (Caddy, nginx, a tunnel) on the same host in front of a loopback listener: `icaro serve --listen 127.0.0.1:8787`. The daemon speaks plain HTTP, so it refuses a non-loopback `--listen` / `daemon.listen` unless you also pass `--allow-remote` (`daemon.allow_remote: true`), and then logs a warning. Set `daemon.public_url` so the generated URLs are correct. On a laptop, use manual or `cron` triggers instead; a `cron` workflow whose first step checks the source and gates the rest with `when` stands in for polling.
+Each integration has one endpoint: `POST /hooks/<integration>`. The generic `webhook` integration uses `POST /hooks/webhook/<token>`, with one random token per workflow that subscribes to it or [awaits](workflows.md#await-steps) it (`icaro integration webhook-tokens`, `--rotate WORKFLOW`). The daemon must be reachable by the provider. The supported way is a TLS-terminating reverse proxy (Caddy, nginx, a tunnel) on the same host in front of a loopback listener: `icaro serve --listen 127.0.0.1:8787`. The daemon speaks plain HTTP, so it refuses a non-loopback `--listen` / `daemon.listen` unless you also pass `--allow-remote` (`daemon.allow_remote: true`), and then logs a warning. Set `daemon.public_url` so the generated URLs are correct. On a laptop, use manual or `cron` triggers instead, and resolve [await steps](workflows.md#await-steps) by hand with `icaro runs deliver`; `icaro doctor` warns about workflows that await events while `daemon.public_url` is unset. A `cron` workflow whose first step checks the source and gates the rest with `when` stands in for polling.
 
 Every request goes through the same pipeline ([ADR 0015](../blueprint/docs/adr/0015-manifest-schema-webhook-pipeline.md)):
 
@@ -85,15 +85,19 @@ Every request goes through the same pipeline ([ADR 0015](../blueprint/docs/adr/0
 2. Verify the signature as the manifest says (HMAC-SHA256/SHA1, shared-secret header, or URL token), and check the timestamp header when the manifest declares one (`webhooks.max_skew`). A timestamp only stops replays when the signature covers it, as Slack's does.
 3. Record the delivery, rejected ones included. A rejected request is unauthenticated, so only its first 4 KiB is kept, with its full size and SHA-256.
 4. Deduplicate: a provider retry of a processed delivery starts nothing. A delivery is a duplicate when its delivery id matches, or when its HMAC-signed material does: delivery ids travel in headers the signature does not cover, so a replay with a fresh id is still caught.
-5. Normalize the payload into `trigger.*`, evaluate each subscribed workflow's `filter`, and enqueue.
+5. Normalize the payload into `trigger.*` and store each matched event, so an [await step](workflows.md#await-steps) that starts later can find it.
+6. Resume await steps: each step waiting for one of the events is resumed by the first event whose `match` equals its key and whose `filter` holds. Generic `webhook` events count only for the workflow whose token received them.
+7. Evaluate each subscribed workflow's `filter`, and enqueue.
+
+A delivery is `processed` when it started a run or resumed a step; its record lists both. A database error in steps 5–7 records it as `error` and answers 503, so the provider retries, and a retry resumes a step only once. Redelivery runs steps 5–7 again, so it can resume a step that is still waiting.
 
 ```sh
 icaro deliveries list                 # status: processed, duplicate, rejected, no_match, error, challenge
-icaro deliveries get ID               # headers (secrets masked), body, matched workflows, runs
+icaro deliveries get ID               # headers (secrets masked), body, matched workflows, runs, resumed steps
 icaro deliveries redeliver ID         # re-run the pipeline from the stored record
 ```
 
-Delivery records are kept for `webhooks.retention` (default `720h`, 30 days), which is also how long a replay is recognized as a duplicate; only the newest `webhooks.max_rejected` rejected deliveries are kept (default `1000`). Verified deliveries are only aged out, so a flood of rejected requests cannot push out the records that catch replays. The daemon prunes hourly.
+Delivery records, and the events they stored, are kept for `webhooks.retention` (default `720h`, 30 days), which is also how long a replay is recognized as a duplicate and how far back an await step can look; only the newest `webhooks.max_rejected` rejected deliveries are kept (default `1000`). Verified deliveries are only aged out, so a flood of rejected requests cannot push out the records that catch replays. The daemon prunes hourly.
 
 ```yaml
 webhooks:
