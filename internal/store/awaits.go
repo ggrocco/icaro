@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-const awaitCols = `run_id, step_id, integration, event, workflow, match_key, state, deadline, delivery_id, payload_json, actor, created_at, decided_at`
+const awaitCols = `run_id, step_id, integration, event, workflow, match_key, match_expr, filter_expr, state, deadline, delivery_id, payload_json, actor, created_at, decided_at`
 
 func scanAwait(sc interface{ Scan(...any) error }) (*StepAwait, error) {
 	var a StepAwait
 	var deadline, created string
 	var decided sql.NullString
-	err := sc.Scan(&a.RunID, &a.StepID, &a.Integration, &a.Event, &a.Workflow, &a.Key, &a.State, &deadline,
+	err := sc.Scan(&a.RunID, &a.StepID, &a.Integration, &a.Event, &a.Workflow, &a.Key, &a.Match, &a.Filter, &a.State, &deadline,
 		&a.DeliveryID, &a.PayloadJSON, &a.Actor, &created, &decided)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -48,9 +48,9 @@ func (s *Store) listAwaits(ctx context.Context, where string, args ...any) ([]*S
 // through delivery_events, which is what closes the race with a delivery
 // arriving meanwhile (ADR 0032).
 func (s *Store) OpenAwait(ctx context.Context, a *StepAwait) (*StepAwait, error) {
-	if _, err := s.exec(ctx, `INSERT INTO step_awaits (run_id, step_id, integration, event, workflow, match_key, deadline, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (run_id, step_id) DO NOTHING`,
-		a.RunID, a.StepID, a.Integration, a.Event, a.Workflow, a.Key, ts(a.Deadline), ts(Now())); err != nil {
+	if _, err := s.exec(ctx, `INSERT INTO step_awaits (run_id, step_id, integration, event, workflow, match_key, match_expr, filter_expr, deadline, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (run_id, step_id) DO NOTHING`,
+		a.RunID, a.StepID, a.Integration, a.Event, a.Workflow, a.Key, a.Match, a.Filter, ts(a.Deadline), ts(Now())); err != nil {
 		return nil, err
 	}
 	return s.GetAwait(ctx, a.RunID, a.StepID)

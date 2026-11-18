@@ -187,6 +187,8 @@ type StepAwait struct {
 	Event       string
 	Workflow    string // the run's workflow; generic webhook events correlate only with it
 	Key         string
+	Match       string // the step's match expression over event.*
+	Filter      string // the step's filter, "" for none
 	State       string
 	Deadline    time.Time
 	DeliveryID  string

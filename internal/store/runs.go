@@ -338,6 +338,11 @@ func (s *Store) requestCancelTx(ctx context.Context, tx *sql.Tx, runID string) e
 	}
 	// A running run is flagged for the engine to stop; a waiting one is
 	// also woken, so the engine claims it and cancels it the same way.
+	// Its awaits stop waiting now, so no event resumes it meanwhile.
+	if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE step_awaits SET state = ?, decided_at = ? WHERE run_id = ? AND state = ?`),
+		AwaitCancelled, now, runID, AwaitWaiting); err != nil {
+		return err
+	}
 	res, err = tx.ExecContext(ctx, s.rebind(`UPDATE runs SET cancel_requested_at = ?,
 		wake_at = CASE WHEN status = ? THEN ? ELSE wake_at END
 		WHERE id = ? AND status IN (?, ?) AND cancel_requested_at IS NULL`), now, RunWaiting, now, runID, RunRunning, RunWaiting)

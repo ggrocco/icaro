@@ -21,8 +21,8 @@ func TestAwaits(t *testing.T) {
 			t.Fatal(err)
 		}
 		deadline := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
-		a, err := s.OpenAwait(ctx, &StepAwait{RunID: r.ID, StepID: "ci", Integration: "github", Event: "check_suite.completed", Workflow: "await", Key: "abc", Deadline: deadline})
-		if err != nil || a.State != AwaitWaiting || a.Key != "abc" || !a.Deadline.Equal(deadline) || a.DecidedAt != nil {
+		a, err := s.OpenAwait(ctx, &StepAwait{RunID: r.ID, StepID: "ci", Integration: "github", Event: "check_suite.completed", Workflow: "await", Key: "abc", Match: "event.head_sha", Filter: "event.ok", Deadline: deadline})
+		if err != nil || a.State != AwaitWaiting || a.Key != "abc" || a.Match != "event.head_sha" || a.Filter != "event.ok" || !a.Deadline.Equal(deadline) || a.DecidedAt != nil {
 			t.Fatalf("%+v %v", a, err)
 		}
 		if again, _ := s.OpenAwait(ctx, &StepAwait{RunID: r.ID, StepID: "ci", Integration: "github", Event: "check_suite.completed", Key: "other", Deadline: deadline}); again.Key != "abc" {
