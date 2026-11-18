@@ -190,13 +190,11 @@ func (h *Hub) SyncWebhookTokens(ctx context.Context) ([]*store.WebhookToken, err
 			return nil, err
 		}
 		for _, s := range specs {
-			for _, tr := range s.Triggers {
-				if tr.Integration == "webhook" {
-					if _, err := h.store.EnsureWebhookToken(ctx, s.Name, newURLToken); err != nil {
-						return nil, err
-					}
-					break
-				}
+			if !s.UsesGenericWebhook() {
+				continue
+			}
+			if _, err := h.store.EnsureWebhookToken(ctx, s.Name, newURLToken); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -231,7 +229,7 @@ func (h *Hub) ServeHook(w http.ResponseWriter, r *http.Request) {
 
 // ServeHookToken handles POST /hooks/webhook/{token}.
 func (h *Hub) ServeHookToken(w http.ResponseWriter, r *http.Request) {
-	l, ok := h.registry.Snapshot().Get("webhook")
+	l, ok := h.registry.Snapshot().Get(workflow.GenericWebhook)
 	if !ok || l.Manifest.Triggers == nil {
 		writeHookJSON(w, http.StatusNotFound, map[string]string{"error": "generic webhook integration is not loaded"})
 		return
