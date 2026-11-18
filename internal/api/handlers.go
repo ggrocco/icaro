@@ -213,6 +213,24 @@ func (s *Server) handleDecide(approve bool) http.HandlerFunc {
 	}
 }
 
+// handleDeliver resolves a waiting await step by hand with an event
+// payload, recording the caller: {"payload": {...}}.
+func (s *Server) handleDeliver(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	run, err := s.svc.DeliverAwait(r.Context(), r.PathValue("id"), r.PathValue("step"), in.Payload, actor(r))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
 // handleStepLogs serves a step attempt's log as text: ?attempt= (default
 // latest), ?offset= to continue from a byte offset, ?tail= for the last N
 // bytes. X-Icaro-Log-Offset / X-Icaro-Log-Size describe the slice.

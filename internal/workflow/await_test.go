@@ -159,3 +159,15 @@ func TestCorrelator(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 }
+
+func TestAwaitsAndGenericWebhook(t *testing.T) {
+	s, _ := parseT(t, awaitYAML, Options{Catalog: fakeCatalog{}})
+	if a := s.Awaits(); len(a) != 1 || a[0].ID != "pr" || s.UsesGenericWebhook() {
+		t.Fatalf("%v", a)
+	}
+	hook := &Spec{Steps: []StepSpec{{ID: "w", Await: &AwaitSpec{Integration: GenericWebhook}}}}
+	trig := &Spec{Triggers: []TriggerSpec{{Integration: GenericWebhook}}}
+	if !hook.UsesGenericWebhook() || !trig.UsesGenericWebhook() || len(trig.Awaits()) != 0 {
+		t.Fatal("generic webhook use")
+	}
+}

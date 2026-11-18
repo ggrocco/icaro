@@ -36,6 +36,7 @@ type Service struct {
 	// (ADR 0038).
 	maxCallDepth   int
 	maxRunsPerRoot int
+	publicURL      string
 	log            *slog.Logger
 }
 
@@ -57,7 +58,10 @@ type Options struct {
 	// workflows.max_runs_per_root (ADR 0038); zero takes the defaults.
 	MaxCallDepth   int
 	MaxRunsPerRoot int
-	Log            *slog.Logger
+	// PublicURL is daemon.public_url; without it no provider can deliver
+	// the events await steps wait for, which Warnings says (ADR 0032).
+	PublicURL string
+	Log       *slog.Logger
 }
 
 // New creates a Service.
@@ -80,7 +84,7 @@ func New(o Options) *Service {
 	return &Service{
 		store: o.Store, key: o.Key, runner: o.Runner, catalog: o.Catalog, secrets: o.Secrets, events: o.Events,
 		logsDir: o.LogsDir, maxTimeout: o.MaxTimeout, agents: o.Agents, log: o.Log,
-		maxCallDepth: o.MaxCallDepth, maxRunsPerRoot: o.MaxRunsPerRoot,
+		maxCallDepth: o.MaxCallDepth, maxRunsPerRoot: o.MaxRunsPerRoot, publicURL: o.PublicURL,
 	}
 }
 

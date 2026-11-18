@@ -31,7 +31,7 @@ func init() {
 		a.Add(hub)
 		a.Add(sched)
 		a.API.IntegrationRoutes(hub, a.Secrets, sched, a.Cfg.Daemon.PublicURL)
-		for _, c := range integration.DoctorChecks(a.Layout.Integrations(), a.Store) {
+		for _, c := range integration.DoctorChecks(a.Layout.Integrations(), a.Store, a.Cfg.Daemon.PublicURL) {
 			a.AddCheck(c)
 		}
 		return nil

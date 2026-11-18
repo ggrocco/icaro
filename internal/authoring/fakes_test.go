@@ -262,6 +262,7 @@ func TestGetRunView(t *testing.T) {
 			{ID: "c", Status: "skipped"},
 			{ID: "d", Status: "failed", LogSize: 5},
 			{ID: "e", Status: "waiting", Approval: &service.ApprovalInfo{Message: "ship?"}},
+			{ID: "f", Status: "waiting", Await: &service.AwaitInfo{Integration: "github", Event: "push", Key: "k", State: "waiting"}},
 		}},
 		logs: map[string]*service.LogPage{
 			"a": {Data: []byte("all of a")},
@@ -275,7 +276,7 @@ func TestGetRunView(t *testing.T) {
 		Steps []map[string]any `json:"steps"`
 	}
 	e.callJSON(ToolGetRun, map[string]any{"id": "r1", "log_tail_bytes": 1 << 20}, &got)
-	if got.Error != "step b failed" || len(got.Steps) != 5 {
+	if got.Error != "step b failed" || len(got.Steps) != 6 {
 		t.Fatalf("run: %+v", got)
 	}
 	a, b, c, d := got.Steps[0], got.Steps[1], got.Steps[2], got.Steps[3]
@@ -293,6 +294,9 @@ func TestGetRunView(t *testing.T) {
 	}
 	if ap, _ := got.Steps[4]["approval"].(map[string]any); ap["message"] != "ship?" || ap["decide_with"] != "icaro runs approve r1 e" {
 		t.Fatalf("e: %+v", got.Steps[4])
+	}
+	if aw, _ := got.Steps[5]["await"].(map[string]any); aw["key"] != "k" || aw["state"] != "waiting" || aw["deliver_with"] != "icaro runs deliver r1 f --payload FILE" {
+		t.Fatalf("f: %+v", got.Steps[5])
 	}
 	for _, tail := range w.logTails {
 		if tail != maxTail {

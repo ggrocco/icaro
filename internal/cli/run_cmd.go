@@ -165,6 +165,11 @@ func followRun(ctx context.Context, c *apiclient.Client, runID, step string, w i
 					fmt.Fprintf(w, "[%s] waiting for approval: %s\n[%s] decide with: icaro runs approve %s %s (or reject ... --comment WHY)\n",
 						st.ID, a.Message, st.ID, run.ID, st.ID)
 				}
+				if a := st.Await; a != nil && a.State == "waiting" && !hinted[st.ID] && (step == "" || st.ID == step) {
+					hinted[st.ID] = true
+					fmt.Fprintf(w, "[%s] waiting for %s.%s with key %q until %s\n[%s] resolve by hand with: icaro runs deliver %s %s --payload FILE\n",
+						st.ID, a.Integration, a.Event, a.Key, a.Deadline, st.ID, run.ID, st.ID)
+				}
 			}
 		case "log":
 			var le struct {
@@ -267,6 +272,16 @@ func printRun(w io.Writer, run *service.RunInfo) {
 		}
 		if st.Call != nil {
 			printCallStep(w, st.ID, st.Call)
+		}
+		if a := st.Await; a != nil {
+			fmt.Fprintf(w, "  %s awaits %s.%s key=%q  state=%s  deadline=%s", st.ID, a.Integration, a.Event, a.Key, a.State, a.Deadline)
+			if a.DeliveryID != "" {
+				fmt.Fprintf(w, "  delivery=%s", a.DeliveryID)
+			}
+			if a.Actor != "" {
+				fmt.Fprintf(w, "  by=%s", a.Actor)
+			}
+			fmt.Fprintln(w)
 		}
 	}
 }

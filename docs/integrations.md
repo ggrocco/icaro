@@ -11,7 +11,7 @@ Workflows use them as `triggers: [{integration, event, filter}]` and `uses: <int
 
 | Integration | Events | Actions |
 |---|---|---|
-| `github` | `pull_request.opened`, `pull_request.synchronize`, `pull_request.closed`, `push`, `issue_comment.created` | `create-issue-comment`, `create-issue`, `create-commit-status` |
+| `github` | `pull_request.opened`, `pull_request.synchronize`, `pull_request.closed`, `push`, `check_suite.completed`, `issue_comment.created` | `create-issue-comment`, `create-issue`, `create-commit-status` |
 | `gitlab` | `merge_request.opened/updated/merged/closed`, `push`, `note.created`, `note.merge_request` | `create-mr-note` |
 | `slack` | `app_mention`, `message` | `post-message`, `post-reply`, `update-message` |
 | `jira` | `issue.created`, `issue.updated` | `create-issue`, `add-comment`, `transition` |

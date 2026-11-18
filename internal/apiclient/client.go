@@ -195,6 +195,14 @@ func (c *Client) DecideApproval(ctx context.Context, id, step string, approve bo
 	return &out, err
 }
 
+// DeliverAwait resolves a run's waiting await step with an event payload.
+func (c *Client) DeliverAwait(ctx context.Context, id, step string, payload map[string]any) (*service.RunInfo, error) {
+	var out service.RunInfo
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(id)+"/steps/"+url.PathEscape(step)+"/deliver",
+		map[string]any{"payload": payload}, &out)
+	return &out, err
+}
+
 // StepLogs fetches a step's log: attempt 0 is the latest; tailBytes > 0
 // returns only the end.
 func (c *Client) StepLogs(ctx context.Context, id, step string, attempt, tailBytes int) ([]byte, error) {

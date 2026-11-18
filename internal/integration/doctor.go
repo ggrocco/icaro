@@ -15,10 +15,11 @@ import (
 )
 
 // DoctorChecks are the Phase 3 checks: pack load errors and missing
-// webhook secrets for integrations that active workflows subscribe to.
-// They read the packs and the database directly, so they work without
-// the daemon.
-func DoctorChecks(dir string, st *store.Store) []doctor.Check {
+// webhook secrets for integrations that active workflows subscribe to or
+// await, plus (Phase 12) await steps no provider can reach because
+// daemon.public_url is unset. They read the packs and the database
+// directly, so they work without the daemon.
+func DoctorChecks(dir string, st *store.Store, publicURL string) []doctor.Check {
 	return []doctor.Check{
 		doctor.Func("integration packs", func(context.Context) doctor.Result {
 			snap := NewRegistry(dir, nil).Snapshot()
@@ -51,6 +52,27 @@ func DoctorChecks(dir string, st *store.Store) []doctor.Check {
 			}
 			return doctor.Result{Severity: doctor.OK, Detail: "every subscribed integration has its webhook secret"}
 		}),
+		doctor.Func("awaited events", func(ctx context.Context) doctor.Result {
+			specs, err := StoreSpecs{Store: st}.ActiveSpecs(ctx)
+			if err != nil {
+				return doctor.Result{Severity: doctor.Error, Detail: err.Error()}
+			}
+			var awaiting []string
+			for _, s := range specs {
+				if len(s.Awaits()) > 0 {
+					awaiting = append(awaiting, s.Name)
+				}
+			}
+			switch {
+			case len(awaiting) == 0:
+				return doctor.Result{Severity: doctor.OK, Detail: "no workflow awaits an integration event"}
+			case publicURL == "":
+				return doctor.Result{Severity: doctor.Warning, Detail: "workflow(s) " + strings.Join(awaiting, ", ") +
+					" await integration events, but daemon.public_url is unset, so no provider can reach this daemon; " +
+					"set daemon.public_url, or resolve those steps by hand with icaro runs deliver"}
+			}
+			return doctor.Result{Severity: doctor.OK, Detail: fmt.Sprintf("%d workflow(s) await events delivered to %s", len(awaiting), publicURL)}
+		}),
 	}
 }
 
@@ -63,11 +85,17 @@ func MissingWebhookSecrets(ctx context.Context, snap *Snapshot, src workflow.Spe
 	}
 	need := map[string]bool{}
 	for _, s := range specs {
+		var used []string
 		for _, tr := range s.Triggers {
-			if tr.Integration == "" {
-				continue
+			if tr.Integration != "" {
+				used = append(used, tr.Integration)
 			}
-			l, ok := snap.Get(tr.Integration)
+		}
+		for _, st := range s.Awaits() {
+			used = append(used, st.Await.Integration)
+		}
+		for _, name := range used {
+			l, ok := snap.Get(name)
 			if !ok || l.Manifest.Triggers == nil || l.Manifest.Triggers.Verify.Kind == VerifyURLToken {
 				continue
 			}

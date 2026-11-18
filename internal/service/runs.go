@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -58,6 +59,22 @@ type StepInfo struct {
 	Approval   *ApprovalInfo   `json:"approval,omitempty"`
 	Agent      *AgentStepInfo  `json:"agent,omitempty"`
 	Call       *CallStepInfo   `json:"call,omitempty"`
+	Await      *AwaitInfo      `json:"await,omitempty"`
+}
+
+// AwaitInfo is the API view of an await step that started: the event it
+// waits for, the key rendered when it started, its deadline, and how it
+// ended (state matched, expired or cancelled) with the delivery
+// ("manual:<id>" when resolved by hand) and who resolved it.
+type AwaitInfo struct {
+	Integration string  `json:"integration"`
+	Event       string  `json:"event"`
+	Key         string  `json:"key"`
+	State       string  `json:"state"`
+	Deadline    string  `json:"deadline"`
+	DeliveryID  string  `json:"delivery_id,omitempty"`
+	Actor       string  `json:"actor,omitempty"`
+	DecidedAt   *string `json:"decided_at,omitempty"`
 }
 
 // CallStepInfo is the API view of a call step (ADR 0038): the workflow it
@@ -379,6 +396,14 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 	for _, a := range approvals {
 		byStep[a.StepID] = a
 	}
+	awaits, err := s.store.ListAwaits(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	awaitBy := map[string]*store.StepAwait{}
+	for _, a := range awaits {
+		awaitBy[a.StepID] = a
+	}
 	info := runInfo(r)
 	for _, st := range steps {
 		si := StepInfo{
@@ -406,9 +431,82 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 				}
 			}
 		}
+		if a := awaitBy[st.StepID]; a != nil {
+			si.Await = &AwaitInfo{Integration: a.Integration, Event: a.Event, Key: a.Key, State: a.State,
+				Deadline: a.Deadline.UTC().Format(time.RFC3339), DeliveryID: a.DeliveryID, Actor: a.Actor, DecidedAt: tsp(a.DecidedAt)}
+		}
 		info.Steps = append(info.Steps, si)
 	}
 	return info, nil
+}
+
+// DeliverAwait resolves a waiting await step by hand with an event
+// payload (ADR 0032), for a daemon its provider cannot reach. The payload
+// may hold only fields the event declares; key, match and filter are not
+// applied, because the person picked the step. Its delivery_id output is
+// "manual:<id>".
+func (s *Service) DeliverAwait(ctx context.Context, runID, stepID string, payload map[string]any, actor string) (*RunInfo, error) {
+	if payload == nil {
+		return nil, badRequest("payload is required (an object of the event's fields)")
+	}
+	st, err := s.store.GetStepRun(ctx, runID, stepID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if st.Kind != workflow.KindAwait {
+		return nil, badRequest("step %s is not an await step", stepID)
+	}
+	if st.Status != store.StepWaiting {
+		return nil, &Conflict{Msg: fmt.Sprintf("step %s is %s, not waiting for an event", stepID, st.Status)}
+	}
+	a, err := s.store.GetAwait(ctx, runID, stepID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, &Conflict{Msg: fmt.Sprintf("step %s is not waiting for an event yet", stepID)}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if s.catalog != nil {
+		ev, ok := s.catalog.Event(a.Integration, a.Event)
+		if !ok {
+			return nil, badRequest("integration %s no longer declares event %s", a.Integration, a.Event)
+		}
+		declared := map[string]bool{}
+		for _, f := range ev.Fields {
+			declared[f] = true
+		}
+		for _, k := range sortedKeys(payload) {
+			if !declared[k] {
+				return nil, badRequest("%s.%s does not declare payload field %q (declared: %s)", a.Integration, a.Event, k, strings.Join(ev.Fields, ", "))
+			}
+		}
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, badRequest("payload: %v", err)
+	}
+	if _, err := s.store.ResolveAwait(ctx, runID, stepID, store.AwaitMatched, "manual:"+store.NewID(), string(b), actor); errors.Is(err, store.ErrConflict) {
+		return nil, &Conflict{Msg: fmt.Sprintf("step %s was already resolved", stepID)}
+	} else if err != nil {
+		return nil, err
+	}
+	s.log.Info("await delivered by hand", "run", runID, "step", stepID, "actor", actor)
+	if s.runner != nil {
+		s.runner.Wake()
+	}
+	return s.GetRun(ctx, runID)
+}
+
+func sortedKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DecideApproval approves or rejects an approval step that is waiting.

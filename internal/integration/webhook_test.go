@@ -296,6 +296,8 @@ func TestEveryBuiltinNormalizesItsFixture(t *testing.T) {
 	cases := []tc{
 		{"github", "github_push.json", "push", func(s string, b []byte) map[string]string { return ghHeaders("push", "p1", s, b) },
 			map[string]any{"ref": "refs/heads/main", "commit_count": float64(1), "pusher": "octocat"}},
+		{"github", "github_check_suite_completed.json", "check_suite.completed", func(s string, b []byte) map[string]string { return ghHeaders("check_suite", "cs1", s, b) },
+			map[string]any{"head_sha": "6dcb09b5b57875f334f61aebed695e2e4193db5e", "conclusion": "success", "app": "github-actions", "head_branch": "fix-flux"}},
 		{"github", "github_issue_comment.json", "issue_comment.created", func(s string, b []byte) map[string]string { return ghHeaders("issue_comment", "c1", s, b) },
 			map[string]any{"issue_number": float64(7), "is_pull_request": true, "comment": "/icaro review"}},
 		{"gitlab", "gitlab_merge_request.json", "merge_request.opened", func(s string, b []byte) map[string]string {

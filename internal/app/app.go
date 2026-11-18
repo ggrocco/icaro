@@ -111,7 +111,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	// The workflow engine is attached by the "workflows" wirer
 	// (internal/app/workflows.go).
 	a.Service = service.New(service.Options{Store: st, Key: key, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Agents: AgentOptions(cfg),
-		MaxCallDepth: cfg.Workflows.MaxCallDepth, MaxRunsPerRoot: cfg.Workflows.MaxRunsPerRoot, Log: log})
+		MaxCallDepth: cfg.Workflows.MaxCallDepth, MaxRunsPerRoot: cfg.Workflows.MaxRunsPerRoot, PublicURL: cfg.Daemon.PublicURL, Log: log})
 	a.API = api.New(a.Service, log)
 
 	a.checks = append(a.checks, BaseChecks(cfg, st, eng, nil)...)
