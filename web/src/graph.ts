@@ -2,7 +2,7 @@
 export interface GraphStep {
   id: string;
   needs?: string[];
-  kind: "image" | "uses" | "approval" | "wait" | "agent" | "call";
+  kind: "image" | "uses" | "approval" | "wait" | "agent" | "call" | "await";
   label: string;
 }
 
@@ -30,7 +30,9 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
               ? "agent"
               : s.call !== undefined
                 ? "call"
-                : "image",
+                : s.await !== undefined
+                  ? "await"
+                  : "image",
       label:
         s.approval !== undefined
           ? "approval"
@@ -40,7 +42,9 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
               ? agentLabel(s.agent)
               : s.call !== undefined
                 ? callLabel(s.call)
-                : String(s.uses ?? s.image ?? ""),
+                : s.await !== undefined
+                  ? `await ${awaitLabel(s.await)}`
+                  : String(s.uses ?? s.image ?? ""),
     }));
 }
 
@@ -54,6 +58,11 @@ export function callLabel(c: unknown): string {
 function agentLabel(a: unknown): string {
   const p = a && typeof a === "object" ? (a as { profile?: unknown }).profile : undefined;
   return typeof p === "string" && p ? `agent · ${p}` : "agent";
+}
+
+function awaitLabel(a: unknown): string {
+  const { integration, event } = (a ?? {}) as { integration?: unknown; event?: unknown };
+  return [integration, event].filter((x) => typeof x === "string" && x).join(".");
 }
 
 export function layout(steps: GraphStep[], colWidth = 240, rowHeight = 96): Placed[] {

@@ -237,7 +237,12 @@ export function Deliveries() {
                   {(d.verify_error || d.error) && <div className="small muted">{d.verify_error || d.error}</div>}
                 </td>
                 <td className="small">
-                  {d.results.length === 0 && <span className="muted">no workflow matched</span>}
+                  {d.results.length === 0 && !d.events.some((e) => e.resumed?.length) && <span className="muted">no workflow matched</span>}
+                  {d.events.flatMap((e) => e.resumed ?? []).map((r) => (
+                    <div key={`${r.run_id}/${r.step}`}>
+                      {r.workflow}: resumed <a href={href("runs", r.run_id)}>{r.step}</a>
+                    </div>
+                  ))}
                   {d.results.map((m, i) => (
                     <div key={i}>
                       {m.workflow}:{" "}

@@ -102,6 +102,7 @@ export interface StepInfo {
   approval?: ApprovalInfo;
   agent?: AgentStepInfo;
   call?: CallStepInfo;
+  await?: AwaitInfo;
 }
 
 // A call step (ADR 0038): the workflow it calls and the child run of its
@@ -131,6 +132,20 @@ export interface AgentProfileInfo {
   agent: string;
   default?: boolean;
   params: { name: string; type: "string" | "int" | "bool" | "enum"; enum?: string[]; min?: number; flag: string; description?: string }[];
+}
+
+// An await step that started (ADR 0032): the event it waits for, the key
+// rendered when it started, its deadline, and how it ended. delivery_id
+// is "manual:<id>" when a person resolved it.
+export interface AwaitInfo {
+  integration: string;
+  event: string;
+  key: string;
+  state: "waiting" | "matched" | "expired" | "cancelled";
+  deadline: string;
+  delivery_id?: string;
+  actor?: string;
+  decided_at?: string;
 }
 
 // The request and decision of an approval step. decision is empty while it
@@ -221,7 +236,7 @@ export interface Delivery {
   verify_error?: string;
   received_at: string;
   redelivery_of?: string;
-  events: { event: string; payload?: Record<string, unknown>; error?: string }[];
+  events: { event: string; payload?: Record<string, unknown>; error?: string; resumed?: { workflow: string; run_id: string; step: string }[] }[];
   results: { workflow: string; event: string; run_id?: string; skipped?: string; deduplicated?: boolean; filtered?: boolean; error?: string }[];
   headers?: Record<string, string[]>;
   body?: string;
@@ -319,6 +334,9 @@ export const api = {
   // Approve or reject a waiting approval step; the caller is the approver.
   decide: (id: string, step: string, approve: boolean, comment: string) =>
     request<RunInfo>("POST", `/api/v1/runs/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/${approve ? "approve" : "reject"}`, { comment }),
+  // Resolve a waiting await step by hand with an event payload.
+  deliver: (id: string, step: string, payload: Record<string, unknown>) =>
+    request<RunInfo>("POST", `/api/v1/runs/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/deliver`, { payload }),
   stepLogs: (id: string, step: string) => request<string>("GET", `/api/v1/runs/${id}/steps/${encodeURIComponent(step)}/logs`, undefined, true),
 
   integrations: () => request<{ integrations: IntegrationInfo[] }>("GET", "/api/v1/integrations").then((r) => r.integrations ?? []),

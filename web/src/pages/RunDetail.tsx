@@ -140,6 +140,11 @@ export function RunDetail({ id }: { id: string }) {
         .map((s) => (
           <ApprovalRequest key={s.id} runId={run.id} step={s} onDecided={(r) => apply(r)} />
         ))}
+      {(run.steps ?? [])
+        .filter((s) => s.status === "waiting" && s.await?.state === "waiting")
+        .map((s) => (
+          <AwaitRequest key={s.id} runId={run.id} step={s} onDelivered={(r) => apply(r)} />
+        ))}
       {spec ? <RunGraph spec={spec} steps={run.steps} selected={selected} onSelect={setSelected} /> : <Loading what="graph" />}
       <div className="split">
         <div className="pane">
@@ -166,6 +171,7 @@ export function RunDetail({ id }: { id: string }) {
               {step.approval && <ApprovalFacts approval={step.approval} />}
               {step.agent && <AgentFacts agent={step.agent} />}
               {step.call && <CallFacts call={step.call} />}
+              {step.await && <AwaitFacts await={step.await} />}
               <dl className="kv">
                 <dt>Attempts</dt>
                 <dd>{step.attempt}</dd>
@@ -232,6 +238,100 @@ function ApprovalRequest({ runId, step, onDecided }: { runId: string; step: Step
         </button>
       </div>
     </div>
+  );
+}
+
+// AwaitRequest shows what a waiting await step waits for and lets a
+// person resolve it with a payload, for a daemon its provider cannot
+// reach. The daemon checks the fields against the event's declaration.
+function AwaitRequest({ runId, step, onDelivered }: { runId: string; step: StepInfo; onDelivered: (r: RunInfo) => void }) {
+  const [payload, setPayload] = useState("{}");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | undefined>();
+  const a = step.await!;
+  const deliver = () => {
+    let body: unknown;
+    try {
+      body = JSON.parse(payload);
+    } catch (e) {
+      setError(new Error(`The payload is not JSON: ${(e as Error).message}`));
+      return;
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      setError(new Error("The payload must be a JSON object of the event's fields."));
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    api
+      .deliver(runId, step.id, body as Record<string, unknown>)
+      .then(onDelivered)
+      .catch(setError)
+      .finally(() => setBusy(false));
+  };
+  const label = `await-${step.id}`;
+  return (
+    <div className="notice warn approval" role="region" aria-labelledby={label}>
+      <h2 className="h3" id={label}>
+        Waiting for <code>{`${a.integration}.${a.event}`}</code>: <code>{step.id}</code>
+      </h2>
+      <p>
+        Key <code>{a.key}</code>
+      </p>
+      <p className="muted small">
+        Fails if no matching event arrives by <When ts={a.deadline} />
+      </p>
+      <details>
+        <summary>Resolve by hand</summary>
+        <label className="field">
+          <span className="label">Event payload (JSON)</span>
+          <textarea rows={4} className="code" spellCheck={false} value={payload} onChange={(e) => setPayload(e.target.value)} />
+        </label>
+        {error && <ErrorBox error={error} />}
+        <div className="actions">
+          <button className="primary" disabled={busy} onClick={deliver}>
+            Deliver
+          </button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function AwaitFacts({ await: a }: { await: NonNullable<StepInfo["await"]> }) {
+  return (
+    <dl className="kv">
+      <dt>Awaits</dt>
+      <dd>
+        <code>{`${a.integration}.${a.event}`}</code>
+      </dd>
+      <dt>Key</dt>
+      <dd>
+        <code>{a.key}</code>
+      </dd>
+      <dt>State</dt>
+      <dd>
+        <Status status={a.state} />
+      </dd>
+      <dt>Deadline</dt>
+      <dd>
+        <When ts={a.deadline} />
+      </dd>
+      {a.delivery_id && (
+        <>
+          <dt>Delivery</dt>
+          <dd>
+            <code>{a.delivery_id}</code>
+          </dd>
+        </>
+      )}
+      {a.actor && (
+        <>
+          <dt>By</dt>
+          <dd>{a.actor}</dd>
+        </>
+      )}
+    </dl>
   );
 }
 
