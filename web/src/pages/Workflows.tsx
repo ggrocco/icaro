@@ -1,4 +1,5 @@
 import { api, type HostWorkflow, type TriggerSpec } from "../api";
+import { NewChatButton } from "./Assistant";
 import { Empty, ErrorBox, Loading, PageHeader, Status, When, useLoad } from "../components/common";
 import { Icon } from "../components/icons";
 import { href } from "../router";
@@ -19,6 +20,7 @@ export function Workflows() {
         title="Workflows"
         subtitle="Pipelines of container, agent and approval steps, started by hand, on a schedule or by a webhook."
       >
+        <NewChatButton label="New with assistant" />
         <a className="button" href={href("new")}>
           <Icon name="plus" />
           New workflow

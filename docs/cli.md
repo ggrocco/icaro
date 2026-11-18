@@ -4,6 +4,131 @@
 
 Every command also accepts the global flags `--config` (config file, default `$ICARO_CONFIG` or `~/.icaro/config/icaro.yaml`) and `--home` (state root, default `$ICARO_HOME` or `~/.icaro`).
 
+## `icaro assist`
+
+The workflow assistant runs your profile's own agent CLI (claude or codex) under its login, so a subscription works without an API key. It reads the schema, integrations and runs, and proposes drafts; you apply them. Runs it asks for wait for your approval. See docs/assistant.md.
+
+```text
+      --json   print JSON
+```
+
+Subcommands: `approve` `cancel` `decline` `distill` `forget` `list` `memories` `new` `rm` `send` `show` `stats`
+
+## `icaro assist approve`
+
+Approve a run the assistant asked for
+
+```text
+icaro assist approve CHAT APPROVAL
+```
+
+## `icaro assist cancel`
+
+Stop the chat's running turn and drop its queued ones
+
+```text
+icaro assist cancel CHAT
+```
+
+## `icaro assist decline`
+
+Decline a run the assistant asked for
+
+```text
+icaro assist decline CHAT APPROVAL
+```
+
+## `icaro assist distill`
+
+Turn a chat into memories now (it also happens when the chat goes idle)
+
+```text
+icaro assist distill CHAT
+```
+
+## `icaro assist forget`
+
+Remove one of a chat's memories for good
+
+```text
+icaro assist forget CHAT MEMORY [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
+```
+
+## `icaro assist list`
+
+List chats
+
+```text
+icaro assist list
+```
+
+## `icaro assist memories`
+
+Show the notes a chat started with and the memories it left
+
+```text
+icaro assist memories CHAT
+```
+
+## `icaro assist new`
+
+Start a chat (optionally about a saved workflow or a draft file)
+
+```text
+icaro assist new [flags]
+```
+
+```text
+  -f, --file string         start from this draft (a path, or - for stdin)
+      --project-id string   scope the assistant's memory reads to this project
+      --title string        the chat's title (default: the first message)
+      --workflow string     start from this saved workflow
+```
+
+## `icaro assist rm`
+
+Delete a chat, its container and its log
+
+```text
+icaro assist rm CHAT [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
+```
+
+## `icaro assist send`
+
+Send a message and print the reply as it streams
+
+```text
+icaro assist send CHAT MESSAGE... [flags]
+```
+
+```text
+      --no-wait   queue the message and return
+```
+
+## `icaro assist show`
+
+Show a chat's messages, draft and pending approvals
+
+```text
+icaro assist show CHAT
+```
+
+## `icaro assist stats`
+
+Compare chats that started with memory and chats that did not
+
+```text
+icaro assist stats
+```
+
 ## `icaro claude`
 
 Run claude in an isolated session for the current repository
@@ -350,7 +475,7 @@ MCP-capable agents use it through `icaro mcp`; these commands are the HTTP/CLI f
       --project-id string   project id (overrides --project)
 ```
 
-Subcommands: `handoff` `import` `ingest` `project` `query` `show` `write`
+Subcommands: `handoff` `import` `ingest` `model` `project` `query` `show` `write`
 
 ## `icaro memory handoff`
 
@@ -404,6 +529,40 @@ icaro memory ingest [PATH] [flags]
 
 ```text
       --commits int   recent commits to index (default 200, -1 for none)
+```
+
+## `icaro memory model`
+
+Without a model, assistant chats leave exact memories only (validator lessons, integration facts, run and save outcomes). A pulled model also summarizes each chat's intent, constraints and where it left off. It runs on the CPU in a container with no network; GPU users can set memory.distill.endpoint to their own llama-server or Ollama instead.
+
+Subcommands: `list` `pull` `rm`
+
+## `icaro memory model list`
+
+List the models you can pull, and which are pulled
+
+```text
+icaro memory model list
+```
+
+## `icaro memory model pull`
+
+Download a model (default: the one for this machine's tier) and check its pinned SHA-256
+
+```text
+icaro memory model pull [NAME]
+```
+
+## `icaro memory model rm`
+
+Delete a pulled model
+
+```text
+icaro memory model rm NAME [flags]
+```
+
+```text
+      --yes   do not ask for confirmation
 ```
 
 ## `icaro memory project`

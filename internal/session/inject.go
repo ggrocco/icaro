@@ -67,7 +67,7 @@ func (m *Manager) Authorize(ctx context.Context, profile, token string) (string,
 	if err != nil {
 		return "", err
 	}
-	if row.Kind != KindAgent || row.Profile != profile {
+	if !interactive(row.Kind) || row.Profile != profile {
 		return "", refused("session %s is not an agent session of profile %s", id, profile)
 	}
 	if row.Status != StatusRunning {

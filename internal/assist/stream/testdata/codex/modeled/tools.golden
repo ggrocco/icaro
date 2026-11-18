@@ -1,0 +1,70 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "0199a213-81c0-7800-8aa1-bbab2a035a53"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "item_1",
+      "server": "icaro",
+      "tool": "list_integrations",
+      "args": {}
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "item_1",
+      "server": "icaro",
+      "tool": "list_integrations",
+      "result": "{\"integrations\":[{\"name\":\"slack\"}]}"
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "item_2",
+      "server": "icaro",
+      "tool": "propose_workflow",
+      "args": {
+        "yaml": "name: x"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "item_2",
+      "server": "icaro",
+      "tool": "propose_workflow",
+      "result": "the draft has issues",
+      "is_error": true
+    },
+    {
+      "kind": "tool_call",
+      "tool_id": "item_3",
+      "tool": "shell",
+      "args": {
+        "command": "bash -lc ls"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "tool_id": "item_3",
+      "tool": "shell",
+      "result": "permission denied",
+      "is_error": true
+    },
+    {
+      "kind": "text",
+      "text": "Slack is installed; the draft needs a channel."
+    },
+    {
+      "kind": "usage",
+      "usage": {
+        "input": 9000,
+        "output": 420
+      }
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "done"
+}

@@ -1,0 +1,49 @@
+#!/bin/sh
+# A stand-in for Claude Code's headless mode (ADR 0035), for end-to-end
+# tests: it reads the prompt from stdin, calls the assistant's MCP tools
+# for real through the session's socket (icaro mcp --socket), and prints
+# a stream-json transcript like `claude -p --output-format stream-json`.
+# A prompt containing "run hello" asks to run the saved hello workflow
+# (approval-gated); anything else proposes a hello workflow.
+set -eu
+prompt=$(cat)
+sid=e2e-session
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id|--resume) sid=$2; shift ;;
+  esac
+  shift
+done
+
+mcp() {
+  printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fake-claude","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    "$1" | icaro mcp --socket /icaro/mcp.sock | tail -n 1
+}
+
+echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$sid\",\"mcp_servers\":[{\"name\":\"icaro\",\"status\":\"connected\"}]}"
+case "$prompt" in
+  *"run hello"*)
+    echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Asking you to approve a run. "},{"type":"tool_use","id":"toolu_run","name":"mcp__icaro__run_workflow","input":{"name":"hello","trigger":{"who":"e2e"}}}]}}'
+    out=$(mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_workflow","arguments":{"name":"hello","trigger":{"who":"e2e"}}}}')
+    status=declined
+    case "$out" in *'\"status\": \"started\"'*) status=started ;; esac
+    echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_run","content":"run_workflow answered"}]}}'
+    echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"The run was $status.\"}]}}"
+    ;;
+  *)
+    draft=$(mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_draft","arguments":{}}}')
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_draft","name":"mcp__icaro__get_draft","input":{}}]}}'
+    echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_draft","content":"read the draft"}]}}'
+    out=$(mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"propose_workflow","arguments":{"yaml":"version: 1\nname: hello\ndescription: Proposed by the assistant\ntriggers:\n  - type: manual\nsteps:\n  - id: greet\n    image: mirror.gcr.io/library/busybox:1.36@sha256:0000000000000000000000000000000000000000000000000000000000000000\n    command: echo hello\n","summary":"a hello workflow"}}}')
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_prop","name":"mcp__icaro__propose_workflow","input":{"summary":"a hello workflow"}}]}}'
+    case "$out" in
+      *'\"valid\": true'*) note="valid" ;;
+      *) note="with issues" ;;
+    esac
+    echo "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_prop\",\"content\":\"proposed ($note)\"}]}}"
+    echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"I proposed a hello workflow ($note). Accept it in the editor, then save.\"}]}}"
+    ;;
+esac
+echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","usage":{"input_tokens":120,"output_tokens":30}}'

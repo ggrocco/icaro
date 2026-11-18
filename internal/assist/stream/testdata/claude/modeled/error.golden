@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "c0ffee"
+    },
+    {
+      "kind": "error",
+      "text": "error max turns"
+    }
+  ],
+  "dropped": 2,
+  "terminal": "error"
+}

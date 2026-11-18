@@ -1,6 +1,6 @@
 # ADR 0035 — A workflow assistant chat that drives the user's own agent CLI
 
-**Status:** Proposed. Adds a third session kind, `assist`, and a chat surface to the web UI and the desktop app. Lifts part of the [deferred design](../02-decisions-risks.md#deferred-designs) "in-container MCP access" (the `author` level, for assistant sessions only, with human-applied writes). Builds on [ADR 0005](0005-persistent-home-egress.md) (profile homes), [ADR 0019](0019-memory-mcp-transport.md) (per-session MCP socket), [ADR 0028](0028-credential-injection.md) (`inject` profiles) and [architecture §10](../01-architecture.md#10-agent-interface) (authoring tools). Spike S11 gates it.
+**Status:** Accepted. The open questions are settled below. Spike S11 is still open: it needs real subscription logins, so Phase 14 is built against stream fixtures modeled on the CLIs' documented formats, and S11 must pass on real logins before the assistant is released. Adds a third session kind, `assist`, and a chat surface to the web UI and the desktop app. Lifts part of the [deferred design](../02-decisions-risks.md#deferred-designs) "in-container MCP access" (the `author` level, for assistant sessions only, with human-applied writes). Builds on [ADR 0005](0005-persistent-home-egress.md) (profile homes), [ADR 0019](0019-memory-mcp-transport.md) (per-session MCP socket), [ADR 0028](0028-credential-injection.md) (`inject` profiles) and [architecture §10](../01-architecture.md#10-agent-interface) (authoring tools).
 
 ## Context
 
@@ -107,14 +107,12 @@ The chat is opened from the editor, or standalone from a **New with assistant** 
 - **Embed an interactive terminal (PTY) in the UI.** Works for every CLI with no adapter, but gives no structured events: no tool calls to render, no draft to diff, no approval cards. It may still come later for `icaro login` in the desktop app.
 - **Let the assistant write workflows directly**, as the host MCP server does. Simpler, and the version history allows a revert. Rejected for the injection reason above; the draft costs one click.
 
-## Open questions
+## Settled questions
 
-These need an answer before Phase 14 starts; a change is made here first.
-
-1. Should `run_workflow` be served at all in v1, or should a run start only from the editor's **Run** button?
-2. Is per-turn start-up time acceptable (S11), or is a persistent CLI process needed from the start?
-3. Does a chat keep its container between turns (faster, one idle container per open chat), or start one per turn (no idle containers, slower)?
-4. Should chats be listed per project, or globally with an optional project?
+1. **`run_workflow` is served**, behind the approval card described above.
+2. **One process per turn** until S11 measures the start-up time on real logins; a persistent process stays the fallback behind the same adapter.
+3. **A chat keeps its container between turns**, stopped after `assistant.idle_timeout`.
+4. **Chats are listed globally**, each with an optional project that scopes memory reads.
 
 ## Consequences
 

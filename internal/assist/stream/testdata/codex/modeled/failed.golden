@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "t1"
+    },
+    {
+      "kind": "error",
+      "text": "stream disconnected before completion"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "error"
+}

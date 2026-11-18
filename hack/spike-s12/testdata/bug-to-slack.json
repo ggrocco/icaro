@@ -1,0 +1,61 @@
+{
+ "name": "bug-to-slack",
+ "workflow": "bug-to-slack",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "When a GitHub issue gets the bug label, post it to Slack."
+  },
+  {
+   "role": "assistant",
+   "text": "I can do that with the github integration's issue event and the slack post_message action. Which channel should it go to?"
+  },
+  {
+   "role": "user",
+   "text": "#bugs. And only for the icaro repo, not the others."
+  },
+  {
+   "role": "assistant",
+   "text": "Got it. I proposed bug-to-slack: trigger github.issues with action labeled, a when on label name == bug and repository == acme/icaro, and a slack.post_message step to #bugs. The validator passed."
+  },
+  {
+   "role": "user",
+   "text": "Can you include the issue title and a link in the message?"
+  },
+  {
+   "role": "assistant",
+   "text": "Done: the text is now `${{ trigger.issue.title }} ${{ trigger.issue.html_url }}`. Validated clean."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "slack"
+   ],
+   [
+    "bug"
+   ]
+  ],
+  "constraints": [
+   [
+    "#bugs"
+   ],
+   [
+    "icaro|repo"
+   ]
+  ],
+  "preferences": [
+   [
+    "title|link|url"
+   ]
+  ],
+  "rejected": [],
+  "open": [],
+  "resume": [
+   [
+    "bug-to-slack|slack|proposed|validated"
+   ]
+  ]
+ }
+}

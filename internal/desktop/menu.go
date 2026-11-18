@@ -65,6 +65,8 @@ func Menu(s State, p Prefs) []Item {
 	}
 	m = append(m, Item{Label: "Open Ícaro", Action: Action{Kind: ActOpenUI}, Disabled: !s.Reachable})
 	if s.Reachable {
+		// The workflow assistant's chats (ADR 0035).
+		m = append(m, Item{Label: "Ask the assistant", Action: Action{Kind: ActOpenUI, Arg: "assistant"}})
 		m = append(m, sep())
 		m = append(m, runsSection(s)...)
 		m = append(m, sep())

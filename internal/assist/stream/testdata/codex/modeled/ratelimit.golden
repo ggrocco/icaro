@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "t1"
+    },
+    {
+      "kind": "rate_limited",
+      "text": "You've hit your usage limit. Try again later."
+    }
+  ],
+  "dropped": 0,
+  "terminal": "rate_limited"
+}

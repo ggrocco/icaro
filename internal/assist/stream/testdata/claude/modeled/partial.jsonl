@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"9a1b"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo."}}}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Hello."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Hello.","usage":{"input_tokens":3,"output_tokens":2}}

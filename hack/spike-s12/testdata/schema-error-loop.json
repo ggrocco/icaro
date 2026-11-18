@@ -1,0 +1,54 @@
+{
+ "name": "schema-error-loop",
+ "workflow": "issue-labeler",
+ "note": "",
+ "turns": [
+  {
+   "role": "user",
+   "text": "Label new issues automatically by area: web, cli, daemon."
+  },
+  {
+   "role": "assistant",
+   "text": "Proposed issue-labeler. The validator reported: /steps/1/with: unknown field 'label'. Did you mean 'labels'?"
+  },
+  {
+   "role": "assistant",
+   "text": "Fixed it to `labels: [${{ steps.classify.outputs.area }}]`. The validator now reports /steps/0/image: images must be pinned by @sha256 digest."
+  },
+  {
+   "role": "assistant",
+   "text": "Pinned the image by digest. Validation passed."
+  },
+  {
+   "role": "user",
+   "text": "Good. Only label, never close issues."
+  },
+  {
+   "role": "assistant",
+   "text": "It only calls github.add_labels; there is no close step."
+  }
+ ],
+ "expect": {
+  "intent": [
+   [
+    "label"
+   ]
+  ],
+  "constraints": [
+   [
+    "never close|not close|close"
+   ],
+   [
+    "web|cli|daemon"
+   ]
+  ],
+  "preferences": [],
+  "rejected": [],
+  "open": [],
+  "resume": [
+   [
+    "validat|pass|label"
+   ]
+  ]
+ }
+}

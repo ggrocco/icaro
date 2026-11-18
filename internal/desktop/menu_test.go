@@ -48,7 +48,7 @@ func TestMenuRunsPreviewsUsage(t *testing.T) {
 	m := Menu(s, Prefs{})
 	got := labels(m)
 	for _, want := range []string{
-		"Ícaro is running; Open Ícaro; ---",
+		"Ícaro is running; Open Ícaro; Ask the assistant; ---",
 		"● fix-ci · running{Open run; Cancel run}",
 		"◐ ship · waiting{Open run; Cancel run}; ○ triage · queued{Open run; Cancel run}",
 		"Recent failures{✕ deploy — step build: exit status 1; ✕ lint}",
@@ -67,6 +67,7 @@ func TestMenuRunsPreviewsUsage(t *testing.T) {
 		"triage…":                         {Kind: ActOpenUI, Arg: "workflows/triage"},
 		"● feat-x · running":              {Kind: ActOpenURL, Arg: "http://feat-x.localhost"},
 		"Today: 1.2M tokens · $3.40 est.": {Kind: ActOpenUI, Arg: "usage"},
+		"Ask the assistant":               {Kind: ActOpenUI, Arg: "assistant"},
 	}
 	for label, want := range cases {
 		if it, ok := find(m, label); !ok || it.Action != want {

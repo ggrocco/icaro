@@ -1,6 +1,6 @@
 # ADR 0036 — A small local model distills assistant chats into memory
 
-**Status:** Proposed. Builds on [ADR 0035](0035-workflow-assistant-chat.md) (assistant chats), [ADR 0004](0004-memory-mcp.md) and [ADR 0020](0020-portable-memory-search.md) (memory and BM25 search). Adds an optional model runtime the daemon manages; no Go dependency. Spike S12 gates it.
+**Status:** Accepted. The open questions are settled below. Spike S12 has run in part: the CPU tier passed on the build machine ([results](#spike-s12-cpu-tier)), while the Apple Silicon and GPU tiers and the person-graded 30-chat set are still open. Builds on [ADR 0035](0035-workflow-assistant-chat.md) (assistant chats), [ADR 0004](0004-memory-mcp.md) and [ADR 0020](0020-portable-memory-search.md) (memory and BM25 search). Adds an optional model runtime the daemon manages; no Go dependency.
 
 ## Context
 
@@ -51,10 +51,13 @@ Every memory either stage writes carries `origin: distill:<chat>`, the chat and 
 
 ### The runtime: llama.cpp, managed or bring-your-own
 
-- **Managed (default when enabled).** The daemon runs llama.cpp's `llama-server` as a helper container, using the upstream image pinned by digest. It runs under the helper baseline, on an internal network with **no egress**, with a CPU quota (`memory.distill.cpus`, default 2) and low priority, so a running distillation never competes with agent sessions. It is started for a batch of jobs and stopped after it. The daemon talks to it over HTTP (OpenAI-compatible API) with the standard library; there is no cgo and no new Go module.
+- **Managed (default when enabled).** The daemon runs llama.cpp's `llama-server` as a helper container, using the upstream image pinned by digest (`ghcr.io/ggml-org/llama.cpp:server`).
+  - It runs under the helper baseline with **no network at all** (`--network none`). It listens on a Unix socket in a directory only it and the daemon share, and it mounts the models directory read-only.
+  - It has a CPU quota (`memory.distill.cpus`, default 2) and a memory limit sized from the model, so a running distillation never competes with agent sessions.
+  - It is started for a batch of jobs and stopped after it. The daemon talks to it over HTTP on that socket (OpenAI-compatible API) with the standard library; there is no cgo and no new Go module.
 - **Bring your own.** `memory.distill.endpoint` points at a llama-server or Ollama the user already runs on the host. This is the fast path on Apple Silicon, where containers in Docker Desktop cannot use the GPU but a host process can use Metal.
-- **Jobs.** Distillation is a queued background job, one at a time, never on a chat's code path. A transcript longer than the model's context is cut into chunks, each chunk is summarized, and the summaries are merged in a second pass. A failed job is recorded and retried once; it never blocks a chat.
-- **Models** are downloaded only on opt-in (`icaro memory model pull [<name>]`), pinned by SHA-256, stored under `~/.icaro/models/`, and listed by `icaro doctor`.
+- **Jobs.** Distillation is a queued background job, one at a time, never on a chat's code path. A transcript longer than the model's context is cut into chunks, each chunk is summarized, and the summaries are merged in a second pass. The managed server has a 12k-token context and a chunk holds up to 32,000 characters, so a 6,000-token chat is a single call; S12 found one call both faster and better than a merge. A failed job is recorded and retried once; it never blocks a chat.
+- **Models** are downloaded only on opt-in (`icaro memory model pull [<name>]`), pinned by SHA-256, stored under `~/.icaro/models/`, and listed by `icaro doctor`. There are no official GGUF builds of the Qwen3.5 small models; the catalog pins the community conversions it was checked against (Unsloth's Qwen3.5 and Gemma 4, IBM's own Granite), each Apache 2.0 like its base model, by repository, file and SHA-256.
 
 ### Model tiers
 
@@ -72,7 +75,7 @@ Candidates evaluated and not chosen as defaults:
 - **LFM2-1.2B-Extract / LFM2.5** (Liquid AI) is built for this kind of extraction and is fast on CPU. However, its LFM Open License ends commercial rights at $10M of annual revenue, so it cannot be a default for a tool anyone may use at work. A user may still pick it by name.
 - **Llama 3.2 1B/3B** is capable, but under the Llama community license; the Apache-licensed options cover the same sizes.
 
-The sizes come from vendor documentation and third-party write-ups, not from Ícaro's own measurements. Spike S12 replaces them with measured numbers and may change the defaults.
+The sizes come from vendor documentation and third-party write-ups. Spike S12 measured the CPU and minimal defaults (below) and kept them; the GPU tiers are not measured yet.
 
 ### Using the memory in the next chat
 
@@ -94,22 +97,45 @@ For each chat, the daemon records:
 
 Embeddings stay out, as ADR 0020 requires, until these numbers show that BM25 retrieval misses relevant memories. If they do, the candidates for local CPU embeddings are EmbeddingGemma-300M (smaller, faster) and Qwen3-Embedding-0.6B (Apache 2.0, stronger on benchmarks). That would be a separate ADR.
 
+### Spike S12: CPU tier
+
+The full results, the method and their caveats are in [`hack/spike-s12/RESULTS.md`](../../../hack/spike-s12/RESULTS.md). They were measured with the managed runtime's container settings, held to 2 cores of a 2.1 GHz Xeon VM, on 12 written chats of 70 to 6,023 tokens:
+
+| Model (Q4_K_M) | Prompt / generation | 6,023-token chat | Fields correct (strict / lenient / reviewed) | Peak RAM |
+|---|---|---|---|---|
+| Qwen3.5-2B, 12k context | 109 / 7.4 tok/s | 103 s, one call | 74% / 94% / 88% | 2.4 GiB of its 3.2 GiB limit |
+| Qwen3.5-0.8B, 8k context | 207 / 15.4 tok/s | 92 s, two parts and a merge | 64% / 81% / — | about 2 GiB |
+
+Every output parsed, and neither model invented a secret, host or workflow name. The CPU-tier default passes the bar on this machine, and the defaults stand: Qwen3.5-2B for the CPU tier, Qwen3.5-0.8B for the minimal tier.
+
+The spike changed three things. The parser drops placeholder items such as "None". The prompt now defines each field more tightly. The context grew to 12k so that a 6,000-token chat is one call.
+
+The weakest field is `rejected`: in 3 of 12 chats the model reported a rejection the person never made. Those memories are `confidence: model`, they expire, and the preamble frames them as data.
+
+Still open before release:
+
+- the person-graded 30-chat set;
+- an 8 GB laptop;
+- Apple Silicon through a host endpoint;
+- a 6 GB GPU;
+- Granite 4.0 Nano, Gemma 4 and the Q8_0 builds.
+
 ## Alternatives considered
 
 - **Ask the agent CLI to summarize at the end of each chat.** It writes the best summaries, but it spends the subscription's usage window on every chat and adds a turn the person did not ask for. It stays possible: the person can say "remember this", and the assistant writes it through the memory tools.
 - **Embed a model runtime in the daemon** (llama.cpp through cgo, or a pure-Go runtime). That would mean one process and no container, but cgo breaks the pure-Go build, and the pure-Go runtimes are much slower on CPU. Rejected under the [dependency policy](../05-engineering.md#dependency-policy).
 - **A model for everything, no deterministic stage.** It is simpler to describe, but the structured facts are exact without a model, and a small model would only make them less reliable.
 
-## Open questions
+## Settled questions
 
-1. Should stage 2 be on by default once a model is pulled, or opt-in per project?
-2. Do distilled memories expire (a TTL), or do they stay until a person removes them?
-3. Should the managed runtime use a GPU when Docker exposes one (the CUDA or Vulkan image), or should GPU users always bring their own endpoint?
+1. **Stage 2 runs for every chat once a model is available.** Pulling a model (or setting `memory.distill.endpoint`) is the opt-in; `memory.distill.enabled: false` turns stage 2 off.
+2. **Model-written memories expire** after `memory.distill.ttl` (default 90 days). Stage 1's exact facts stay until a person removes them.
+3. **The managed runtime is CPU only.** GPU and Apple Silicon users point `memory.distill.endpoint` at their own llama-server or Ollama.
 
 ## Consequences
 
 - Every chat leaves structured memories at no cost, even without a model, and the next chat on the same workflow starts with them.
-- With a model pulled, a 2B model on a 4-core laptop CPU can summarize a typical chat in the background in about a minute or two (an estimate S12 must confirm). Chats never wait for it.
+- With a model pulled, the 2B model on 2 CPU cores summarizes a short chat in 10–45 seconds and a 6,000-token chat in under 2 minutes (S12, CPU tier). Chats never wait for it.
 - Nothing leaves the machine: the managed runtime has no egress, and the transcript it reads is already secret-redacted.
 - A distilled memory can be wrong. Provenance, `confidence: model` and the measurements are how a person finds out and removes it.
 - A run log can carry a prompt injection. Stage 2 never reads run logs, and every memory is framed as data in the preamble; a poisoned memory can still mislead a later chat, which the draft and approval gates of ADR 0035 contain.

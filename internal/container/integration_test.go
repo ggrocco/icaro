@@ -381,3 +381,61 @@ func TestAgentGitProtection(t *testing.T) {
 		t.Errorf("a write to a masked file reached the host: %q", b)
 	}
 }
+
+// TestEngineExec runs the assistant's exec path (ADR 0035) in a container
+// under the agent baseline: stdin in, stdout and stderr apart, the exit
+// code back, and a cancelled exec returning promptly.
+func TestEngineExec(t *testing.T) {
+	eng := engine(t)
+	ctx := context.Background()
+	if err := eng.EnsureImage(ctx, testImage); err != nil {
+		t.Fatal(err)
+	}
+	ws, home := t.TempDir(), t.TempDir()
+	_ = os.Chmod(ws, 0o777)
+	_ = os.Chmod(home, 0o777)
+	net := "icaro-it-exec-" + time.Now().Format("150405")
+	if err := eng.CreateNetwork(ctx, net, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.RemoveNetwork(ctx, net) })
+	spec, ns := AgentSpec{
+		Name: net + "-c", Image: testImage, User: "1234:1234", Workspace: ws, Home: HomeMount{Dir: home},
+		Labels: map[string]string{LabelSession: "it-exec"}, Egress: Attachment{Network: net},
+		Limits: sandbox.Limits{MemoryBytes: 256 << 20, Pids: 64}, Runtime: testRuntime,
+	}.Build()
+	id, err := eng.CreateContainerOn(ctx, spec, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.RemoveContainer(ctx, id) })
+	if err := eng.StartContainer(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code, err := eng.Exec(ctx, id, docker.ExecOptions{
+		Cmd:  []string{"sh", "-c", `echo $$ > /home/icaro/.icaro-turn.pid && read line && echo "got:$line" && echo warn >&2 && pwd && exit 3`},
+		User: "1234:1234", Workdir: WorkspacePath, Env: []string{"A=b"}, Stdin: []byte("hello\n"),
+	}, &out, &errOut)
+	if err != nil || code != 3 || out.String() != "got:hello\n/workspace\n" || errOut.String() != "warn\n" {
+		t.Fatalf("code %d err %v stdout %q stderr %q", code, err, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".icaro-turn.pid")); err != nil {
+		t.Fatalf("the pid file is written in the home: %v", err)
+	}
+	// No stdin: the command sees EOF.
+	out.Reset()
+	if code, err := eng.Exec(ctx, id, docker.ExecOptions{Cmd: []string{"sh", "-c", "cat; echo done"}, User: "1234:1234"}, &out, io.Discard); err != nil || code != 0 || out.String() != "done\n" {
+		t.Fatalf("no stdin: %d %v %q", code, err, out.String())
+	}
+	// A cancelled exec returns at once (the process is the caller's to stop).
+	cctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := eng.Exec(cctx, id, docker.ExecOptions{Cmd: []string{"sleep", "30"}, User: "1234:1234"}, io.Discard, io.Discard); err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("cancelled exec: %v after %s", err, time.Since(start))
+	}
+	if _, err := eng.Exec(ctx, "no-such-container", docker.ExecOptions{Cmd: []string{"true"}}, io.Discard, io.Discard); err == nil {
+		t.Fatal("exec in a missing container")
+	}
+}

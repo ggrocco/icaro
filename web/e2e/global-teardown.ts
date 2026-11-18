@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 export default async function globalTeardown() {
@@ -8,5 +9,13 @@ export default async function globalTeardown() {
     if (pid) process.kill(pid, "SIGTERM");
   } catch {
     /* already gone */
+  }
+  // Assist containers outlive the daemon (a restart re-attaches to them);
+  // remove the ones of the e2e-only assistant profile.
+  try {
+    const ids = execFileSync("docker", ["ps", "-aq", "--filter", "label=icaro.profile=assistant-e2e"]).toString().split(/\s+/).filter(Boolean);
+    if (ids.length) execFileSync("docker", ["rm", "-f", ...ids]);
+  } catch {
+    /* no docker */
   }
 }

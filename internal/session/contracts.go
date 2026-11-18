@@ -27,7 +27,15 @@ const (
 	KindAgent = "agent"
 	// KindRun backs one workflow run (ADR 0010): its steps share the workspace.
 	KindRun = "run"
+	// KindAssist backs one workflow assistant chat (ADR 0035): a scratch
+	// workspace, an idle container, and the assistant's MCP tools.
+	KindAssist = "assist"
 )
+
+// interactive reports kinds whose container the session manager runs and
+// supervises (an agent's or an assistant's); a run session's containers
+// belong to the workflow engine.
+func interactive(kind string) bool { return kind == KindAgent || kind == KindAssist }
 
 // Session is the persisted parent row (ADR 0006).
 type Session struct {
@@ -83,6 +91,13 @@ type RunSessions interface {
 type PreviewHook interface {
 	WorktreeAdded(ctx context.Context, sessionID, projectID, worktreePath string) (previewInstanceID string, err error)
 	WorktreeRemoved(ctx context.Context, sessionID, worktreePath string) error
+}
+
+// AssistAttacher serves the workflow assistant's MCP tools for one assist
+// session on a Unix socket; the tools resolve the chat from the identity's
+// session id, server-side.
+type AssistAttacher interface {
+	ServeAssist(ctx context.Context, id Identity, socketPath string) (stop func(), err error)
 }
 
 // MemoryAttacher serves the memory MCP server for one session on a Unix

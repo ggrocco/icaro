@@ -70,7 +70,13 @@ type Options struct {
 	Images  ImageResolver
 	Preview PreviewHook    // optional
 	Memory  MemoryAttacher // optional
-	Log     *slog.Logger
+	// Assist serves the assistant's tools to assist sessions, and
+	// AssistPreamble is their system prompt (both optional).
+	Assist         AssistAttacher
+	AssistPreamble string
+	// Execer runs assistant turns in assist sessions (optional).
+	Execer Execer
+	Log    *slog.Logger
 	// UID/GID the containers run as; defaults to the daemon's user, or
 	// 1000:1000 when the daemon runs as root (containers are never root).
 	UID, GID int
@@ -131,6 +137,12 @@ func (m *Manager) SetPreviewHook(h PreviewHook) { m.o.Preview = h }
 // SetMemoryAttacher attaches the memory facet. Call before Run.
 func (m *Manager) SetMemoryAttacher(a MemoryAttacher) { m.o.Memory = a }
 
+// SetAssist attaches the assistant's tools and system prompt. Call before
+// Run.
+func (m *Manager) SetAssist(a AssistAttacher, preamble string) {
+	m.o.Assist, m.o.AssistPreamble = a, preamble
+}
+
 // Name implements app.Component.
 func (m *Manager) Name() string { return "sessions" }
 
@@ -183,18 +195,27 @@ func (m *Manager) nudge() {
 // fill claims queued agent sessions while below the cap. Only Run calls
 // it, so the count cannot race.
 func (m *Manager) fill(ctx context.Context) {
-	active, err := m.o.Store.CountSessions(ctx, KindAgent, StatusRunning, StatusCreating)
+	m.fillKind(ctx, KindAgent, m.MaxActive())
+	m.fillKind(ctx, KindAssist, m.AssistMaxActive())
+}
+
+// AssistMaxActive is the cap on running assist sessions.
+func (m *Manager) AssistMaxActive() int { return max(m.o.Config.Assistant.MaxActive, 1) }
+
+// fillKind claims queued sessions of kind while below its cap.
+func (m *Manager) fillKind(ctx context.Context, kind string, limit int) {
+	active, err := m.o.Store.CountSessions(ctx, kind, StatusRunning, StatusCreating)
 	if err != nil {
 		m.o.Log.Error("count sessions", "err", err)
 		return
 	}
-	queued, err := m.o.Store.ListSessions(ctx, store.SessionFilter{Kind: KindAgent, Statuses: []string{StatusQueued}})
+	queued, err := m.o.Store.ListSessions(ctx, store.SessionFilter{Kind: kind, Statuses: []string{StatusQueued}})
 	if err != nil {
 		m.o.Log.Error("list queued", "err", err)
 		return
 	}
 	for _, row := range queued {
-		if active >= m.MaxActive() {
+		if active >= limit {
 			return
 		}
 		if m.loginHeld(row.Profile) {
@@ -405,9 +426,11 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 	if err != nil {
 		return err
 	}
-	proj, err := m.o.Store.GetProject(ctx, row.ProjectID)
-	if err != nil {
-		return fmt.Errorf("project: %w", err)
+	var proj *store.Project
+	if row.Kind == KindAgent || row.ProjectID != "" {
+		if proj, err = m.o.Store.GetProject(ctx, row.ProjectID); err != nil {
+			return fmt.Errorf("project: %w", err)
+		}
 	}
 	image, err := m.o.Images.Resolve(ctx, prof.Image)
 	if err != nil {
@@ -444,18 +467,29 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		if err != nil {
 			return "", err
 		}
-		if err := agent.Configure(m.o.Homes.SessionFiles(row.Profile, row.ID), m.o.Memory != nil, cfg.Memory.Preamble); err != nil {
+		withMCP, preamble := m.o.Memory != nil, cfg.Memory.Preamble
+		if row.Kind == KindAssist {
+			withMCP, preamble = m.o.Assist != nil, m.o.AssistPreamble
+		}
+		if err := agent.Configure(m.o.Homes.SessionFiles(row.Profile, row.ID), withMCP, preamble); err != nil {
 			return "", fmt.Errorf("configure %s: %w", agent.Name, err)
 		}
 		m.chownForContainer(filepath.Join(m.layout.Home(row.Profile), "sessions", row.ID))
+		projName, gitDir := "", ""
+		if proj != nil {
+			projName = proj.Name
+			if row.Kind == KindAgent {
+				gitDir = filepath.Join(proj.RootPath, ".git")
+			}
+		}
 		spec, ns := container.AgentSpec{
 			Name:  "icaro-session-" + strings.ToLower(row.ID),
 			Image: image, User: m.User(),
-			Env: append([]string{"ICARO_SESSION=" + row.ID, "ICARO_PROJECT=" + proj.Name, "ICARO_PROFILE=" + row.Profile, "ICARO_BRANCH=" + row.Branch}, providerEnv...),
+			Env: append([]string{"ICARO_SESSION=" + row.ID, "ICARO_PROJECT=" + projName, "ICARO_PROFILE=" + row.Profile, "ICARO_BRANCH=" + row.Branch}, providerEnv...),
 			Labels: map[string]string{
 				container.LabelSession: row.ID, container.LabelKind: row.Kind, container.LabelProfile: row.Profile,
 			},
-			Workspace: row.WorktreePath, GitDir: filepath.Join(proj.RootPath, ".git"), Home: home, IcaroDir: icaroDir,
+			Workspace: row.WorktreePath, GitDir: gitDir, Home: home, IcaroDir: icaroDir,
 			Extra:   extra,
 			Limits:  sandbox.Limits{MemoryBytes: cfg.Limits.MemoryMB << 20, NanoCPUs: int64(cfg.Limits.CPUs * 1e9), Pids: cfg.Limits.Pids, NoFile: cfg.Limits.NoFile},
 			Runtime: prof.Runtime, Egress: att,
@@ -493,18 +527,10 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		return err
 	}
 	var mem *memServer
-	if m.o.Memory != nil {
-		sock := MemorySocketPath(m.layout, row.ID)
-		stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock)
-		if err != nil {
-			m.o.Log.Warn("memory MCP unavailable for session", "session", row.ID, "err", err)
-		} else {
-			// The socket is created after the session dir was handed to the
-			// container user; a root daemon must hand it over too, or the
-			// non-root agent cannot connect (0600).
-			m.chownForContainer(sock)
-			mem = m.mcp.put(row.ID, stop)
-		}
+	if stop, err := m.serveMCP(ctx, row, proj, agent.Name); err != nil {
+		m.o.Log.Warn("MCP unavailable for session", "session", row.ID, "kind", row.Kind, "err", err)
+	} else if stop != nil {
+		mem = m.mcp.put(row.ID, stop)
 	}
 	row.Status, row.Error = StatusRunning, ""
 	now := time.Now()
@@ -525,6 +551,31 @@ func (m *Manager) startAgent(ctx context.Context, row *store.SessionRow) error {
 		err = errStartAborted
 	}
 	return err
+}
+
+// serveMCP serves a session's MCP socket: memory for an agent session,
+// the assistant's tools for an assist session. It returns a nil stop when
+// the kind's facet is not wired.
+func (m *Manager) serveMCP(ctx context.Context, row *store.SessionRow, proj *store.Project, agent string) (func(), error) {
+	sock := MemorySocketPath(m.layout, row.ID)
+	var stop func()
+	var err error
+	switch {
+	case row.Kind == KindAgent && m.o.Memory != nil:
+		stop, err = m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent), sock)
+	case row.Kind == KindAssist && m.o.Assist != nil:
+		stop, err = m.o.Assist.ServeAssist(ctx, m.identity(row, proj, agent), sock)
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The socket is created after the session dir was handed to the
+	// container user; a root daemon must hand it over too, or the
+	// non-root agent cannot connect (0600).
+	m.chownForContainer(sock)
+	return stop, nil
 }
 
 // MemorySocketPath is the host path of a session's memory MCP socket. It
@@ -712,7 +763,7 @@ func (m *Manager) Start(ctx context.Context, id string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	if row.Kind != KindAgent {
+	if !interactive(row.Kind) {
 		return nil, invalid("run sessions are started by their workflow run")
 	}
 	if row.Status == StatusRunning || row.Status == StatusQueued || row.Status == StatusCreating {
@@ -762,6 +813,14 @@ func (m *Manager) Remove(ctx context.Context, id string, keepWorktree bool) erro
 	}
 	if err := m.o.Homes.Release(ctx, row.Profile, row.ID); err != nil {
 		return err
+	}
+	if row.Kind == KindAssist {
+		// The scratch workspace is the daemon's, never the user's work.
+		if dir := filepath.Dir(row.WorktreePath); strings.HasPrefix(dir, m.layout.Assist()+string(filepath.Separator)) {
+			_ = os.RemoveAll(dir)
+		}
+		_ = os.RemoveAll(m.icaroDir(id))
+		return m.o.Store.DeleteSession(ctx, id)
 	}
 	if m.o.Preview != nil && row.WorktreePath != "" {
 		if err := m.o.Preview.WorktreeRemoved(ctx, row.ID, row.WorktreePath); err != nil {
@@ -821,7 +880,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 			return err
 		}
 		reason := m.liveness(ctx, row)
-		if row.Status == StatusCreating && reason == "" && row.Kind == KindAgent {
+		if row.Status == StatusCreating && reason == "" && interactive(row.Kind) {
 			reason = "daemon stopped while the session was being created"
 		}
 		if reason != "" {
@@ -837,12 +896,10 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 			}
 		}
 		m.o.Log.Info("session re-attached", "session", row.ID, "container", row.ContainerID, "preview", preview)
-		if row.Kind == KindAgent && m.o.Memory != nil {
+		if interactive(row.Kind) {
 			proj, _ := m.o.Store.GetProject(ctx, row.ProjectID)
 			agent, _ := creds.LookupAgent(m.o.Config.Profiles[row.Profile].Agent)
-			sock := MemorySocketPath(m.layout, row.ID)
-			if stop, err := m.o.Memory.ServeSession(ctx, m.identity(row, proj, agent.Name), sock); err == nil {
-				m.chownForContainer(sock)
+			if stop, err := m.serveMCP(ctx, row, proj, agent.Name); err == nil && stop != nil {
 				m.mcp.put(row.ID, stop)
 			}
 		}
@@ -895,7 +952,7 @@ func (m *Manager) orphan(ctx context.Context, row *store.SessionRow, reason stri
 	}
 	// Run sessions' step containers belong to the workflow engine, which
 	// reconciles its runs itself.
-	if row.Kind == KindAgent && row.ContainerID != "" {
+	if interactive(row.Kind) && row.ContainerID != "" {
 		if err := m.o.Engine.StopContainer(ctx, row.ContainerID, 10); err != nil {
 			m.o.Log.Warn("stop orphaned container", "session", row.ID, "container", short(row.ContainerID), "err", err)
 		}
@@ -926,7 +983,7 @@ func (m *Manager) liveness(ctx context.Context, row *store.SessionRow) string {
 	if !st.Exists {
 		return "container " + short(row.ContainerID) + " is gone"
 	}
-	if !st.Running && row.Kind == KindAgent {
+	if !st.Running && interactive(row.Kind) {
 		return fmt.Sprintf("container %s exited (code %d)", short(row.ContainerID), st.ExitCode)
 	}
 	return ""
@@ -934,9 +991,13 @@ func (m *Manager) liveness(ctx context.Context, row *store.SessionRow) string {
 
 // probe marks running agent sessions whose container died as orphaned.
 func (m *Manager) probe(ctx context.Context) {
-	rows, err := m.o.Store.ListSessions(ctx, store.SessionFilter{Kind: KindAgent, Statuses: []string{StatusRunning}})
-	if err != nil {
-		return
+	var rows []*store.SessionRow
+	for _, kind := range []string{KindAgent, KindAssist} {
+		r, err := m.o.Store.ListSessions(ctx, store.SessionFilter{Kind: kind, Statuses: []string{StatusRunning}})
+		if err != nil {
+			return
+		}
+		rows = append(rows, r...)
 	}
 	for _, row := range rows {
 		if reason := m.liveness(ctx, row); reason != "" {

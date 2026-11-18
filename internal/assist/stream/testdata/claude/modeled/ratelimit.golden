@@ -1,0 +1,15 @@
+{
+  "events": [
+    {
+      "kind": "session",
+      "conversation_id": "c0ffee"
+    },
+    {
+      "kind": "rate_limited",
+      "text": "Claude AI usage limit reached",
+      "reset_at": "2026-10-31T20:00:00Z"
+    }
+  ],
+  "dropped": 0,
+  "terminal": "rate_limited"
+}

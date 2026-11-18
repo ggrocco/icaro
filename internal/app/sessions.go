@@ -28,6 +28,7 @@ func init() {
 		// and 40) through a.Sessions.SetPreviewHook / SetMemoryAttacher.
 		a.Sessions = session.New(session.Options{
 			Store: a.Store, Config: a.Cfg, Engine: a.Docker, Egress: a.Egress, Homes: a.Homes, Images: a.Images, Log: a.Log,
+			Execer: a.Docker, // assistant turns (ADR 0035)
 		})
 		a.API.RegisterSessions(api.SessionDeps{
 			Sessions: a.Sessions, Secrets: a.Secrets, Egress: a.Egress, Images: a.Images, Homes: a.Homes, Config: a.Cfg,
