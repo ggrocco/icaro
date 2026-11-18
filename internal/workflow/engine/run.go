@@ -451,6 +451,9 @@ func (rx *runExec) schedule(ctx context.Context) (string, string, bool) {
 				rx.settle(fctx, row, store.StepCancelled, "run cancelled")
 			}
 		}
+		if err := rx.e.d.Store.CancelAwaits(fctx, rx.run.ID); err != nil {
+			rx.e.log.Error("cancel awaits", "run", rx.run.ID, "err", err)
+		}
 		return store.RunCancelled, "cancelled", false
 	}
 

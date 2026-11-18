@@ -123,3 +123,39 @@ steps:
 		t.Fatal(issues)
 	}
 }
+
+func TestCorrelator(t *testing.T) {
+	c := NewCorrelator()
+	ev := map[string]any{"sha": "abc", "n": float64(7), "conclusion": "success"}
+	for _, tc := range []struct {
+		match, filter, key string
+		want               bool
+		err                bool
+	}{
+		{"event.sha", "", "abc", true, false},
+		{"${{ event.sha }}", "", "abc", true, false},
+		{"event.sha", "", "abd", false, false},
+		{"event.n", "", "7", true, false},
+		{"event.sha", "event.conclusion == 'success'", "abc", true, false},
+		{"event.sha", "event.conclusion != 'success'", "abc", false, false},
+		{"event.missing", "", "", false, false},
+		{"event.sha", "event.missing == 'x'", "abc", false, false},
+		{"event.sha ==", "", "abc", false, true},
+		{"event.sha", "event.sha ==", "abc", false, true},
+		{"event.sha", "event.sha", "abc", false, true}, // not a boolean
+		{"event.sha.x", "", "abc", false, true},        // indexing a string
+		{"event.sha", "event.sha.x == 'y'", "abc", false, true},
+	} {
+		got, err := c.Correlates(tc.match, tc.filter, tc.key, ev)
+		if got != tc.want || (err != nil) != tc.err {
+			t.Errorf("%q %q %q: %v %v", tc.match, tc.filter, tc.key, got, err)
+		}
+	}
+	if len(c.cache) == 0 {
+		t.Fatal("expressions are cached")
+	}
+	out := AwaitOutputValues(ev, "d1")
+	if out["n"] != "7" || out["sha"] != "abc" || out["delivery_id"] != "d1" || len(out) != 4 {
+		t.Fatalf("%v", out)
+	}
+}

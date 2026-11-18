@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,11 +13,12 @@ import (
 	"icaro/internal/workflow/events"
 )
 
-// Approval and wait steps (ADR 0030) run nothing: the scheduler starts
-// them, checks them on every pass, and parks the run when they are all
-// that is left, so a pending approval holds no engine slot.
+// Approval, wait and await steps (ADRs 0030, 0032) run nothing: the
+// scheduler starts them, checks them on every pass, and parks the run
+// when they are all that is left, so a pending approval or event wait
+// holds no engine slot.
 
-// startPause makes an approval or wait step start waiting.
+// startPause makes an approval, wait or await step start waiting.
 func (rx *runExec) startPause(ctx context.Context, st *workflow.StepSpec) {
 	if st.Kind() == workflow.KindCall {
 		rx.startCall(ctx, st, 1)
@@ -41,9 +43,91 @@ func (rx *runExec) startPause(ctx context.Context, st *workflow.StepSpec) {
 			return
 		}
 	}
+	var a *store.StepAwait
+	if st.Kind() == workflow.KindAwait {
+		if a = rx.openAwait(ctx, st); a == nil {
+			return
+		}
+	}
 	now := time.Now()
 	row.Status, row.Attempt, row.StartedAt, row.Error = store.StepWaiting, 1, &now, ""
 	rx.persist(ctx, row)
+	if a != nil && a.State == store.AwaitWaiting {
+		rx.lookBack(ctx, a)
+	}
+}
+
+// openAwait renders an await step's key and commits its waiting row. It
+// settles the step and returns nil when either fails.
+func (rx *runExec) openAwait(ctx context.Context, st *workflow.StepSpec) *store.StepAwait {
+	row := rx.rows[st.ID]
+	env := rx.baseEnv(1)
+	env["steps"] = rx.stepsEnv()
+	delete(env, "secrets") // the key is stored and displayed
+	key, err := expr.RenderString(st.Await.Key, env)
+	if err != nil {
+		rx.settle(ctx, row, store.StepFailed, "await key: "+err.Error())
+		return nil
+	}
+	if key == "" {
+		rx.settle(ctx, row, store.StepFailed, "await key rendered empty")
+		return nil
+	}
+	d, _ := time.ParseDuration(st.Timeout) // validated: required
+	a, err := rx.e.d.Store.OpenAwait(ctx, &store.StepAwait{
+		RunID: rx.run.ID, StepID: st.ID, Integration: st.Await.Integration, Event: st.Await.Event,
+		Workflow: rx.run.WorkflowName, Key: key, Match: st.Await.Match, Filter: st.Await.Filter,
+		Deadline: time.Now().Add(d),
+	})
+	if err != nil {
+		rx.settle(ctx, row, store.StepFailed, "open await: "+err.Error())
+		return nil
+	}
+	return a
+}
+
+// genericWebhook is the integration whose events correlate only with
+// runs of the workflow whose URL token received them (ADR 0032).
+const genericWebhook = "webhook"
+
+// lookBack claims the oldest event received since the run started that
+// correlates with a just-opened await. The waiting row is committed
+// first, and the pipeline persists events before it reads waiting rows,
+// so an event landing meanwhile is seen by one side or the other; the
+// compare-and-set makes sure it is used once.
+func (rx *runExec) lookBack(ctx context.Context, a *store.StepAwait) {
+	since := rx.run.CreatedAt
+	if rx.run.StartedAt != nil {
+		since = *rx.run.StartedAt
+	}
+	workflowOnly := ""
+	if a.Integration == genericWebhook {
+		workflowOnly = a.Workflow
+	}
+	evs, err := rx.e.d.Store.ListDeliveryEventsSince(ctx, a.Integration, a.Event, workflowOnly, since)
+	if err != nil {
+		// Later deliveries still resume the step; only the lookback is lost.
+		rx.e.log.Error("await lookback", "run", rx.run.ID, "step", a.StepID, "err", err)
+		return
+	}
+	c := workflow.NewCorrelator()
+	for _, ev := range evs {
+		payload := map[string]any{}
+		_ = json.Unmarshal([]byte(ev.PayloadJSON), &payload)
+		ok, err := c.Correlates(a.Match, a.Filter, a.Key, payload)
+		if err != nil {
+			rx.e.log.Warn("await correlate", "run", rx.run.ID, "step", a.StepID, "delivery", ev.DeliveryID, "err", err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		_, err = rx.e.d.Store.ResolveAwait(ctx, rx.run.ID, a.StepID, store.AwaitMatched, ev.DeliveryID, ev.PayloadJSON, "integration:"+a.Integration)
+		if err != nil && !errors.Is(err, store.ErrConflict) {
+			rx.e.log.Error("await claim", "run", rx.run.ID, "step", a.StepID, "err", err)
+		}
+		return // matched here, or the pipeline matched first
+	}
 }
 
 // checkPause settles a waiting step whose condition holds. Otherwise it
@@ -107,8 +191,49 @@ func (rx *runExec) checkPause(ctx context.Context, st *workflow.StepSpec) (settl
 			return false, nil
 		}
 		return true, nil
+	case workflow.KindAwait:
+		return rx.checkAwait(ctx, st)
 	}
 	return false, nil
+}
+
+// checkAwait settles an await step once it was matched, cancelled or its
+// deadline passed; otherwise it is next due at its deadline.
+func (rx *runExec) checkAwait(ctx context.Context, st *workflow.StepSpec) (bool, *time.Time) {
+	row := rx.rows[st.ID]
+	a, err := rx.e.d.Store.GetAwait(ctx, rx.run.ID, st.ID)
+	if err != nil {
+		rx.finishStep(ctx, row, store.StepFailed, nil, "load await: "+err.Error())
+		return true, nil
+	}
+	if a.State == store.AwaitWaiting {
+		if time.Now().Before(a.Deadline) {
+			return false, &a.Deadline
+		}
+		// The deadline passed. An event that lands first wins, so read
+		// back whatever was recorded.
+		b, err := rx.e.d.Store.ResolveAwait(ctx, rx.run.ID, st.ID, store.AwaitExpired, "", "", "")
+		if errors.Is(err, store.ErrConflict) {
+			b, err = rx.e.d.Store.GetAwait(ctx, rx.run.ID, st.ID)
+		}
+		if err != nil {
+			rx.e.log.Error("expire await", "run", rx.run.ID, "step", st.ID, "err", err)
+			return false, nil
+		}
+		a = b
+	}
+	switch a.State {
+	case store.AwaitMatched:
+		payload := map[string]any{}
+		_ = json.Unmarshal([]byte(a.PayloadJSON), &payload)
+		rx.finishStep(ctx, row, store.StepSucceeded, workflow.AwaitOutputValues(payload, a.DeliveryID), "")
+	case store.AwaitExpired:
+		rx.finishStep(ctx, row, store.StepFailed, nil,
+			fmt.Sprintf("no matching %s.%s before %s", a.Integration, a.Event, a.Deadline.UTC().Format(time.RFC3339)))
+	default:
+		rx.finishStep(ctx, row, store.StepFailed, nil, "await "+a.State)
+	}
+	return true, nil
 }
 
 // checkPauses settles every waiting step that can be. It reports whether
@@ -138,7 +263,7 @@ func (rx *runExec) anyWaiting() bool {
 }
 
 // park gives the run's engine slot back until due (nil: until a decision,
-// a child run's end or a cancel request). A decision, or a child's end,
+// a matched event, a child run's end or a cancel request). One of those
 // recorded while the run was still running set no wake time, so it is
 // looked for again once parked.
 func (rx *runExec) park(ctx context.Context, due *time.Time) error {
@@ -146,21 +271,29 @@ func (rx *runExec) park(ctx context.Context, due *time.Time) error {
 		return fmt.Errorf("park run: %w", err)
 	}
 	for _, id := range rx.plan.Order {
-		row := rx.rows[id]
-		if row.Status != store.StepWaiting {
+		if rx.rows[id].Status != store.StepWaiting || !rx.resolved(ctx, id) {
 			continue
 		}
-		switch rx.spec.Step(id).Kind() {
-		case workflow.KindApproval:
-			if a, err := rx.e.d.Store.GetApproval(ctx, rx.run.ID, id); err == nil && a.Decision != "" {
-				return rx.e.d.Store.WakeRun(ctx, rx.run.ID)
-			}
-		case workflow.KindCall:
-			if c, err := rx.e.d.Store.GetRun(ctx, row.ChildRunID); err == nil && terminalRun(c.Status) {
-				return rx.e.d.Store.WakeRun(ctx, rx.run.ID)
-			}
-		}
+		return rx.e.d.Store.WakeRun(ctx, rx.run.ID)
 	}
 	rx.e.publish(events.Event{Type: events.TypeRun, RunID: rx.run.ID, Status: store.RunWaiting})
 	return nil
+}
+
+// resolved reports whether a waiting approval was decided, a waiting
+// await resolved, or a call step's child run ended, without the engine
+// having seen it yet.
+func (rx *runExec) resolved(ctx context.Context, id string) bool {
+	switch rx.spec.Step(id).Kind() {
+	case workflow.KindCall:
+		c, err := rx.e.d.Store.GetRun(ctx, rx.rows[id].ChildRunID)
+		return err == nil && terminalRun(c.Status)
+	case workflow.KindApproval:
+		a, err := rx.e.d.Store.GetApproval(ctx, rx.run.ID, id)
+		return err == nil && a.Decision != ""
+	case workflow.KindAwait:
+		a, err := rx.e.d.Store.GetAwait(ctx, rx.run.ID, id)
+		return err == nil && a.State != store.AwaitWaiting
+	}
+	return false
 }
