@@ -126,8 +126,10 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
         const p = (k: string) => ["steps", i, k];
         const uses = String(getIn(doc, p("uses")) ?? "");
         const isUses = doc.hasIn(p("uses"));
-        const kind = isUses ? "uses" : doc.hasIn(p("approval")) ? "approval" : doc.hasIn(p("wait")) ? "wait" : "image";
-        const pauses = kind === "approval" || kind === "wait";
+        const kind = isUses ? "uses" : doc.hasIn(p("approval")) ? "approval" : doc.hasIn(p("wait")) ? "wait" : doc.hasIn(p("await")) ? "await" : "image";
+        const pauses = kind === "approval" || kind === "wait" || kind === "await";
+        const aw = (k: string) => ["steps", i, "await", k];
+        const awaitIntg = String(getIn(doc, aw("integration")) ?? "");
         const action = actions.get(uses);
         const needs = (getIn<string[]>(doc, p("needs")) ?? []) as string[];
         return (
@@ -142,12 +144,16 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
                 onChange={(e) =>
                   mutate((d) => {
                     // Each form has its own fields; switching drops the old ones.
-                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait"]) d.deleteIn(["steps", i, k]);
-                    if (e.target.value === "approval" || e.target.value === "wait") d.deleteIn(["steps", i, "retry"]);
+                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "await"]) d.deleteIn(["steps", i, k]);
+                    if (e.target.value === "approval" || e.target.value === "wait" || e.target.value === "await") d.deleteIn(["steps", i, "retry"]);
                     if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
                     if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
                     else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
                     else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
+                    else if (e.target.value === "await") {
+                      d.setIn(["steps", i, "await"], { integration: "github", event: "check_suite.completed", key: "", match: "event.head_sha" });
+                      if (!d.hasIn(["steps", i, "timeout"])) d.setIn(["steps", i, "timeout"], "2h");
+                    }
                     else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                   })
                 }
@@ -156,6 +162,7 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
                 <option value="uses">uses (integration action)</option>
                 <option value="approval">approval (a person decides)</option>
                 <option value="wait">wait (pause for a time)</option>
+                <option value="await">await (wait for an integration event)</option>
               </select>
             </Field>
             {kind === "approval" ? (
@@ -170,6 +177,48 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
               <Field label="Duration" hint="e.g. 30m or 2h (at most 720h)">
                 <input value={String(getIn(doc, p("wait")) ?? "")} onChange={(e) => update(p("wait"), e.target.value)} />
               </Field>
+            ) : kind === "await" ? (
+              <>
+                <Field label="Integration">
+                  <select
+                    value={awaitIntg}
+                    onChange={(e) =>
+                      mutate((d) => {
+                        d.setIn(aw("integration"), e.target.value);
+                        d.setIn(aw("event"), "");
+                      })
+                    }
+                  >
+                    {!integrations.some((x) => x.name === awaitIntg) && <option value={awaitIntg}>{awaitIntg || "choose…"}</option>}
+                    {integrations
+                      .filter((x) => Object.keys(x.event_details ?? {}).length)
+                      .map((x) => (
+                        <option key={x.name} value={x.name}>
+                          {x.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+                <Field label="Event">
+                  <select value={String(getIn(doc, aw("event")) ?? "")} onChange={(e) => update(aw("event"), e.target.value)}>
+                    <option value="">choose an event…</option>
+                    {Object.values(integrations.find((x) => x.name === awaitIntg)?.event_details ?? {}).map((ev) => (
+                      <option key={ev.event} value={ev.event} title={ev.description}>
+                        {ev.event}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Key" hint="Rendered when the step starts, e.g. ${{ steps.push.outputs.sha }}">
+                  <input value={String(getIn(doc, aw("key")) ?? "")} onChange={(e) => update(aw("key"), e.target.value)} />
+                </Field>
+                <Field label="Match" hint="Over the event; must equal the key, e.g. event.head_sha">
+                  <input value={String(getIn(doc, aw("match")) ?? "")} onChange={(e) => update(aw("match"), e.target.value)} />
+                </Field>
+                <Field label="Filter" hint="Optional, e.g. event.conclusion != 'neutral'">
+                  <input value={String(getIn(doc, aw("filter")) ?? "")} onChange={(e) => update(aw("filter"), e.target.value || undefined)} />
+                </Field>
+              </>
             ) : isUses ? (
               <>
                 <Field label="Action">
@@ -234,8 +283,11 @@ export function FormEditor({ yaml, onChange, integrations }: Props) {
             </Field>
             <div className="row">
               {kind !== "wait" && (
-                <Field label={kind === "approval" ? "Deadline" : "Timeout"} hint={kind === "approval" ? "undecided after this, it fails" : undefined}>
-                  <input placeholder={kind === "approval" ? "24h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
+                <Field
+                  label={kind === "approval" || kind === "await" ? "Deadline" : "Timeout"}
+                  hint={kind === "approval" ? "undecided after this, it fails" : kind === "await" ? "required, at most 720h; with no event by then, it fails" : undefined}
+                >
+                  <input placeholder={kind === "approval" ? "24h" : kind === "await" ? "2h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
                 </Field>
               )}
               {!pauses && (

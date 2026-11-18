@@ -2,7 +2,7 @@
 export interface GraphStep {
   id: string;
   needs?: string[];
-  kind: "image" | "uses" | "approval" | "wait";
+  kind: "image" | "uses" | "approval" | "wait" | "await";
   label: string;
 }
 
@@ -20,9 +20,14 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
     .map((s, i) => ({
       id: typeof s.id === "string" && s.id ? s.id : `step-${i + 1}`,
       needs: Array.isArray(s.needs) ? s.needs.filter((n): n is string => typeof n === "string") : [],
-      kind: s.uses ? "uses" : s.approval !== undefined ? "approval" : s.wait !== undefined ? "wait" : "image",
-      label: s.approval !== undefined ? "approval" : s.wait !== undefined ? `wait ${String(s.wait)}` : String(s.uses ?? s.image ?? ""),
+      kind: s.uses ? "uses" : s.approval !== undefined ? "approval" : s.wait !== undefined ? "wait" : s.await !== undefined ? "await" : "image",
+      label: s.approval !== undefined ? "approval" : s.wait !== undefined ? `wait ${String(s.wait)}` : s.await !== undefined ? `await ${awaitLabel(s.await)}` : String(s.uses ?? s.image ?? ""),
     }));
+}
+
+function awaitLabel(a: unknown): string {
+  const { integration, event } = (a ?? {}) as { integration?: unknown; event?: unknown };
+  return [integration, event].filter((x) => typeof x === "string" && x).join(".");
 }
 
 export function layout(steps: GraphStep[], colWidth = 240, rowHeight = 96): Placed[] {
