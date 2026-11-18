@@ -86,10 +86,6 @@ func (rx *runExec) openAwait(ctx context.Context, st *workflow.StepSpec) *store.
 	return a
 }
 
-// genericWebhook is the integration whose events correlate only with
-// runs of the workflow whose URL token received them (ADR 0032).
-const genericWebhook = "webhook"
-
 // lookBack claims the oldest event received since the run started that
 // correlates with a just-opened await. The waiting row is committed
 // first, and the pipeline persists events before it reads waiting rows,
@@ -101,7 +97,7 @@ func (rx *runExec) lookBack(ctx context.Context, a *store.StepAwait) {
 		since = *rx.run.StartedAt
 	}
 	workflowOnly := ""
-	if a.Integration == genericWebhook {
+	if a.Integration == workflow.GenericWebhook {
 		workflowOnly = a.Workflow
 	}
 	evs, err := rx.e.d.Store.ListDeliveryEventsSince(ctx, a.Integration, a.Event, workflowOnly, since)

@@ -123,3 +123,24 @@ func (s *Spec) IntegrationTriggers() []TriggerSpec {
 	}
 	return out
 }
+
+// GenericWebhook is the integration whose events arrive on a per-workflow
+// URL token (ADR 0015); its await steps correlate only with events
+// delivered on their own workflow's token (ADR 0032).
+const GenericWebhook = "webhook"
+
+// UsesGenericWebhook reports whether the workflow is triggered by, or
+// awaits, the generic webhook integration, and so needs a URL token.
+func (s *Spec) UsesGenericWebhook() bool {
+	for _, t := range s.Triggers {
+		if t.Integration == GenericWebhook {
+			return true
+		}
+	}
+	for _, st := range s.Steps {
+		if st.Await != nil && st.Await.Integration == GenericWebhook {
+			return true
+		}
+	}
+	return false
+}
