@@ -255,4 +255,17 @@ func TestCallTransactionsRollBack(t *testing.T) {
 	if got, _ := s.GetRun(ctx, parent.ID); got.CancelRequestedAt != nil {
 		t.Fatal("the parent was flagged although its child was not cancelled")
 	}
+	// A run whose own final state cannot be written stays as it was.
+	if err := s.FinishRun(ctx, "kid", RunFailed, ""); err == nil || !strings.Contains(err.Error(), "cancel refused") {
+		t.Fatal(err)
+	}
+	// A replace whose cancel of the runs it replaces fails starts nothing:
+	// cancelling the parked parent cascades to the child that refuses.
+	rep := &Run{WorkflowID: w.ID, WorkflowName: w.Name, WorkflowVersion: 1, Concurrency: "replace"}
+	if _, err := s.EnqueueRun(ctx, rep, nil); err == nil || !strings.Contains(err.Error(), "cancel refused") {
+		t.Fatal(err)
+	}
+	if _, err := s.GetRun(ctx, rep.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("the replacing run was created although the replace failed")
+	}
 }
