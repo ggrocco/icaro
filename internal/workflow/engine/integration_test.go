@@ -207,3 +207,83 @@ steps:
 		t.Fatalf("log after re-attach: %q", b)
 	}
 }
+
+// Call steps against real Docker (ADR 0038): lineage through a three-deep
+// chain on one slot, a daemon restart while the leaf runs, and a cancel
+// of the root that stops the whole tree.
+func TestIntegrationCallTree(t *testing.T) {
+	f, _ := newDockerFixture(t)
+	f.cfg.MaxRuns = 1
+	f.calls()
+	leaf := `
+version: 1
+name: leaf
+triggers: [{type: call}]
+outputs:
+  word: ${{ steps.say.outputs.word }}
+steps:
+  - id: say
+    image: ` + itImage + `
+    command: sleep ${{ trigger.secs }} && printf '{"word":"hi-%s"}' "${{ trigger.secs }}" > /icaro/output.json
+    outputs: {word: "json:word"}
+`
+	mid := `
+version: 1
+name: mid
+triggers: [{type: call}]
+outputs:
+  word: ${{ steps.inner.outputs.word }}
+steps:
+  - id: inner
+    call: {workflow: leaf, input: {secs: "${{ trigger.secs }}"}}
+`
+	top := `
+version: 1
+name: top
+steps:
+  - id: outer
+    call: {workflow: mid, input: {secs: "${{ trigger.secs }}"}}
+  - id: echo
+    needs: [outer]
+    image: ` + itImage + `
+    command: echo ${{ steps.outer.outputs.word }}
+    outputs: {line: "stdout:last-line"}
+`
+	f.apply(leaf)
+	f.apply(mid)
+
+	// Lineage, and a restart while the leaf's container runs.
+	run := f.enqueue(top, map[string]any{"secs": "3"})
+	_, stop := f.start()
+	f.waitChild(run.ID, "outer", store.RunWaiting)
+	stop()
+	_, stop = f.start()
+	got := f.waitLong(run.ID, store.RunSucceeded, store.RunFailed)
+	stop()
+	if got.Status != store.RunSucceeded || f.outputs(run.ID, "echo")["line"] != "hi-3" {
+		t.Fatalf("%s %v %s", got.Status, f.outputs(run.ID, "echo"), f.dump(run.ID))
+	}
+	tree := f.tree(run.ID)
+	if len(tree) != 3 || tree[1].Depth != 1 || tree[2].Depth != 2 || tree[2].ParentRunID != tree[1].ID || tree[2].RootRunID != run.ID {
+		t.Fatalf("tree %+v", tree)
+	}
+
+	// Cancelling the root stops the tree, the leaf's container included.
+	run = f.enqueue(top, map[string]any{"secs": "120"})
+	e, stop := f.start()
+	defer stop()
+	midID := f.waitChild(run.ID, "outer", store.RunWaiting)
+	leafID := f.waitChild(midID, "inner", store.RunRunning)
+	f.waitStep(leafID, "say", func(r *store.StepRun) bool { return r.Status == store.StepRunning && r.ContainerID != "" })
+	if _, err := f.st.RequestCancel(f.ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.Wake()
+	root := f.waitLong(run.ID, store.RunCancelled)
+	for _, id := range []string{midID, leafID} {
+		r := f.waitLong(id, store.RunCancelled)
+		if r.FinishedAt.After(*root.FinishedAt) {
+			t.Fatalf("%s finished after the root", id)
+		}
+	}
+}

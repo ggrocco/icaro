@@ -111,6 +111,17 @@ export function RunDetail({ id }: { id: string }) {
             Re-run of <a href={href("runs", run.rerun_of)}>{run.rerun_of.slice(-10)}</a>
           </span>
         )}
+        {run.parent_run_id && (
+          <span>
+            Called by <a href={href("runs", run.parent_run_id)}>{run.parent_run_id.slice(-10)}</a>
+            {run.root_run_id && run.root_run_id !== run.parent_run_id && (
+              <>
+                {" "}
+                · root <a href={href("runs", run.root_run_id)}>{run.root_run_id.slice(-10)}</a>
+              </>
+            )}
+          </span>
+        )}
         <span>
           Started <strong>{run.started_at ? <When ts={run.started_at} /> : "not yet"}</strong>
         </span>
@@ -154,6 +165,7 @@ export function RunDetail({ id }: { id: string }) {
               {step.error && <div className="notice error">{step.error}</div>}
               {step.approval && <ApprovalFacts approval={step.approval} />}
               {step.agent && <AgentFacts agent={step.agent} />}
+              {step.call && <CallFacts call={step.call} />}
               <dl className="kv">
                 <dt>Attempts</dt>
                 <dd>{step.attempt}</dd>
@@ -250,6 +262,30 @@ function ApprovalFacts({ approval: a }: { approval: NonNullable<StepInfo["approv
           </dd>
         </>
       )}
+    </dl>
+  );
+}
+
+// CallFacts links a call step to the child run it started (ADR 0038);
+// the child keeps its own logs.
+function CallFacts({ call: c }: { call: NonNullable<StepInfo["call"]> }) {
+  return (
+    <dl className="kv" aria-label="Call step">
+      <dt>Workflow</dt>
+      <dd>
+        <a href={href("workflows", c.workflow)}>{c.workflow}</a>
+        {c.version ? <span className="version"> v{c.version}</span> : null}
+      </dd>
+      <dt>Child run</dt>
+      <dd>
+        {c.run_id ? (
+          <>
+            <a href={href("runs", c.run_id)}>{c.run_id.slice(-10)}</a> {c.status && <Status status={c.status} />}
+          </>
+        ) : (
+          <span className="muted">not started</span>
+        )}
+      </dd>
     </dl>
   );
 }

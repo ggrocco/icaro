@@ -105,11 +105,12 @@ A workflow is a DAG validated by JSON Schema plus semantic validations: unique n
 
 Validation returns structured issues: a JSON Pointer path, a message, and a nearest-match hint for unknown names. The CLI, API, UI, and the MCP `validate_workflow` tool all show the same list. The implementation generates its published schema from its own types, and a drift test keeps that output equal to [the blueprint contract](schemas/workflow.schema.json).
 
-Step model: a step takes exactly one of two forms ([ADR 0007](adr/0007-integration-manifests.md)):
+Step model: a step takes exactly one form ([ADR 0007](adr/0007-integration-manifests.md)); besides the ones below, `approval` and `wait` ([ADR 0030](adr/0030-approval-wait-steps.md)) run nothing:
 
 - An **`image` step** runs a container image (`image` + `command`) — the general compute primitive. A **shell** or **JS** step is just an image with the right runtime; host execution requires an explicit flag.
 - An **`agent` step** ([ADR 0037](adr/0037-agent-steps.md)) runs a profile's agent CLI headless with the catalog's step mode (`internal/creds`): the prompt on stdin from `/icaro/prompt.md`, typed `params`, and the CLI's event stream parsed by `internal/assist/stream` into the step log. Its last message is the output `result`, and its token usage is recorded on the step run. It is one container in the run session, like an image step, but under its agent profile's step session (home layer, egress, inject token, memory) and the profile's image at the digest pinned when the run started.
 - A **`uses` step** invokes a declarative integration action (`uses: slack.post-message` + typed `input`) executed **in-process by the daemon** — talking to an external API needs no container. Notifications are `uses` actions, not a special step type.
+- A **`call` step** ([ADR 0038](adr/0038-call-workflow-steps.md)) runs another workflow, one with a `call` trigger, as a child run: `input` becomes the child's `trigger.*`, and the child's workflow-level `outputs` become the step's. The workflow service enqueues the child (`trigger_kind: call`, `parent_run_id`, `root_run_id`, `depth`, idempotency key `call:<run>:<step>:<attempt>`) and books it on the step run, with the child's version, in one transaction, under `workflows.max_call_depth` and `workflows.max_runs_per_root`. The caller parks like a run on an approval ([ADR 0030](adr/0030-approval-wait-steps.md)) and the transaction that records the child's end wakes it. A call cycle through the current versions is refused at validation; cancelling goes down the tree, and the callee's `replace` acts as `queue`.
 - Both forms are full DAG citizens: `needs`, `when`, `retry`, `timeout`, and `outputs` behave identically. **Conditional execution** is a step's `when` expression, not a dedicated condition step.
 - Runs started by an integration trigger expose the normalized event payload as `${{ trigger.* }}` (§9); manual runs prompt for those fields, so every workflow stays testable by hand.
 
@@ -215,7 +216,7 @@ AI agents author and run workflows through the same daemon MCP server that hosts
   - `validate_workflow` — the structured issues from §6. This is the most important tool, because issue quality decides how fast an agent converges;
   - `create_workflow` / `update_workflow` / `get_workflow` / `list_workflows`;
   - `run_workflow`;
-  - `get_run` — status, per-step outputs, and a size-capped log tail, so debugging does not flood the agent's context.
+  - `get_run` — status, per-step outputs, and a size-capped log tail, so debugging does not flood the agent's context. A call step names its child run, and a child its parent and root ([ADR 0038](adr/0038-call-workflow-steps.md)); `list_workflows` marks callable workflows with their outputs, so an agent calls a sequence instead of copying it.
 - **No destructive tools in v1.** Agents author and run; humans delete.
 - **Transports:** stdio (`icaro mcp`, which proxies to the daemon) for local CLIs, and streamable HTTP on the daemon under the same auth as the API (§3). One tool-definition layer sits over the service layer, so both transports share semantics.
 - **Authoring skill.** An `icaro-workflows` skill ships in the repo, versioned with the engine. It is installable into Claude Code/Codex with `icaro skill install`, which writes the skill and the MCP entry. It encodes the loop:

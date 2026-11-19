@@ -192,3 +192,20 @@ func TestApproveAndRejectCommands(t *testing.T) {
 	wantCLI(t, []string{"runs", "reject", "--json", id, "gate", "--comment", "not today"}, `"decision": "rejected"`)
 	failCLI(t, "", "runs", "approve", "run_nope", "gate")
 }
+
+// Call steps through the CLI (ADR 0038): a callee lists its callers, and
+// changing it warns about the callers it breaks.
+func TestWorkflowCallersAndWarnings(t *testing.T) {
+	startDaemon(t)
+	dir := t.TempDir()
+	callee := "version: 1\nname: run-tests\ntriggers: [{type: call}]\noutputs:\n  ok: ${{ steps.t1.outputs.ok }}\nsteps:\n  - id: t1\n    image: mirror.gcr.io/library/alpine:3.24\n    outputs: {ok: stdout}\n"
+	caller := "version: 1\nname: release\ntriggers: [{type: manual}]\nsteps:\n  - id: t1\n    call: {workflow: run-tests}\n  - id: t2\n    needs: [t1]\n    image: mirror.gcr.io/library/alpine:3.24\n    command: echo ${{ steps.t1.outputs.ok }}\n"
+	wantCLI(t, []string{"workflow", "apply", writeFile(t, dir, "callee.yaml", callee)}, "applied run-tests version 1")
+	wantCLI(t, []string{"workflow", "apply", writeFile(t, dir, "caller.yaml", caller)}, "applied release version 1")
+	wantCLI(t, []string{"workflow", "get", "run-tests"}, "# called by: release")
+	dropped := writeFile(t, dir, "dropped.yaml", strings.Replace(callee, "outputs:\n  ok: ${{ steps.t1.outputs.ok }}\n", "", 1))
+	wantCLI(t, []string{"workflow", "validate", dropped}, "valid: run-tests", `warning: /: caller release would fail validation at /steps/1/command: workflow run-tests declares no output "ok"`)
+	wantCLI(t, []string{"workflow", "apply", dropped}, "applied run-tests version 2", "warning: /: caller release would fail validation")
+	// The caller now fails validation, naming the missing output.
+	failCLI(t, "issue(s)", "workflow", "validate", writeFile(t, dir, "caller2.yaml", caller))
+}

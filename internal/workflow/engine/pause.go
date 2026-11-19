@@ -18,6 +18,10 @@ import (
 
 // startPause makes an approval or wait step start waiting.
 func (rx *runExec) startPause(ctx context.Context, st *workflow.StepSpec) {
+	if st.Kind() == workflow.KindCall {
+		rx.startCall(ctx, st, 1)
+		return
+	}
 	row := rx.rows[st.ID]
 	if st.Kind() == workflow.KindApproval {
 		msg := "Approve step " + st.ID + "?"
@@ -52,6 +56,8 @@ func (rx *runExec) checkPause(ctx context.Context, st *workflow.StepSpec) (settl
 		started = *row.StartedAt
 	}
 	switch st.Kind() {
+	case workflow.KindCall:
+		return rx.checkCall(ctx, st)
 	case workflow.KindWait:
 		d, _ := time.ParseDuration(st.Wait) // validated
 		until := started.Add(d)
@@ -131,19 +137,28 @@ func (rx *runExec) anyWaiting() bool {
 	return false
 }
 
-// park gives the run's engine slot back until due (nil: until a decision
-// or a cancel request). A decision recorded while the run was still
-// running set no wake time, so it is looked for again once parked.
+// park gives the run's engine slot back until due (nil: until a decision,
+// a child run's end or a cancel request). A decision, or a child's end,
+// recorded while the run was still running set no wake time, so it is
+// looked for again once parked.
 func (rx *runExec) park(ctx context.Context, due *time.Time) error {
 	if err := rx.e.d.Store.ParkRun(ctx, rx.run.ID, due); err != nil {
 		return fmt.Errorf("park run: %w", err)
 	}
 	for _, id := range rx.plan.Order {
-		if rx.rows[id].Status != store.StepWaiting || rx.spec.Step(id).Kind() != workflow.KindApproval {
+		row := rx.rows[id]
+		if row.Status != store.StepWaiting {
 			continue
 		}
-		if a, err := rx.e.d.Store.GetApproval(ctx, rx.run.ID, id); err == nil && a.Decision != "" {
-			return rx.e.d.Store.WakeRun(ctx, rx.run.ID)
+		switch rx.spec.Step(id).Kind() {
+		case workflow.KindApproval:
+			if a, err := rx.e.d.Store.GetApproval(ctx, rx.run.ID, id); err == nil && a.Decision != "" {
+				return rx.e.d.Store.WakeRun(ctx, rx.run.ID)
+			}
+		case workflow.KindCall:
+			if c, err := rx.e.d.Store.GetRun(ctx, row.ChildRunID); err == nil && terminalRun(c.Status) {
+				return rx.e.d.Store.WakeRun(ctx, rx.run.ID)
+			}
 		}
 	}
 	rx.e.publish(events.Event{Type: events.TypeRun, RunID: rx.run.ID, Status: store.RunWaiting})

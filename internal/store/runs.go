@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const runCols = `id, workflow_id, workflow_name, workflow_version, status, trigger_kind, input_json, root_run_id, parent_run_id, depth, rerun_of, library_hash, claimed_by, claimed_at, heartbeat_at, started_at, finished_at, cancel_requested_at, error, created_at, idempotency_key, concurrency, session_id, delivery_id, actor, wake_at`
+const runCols = `id, workflow_id, workflow_name, workflow_version, status, trigger_kind, input_json, root_run_id, parent_run_id, depth, rerun_of, library_hash, claimed_by, claimed_at, heartbeat_at, started_at, finished_at, cancel_requested_at, error, created_at, idempotency_key, concurrency, session_id, delivery_id, actor, wake_at, outputs_json`
 
 func scanRun(sc interface{ Scan(...any) error }) (*Run, error) {
 	var r Run
@@ -18,7 +18,7 @@ func scanRun(sc interface{ Scan(...any) error }) (*Run, error) {
 	var created string
 	err := sc.Scan(&r.ID, &r.WorkflowID, &r.WorkflowName, &r.WorkflowVersion, &r.Status, &r.TriggerKind, &r.TriggerJSON, &r.RootRunID,
 		&parent, &r.Depth, &rerun, &lib, &claimedBy, &claimedAt, &heartbeat, &started, &finished, &cancel, &r.Error, &created,
-		&idem, &r.Concurrency, &session, &delivery, &r.Actor, &wake)
+		&idem, &r.Concurrency, &session, &delivery, &r.Actor, &wake, &r.OutputsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -71,6 +71,33 @@ type PolicyOutcome struct {
 // UPDATE, portable to SQLite's single writer and Postgres row locks); a
 // workflow deleted meanwhile returns ErrNotFound.
 func (s *Store) EnqueueRun(ctx context.Context, r *Run, steps []StepInit) (PolicyOutcome, error) {
+	return s.enqueue(ctx, r, steps, nil)
+}
+
+// CallBooking makes an enqueue the child run of a call step (ADR 0038).
+type CallBooking struct {
+	// ParentRunID and StepID are the call step; it records the child's
+	// id and version in the enqueue's transaction.
+	ParentRunID string
+	StepID      string
+	// MaxRunsPerRoot bounds the runs, retries included, that share the
+	// child's root run (workflows.max_runs_per_root).
+	MaxRunsPerRoot int
+}
+
+// ErrRootBudget means a call would exceed workflows.max_runs_per_root.
+var ErrRootBudget = errors.New("the root run's budget of runs is spent")
+
+// EnqueueCall is EnqueueRun for a call step's child: r carries the
+// lineage (RootRunID, ParentRunID, Depth). In one transaction it checks
+// the root's run budget, applies r's concurrency policy, inserts the run
+// and books it on the parent's step, so a restart between enqueue and
+// bookkeeping cannot lose or duplicate the child.
+func (s *Store) EnqueueCall(ctx context.Context, r *Run, steps []StepInit, b CallBooking) (PolicyOutcome, error) {
+	return s.enqueue(ctx, r, steps, &b)
+}
+
+func (s *Store) enqueue(ctx context.Context, r *Run, steps []StepInit, b *CallBooking) (PolicyOutcome, error) {
 	s.fillRun(r)
 	var out PolicyOutcome
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -82,6 +109,15 @@ func (s *Store) EnqueueRun(ctx context.Context, r *Run, steps []StepInit) (Polic
 		if err := affected(res); err != nil {
 			return err
 		}
+		if b != nil {
+			var n int
+			if err := tx.QueryRowContext(ctx, s.rebind(`SELECT COUNT(*) FROM runs WHERE root_run_id = ?`), r.RootRunID).Scan(&n); err != nil {
+				return err
+			}
+			if n >= b.MaxRunsPerRoot {
+				return ErrRootBudget
+			}
+		}
 		if r.Concurrency == "forbid" || r.Concurrency == "replace" {
 			active, err := s.activeRunsTx(ctx, tx, r.WorkflowID)
 			if err != nil {
@@ -92,13 +128,29 @@ func (s *Store) EnqueueRun(ctx context.Context, r *Run, steps []StepInit) (Polic
 				return nil
 			}
 			for _, old := range active {
+				if old.ParentRunID != "" {
+					// A call step waits on it (ADR 0038): replace leaves
+					// it alone, and the new run waits for it in ClaimRun.
+					continue
+				}
 				if err := s.requestCancelTx(ctx, tx, old.ID); err != nil {
 					return err
 				}
+				out.Replaced = append(out.Replaced, old)
 			}
-			out.Replaced = active
 		}
-		return s.insertRun(ctx, tx, r, steps)
+		if err := s.insertRun(ctx, tx, r, steps); err != nil {
+			return err
+		}
+		if b == nil {
+			return nil
+		}
+		res, err = tx.ExecContext(ctx, s.rebind(`UPDATE step_runs SET child_run_id = ?, child_version = ? WHERE run_id = ? AND step_id = ?`),
+			r.ID, r.WorkflowVersion, b.ParentRunID, b.StepID)
+		if err != nil {
+			return err
+		}
+		return affected(res)
 	})
 	if isUniqueViolation(err) {
 		return PolicyOutcome{}, ErrConflict
@@ -143,14 +195,17 @@ func (s *Store) fillRun(r *Run) {
 	if r.Concurrency == "" {
 		r.Concurrency = "allow"
 	}
+	if r.OutputsJSON == "" {
+		r.OutputsJSON = "{}"
+	}
 }
 
 func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, r *Run, steps []StepInit) error {
-	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		r.ID, r.WorkflowID, r.WorkflowName, r.WorkflowVersion, r.Status, r.TriggerKind, r.TriggerJSON, r.RootRunID,
 		nullStr(r.ParentRunID), r.Depth, nullStr(r.RerunOf), nullStr(r.LibraryHash), nullStr(r.ClaimedBy),
 		tsPtr(r.ClaimedAt), tsPtr(r.HeartbeatAt), tsPtr(r.StartedAt), tsPtr(r.FinishedAt), tsPtr(r.CancelRequestedAt),
-		r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor, tsPtr(r.WakeAt)); err != nil {
+		r.Error, ts(r.CreatedAt), nullStr(r.IdempotencyKey), r.Concurrency, nullStr(r.SessionID), nullStr(r.DeliveryID), r.Actor, tsPtr(r.WakeAt), r.OutputsJSON); err != nil {
 		return err
 	}
 	for _, st := range steps {
@@ -201,6 +256,10 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 		where = append(where, "status = ?")
 		args = append(args, f.Status)
 	}
+	if f.RootRunID != "" {
+		where = append(where, "root_run_id = ?")
+		args = append(args, f.RootRunID)
+	}
 	q := `SELECT ` + runCols + ` FROM runs`
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -223,6 +282,32 @@ func (s *Store) ListRunsByStatus(ctx context.Context, status string) ([]*Run, er
 func (s *Store) ActiveRuns(ctx context.Context, workflowID string) ([]*Run, error) {
 	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE workflow_id = ? AND status IN (?, ?, ?) ORDER BY created_at, id`,
 		workflowID, RunQueued, RunRunning, RunWaiting)
+}
+
+// ActiveChildren returns the queued, running and waiting runs whose
+// parent is runID (ADR 0038).
+func (s *Store) ActiveChildren(ctx context.Context, runID string) ([]*Run, error) {
+	return s.listRuns(ctx, `SELECT `+runCols+` FROM runs WHERE parent_run_id = ? AND status IN (?, ?, ?) ORDER BY created_at, id`,
+		runID, RunQueued, RunRunning, RunWaiting)
+}
+
+// ActiveDescendants returns every queued, running and waiting run below
+// runID in its tree, parents before children.
+func (s *Store) ActiveDescendants(ctx context.Context, runID string) ([]*Run, error) {
+	var out []*Run
+	queue := []string{runID}
+	for len(queue) > 0 {
+		kids, err := s.ActiveChildren(ctx, queue[0])
+		if err != nil {
+			return nil, err
+		}
+		queue = queue[1:]
+		for _, k := range kids {
+			out = append(out, k)
+			queue = append(queue, k.ID)
+		}
+	}
+	return out, nil
 }
 
 // ClaimRun atomically takes the oldest claimable queued run. A run whose
@@ -261,7 +346,7 @@ func (s *Store) ClaimDueRun(ctx context.Context, runnerID string) (*Run, error) 
 	err := s.queryRow(ctx, `UPDATE runs SET status = ?, claimed_by = ?, claimed_at = ?, heartbeat_at = ?, wake_at = NULL
 		WHERE id = (
 			SELECT id FROM runs
-			WHERE status = ? AND ((wake_at IS NOT NULL AND wake_at <= ?) OR cancel_requested_at IS NOT NULL)
+			WHERE status = ? AND ((wake_at IS NOT NULL AND wake_at <= ?) OR (cancel_requested_at IS NOT NULL AND wake_at IS NULL))
 			ORDER BY COALESCE(wake_at, cancel_requested_at), id LIMIT 1)
 		AND status = ?
 		RETURNING id`, RunRunning, runnerID, now, now, RunWaiting, now, RunWaiting).Scan(&id)
@@ -308,11 +393,35 @@ func (s *Store) Heartbeat(ctx context.Context, runID string) error {
 
 // FinishRun records the terminal status of a run.
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	res, err := s.exec(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ?`, status, errMsg, ts(Now()), runID)
-	if err != nil {
-		return err
+	return s.FinishRunOutputs(ctx, runID, status, errMsg, "")
+}
+
+// FinishRunOutputs records the terminal status of a run and its workflow
+// outputs ("" = none). In the same transaction it wakes the run's parent,
+// so a call step waiting on it is looked at again at once (ADR 0038).
+func (s *Store) FinishRunOutputs(ctx context.Context, runID, status, errMsg, outputsJSON string) error {
+	if outputsJSON == "" {
+		outputsJSON = "{}"
 	}
-	return affected(res)
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, s.rebind(`UPDATE runs SET status = ?, error = ?, finished_at = ?, outputs_json = ? WHERE id = ?`),
+			status, errMsg, ts(Now()), outputsJSON, runID)
+		if err != nil {
+			return err
+		}
+		if err := affected(res); err != nil {
+			return err
+		}
+		return s.wakeParentTx(ctx, tx, runID)
+	})
+}
+
+// wakeParentTx makes a parked parent of runID due now (ADR 0038). A
+// parent that is still running looks at its call steps on its next poll.
+func (s *Store) wakeParentTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	_, err := tx.ExecContext(ctx, s.rebind(`UPDATE runs SET wake_at = ? WHERE status = ?
+		AND id = (SELECT parent_run_id FROM runs WHERE id = ?)`), ts(Now()), RunWaiting, runID)
+	return err
 }
 
 // RequestCancel marks a run for cancellation. Queued runs are cancelled
@@ -332,9 +441,35 @@ func (s *Store) requestCancelTx(ctx context.Context, tx *sql.Tx, runID string) e
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 1 {
-		_, err := tx.ExecContext(ctx, s.rebind(`UPDATE step_runs SET status = ?, finished_at = ?, error = ? WHERE run_id = ? AND status = ?`),
-			StepCancelled, now, "run cancelled", runID, StepPending)
+		if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE step_runs SET status = ?, finished_at = ?, error = ? WHERE run_id = ? AND status = ?`),
+			StepCancelled, now, "run cancelled", runID, StepPending); err != nil {
+			return err
+		}
+		return s.wakeParentTx(ctx, tx, runID)
+	}
+	// Cancelling goes down the tree (ADR 0038): every active child is
+	// cancelled, or flagged, before the run itself.
+	children, err := tx.QueryContext(ctx, s.rebind(`SELECT id FROM runs WHERE parent_run_id = ? AND status IN (?, ?, ?)`),
+		runID, RunQueued, RunRunning, RunWaiting)
+	if err != nil {
 		return err
+	}
+	var ids []string
+	for children.Next() {
+		var id string
+		if err := children.Scan(&id); err != nil {
+			_ = children.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := children.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.requestCancelTx(ctx, tx, id); err != nil {
+			return err
+		}
 	}
 	// A running run is flagged for the engine to stop; a waiting one is
 	// also woken, so the engine claims it and cancels it the same way.
@@ -376,7 +511,7 @@ func (s *Store) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
 }
 
 const stepCols = `run_id, step_id, idx, kind, status, attempt, session_id, container_id, exit_code, outputs_json, log_path, log_size, log_lines, started_at, finished_at, error,
-	profile, image_digest, input_tokens, output_tokens, cache_read, cache_write, cost_micro`
+	profile, image_digest, input_tokens, output_tokens, cache_read, cache_write, cost_micro, child_run_id, child_version`
 
 func scanStep(sc interface{ Scan(...any) error }) (*StepRun, error) {
 	var st StepRun
@@ -385,7 +520,7 @@ func scanStep(sc interface{ Scan(...any) error }) (*StepRun, error) {
 	u := &st.Usage
 	err := sc.Scan(&st.RunID, &st.StepID, &st.Idx, &st.Kind, &st.Status, &st.Attempt, &st.SessionID, &st.ContainerID, &exit,
 		&st.OutputsJSON, &st.LogPath, &st.LogSize, &st.LogLines, &started, &finished, &st.Error,
-		&st.Profile, &st.ImageDigest, &u.Input, &u.Output, &u.CacheRead, &u.CacheWrite, &u.CostMicro)
+		&st.Profile, &st.ImageDigest, &u.Input, &u.Output, &u.CacheRead, &u.CacheWrite, &u.CostMicro, &st.ChildRunID, &st.ChildVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -435,11 +570,12 @@ func (s *Store) UpdateStepRun(ctx context.Context, st *StepRun) error {
 	u := st.Usage
 	res, err := s.exec(ctx, `UPDATE step_runs SET status = ?, attempt = ?, session_id = ?, container_id = ?, exit_code = ?, outputs_json = ?,
 		log_path = ?, log_size = ?, log_lines = ?, started_at = ?, finished_at = ?, error = ?,
-		profile = ?, image_digest = ?, input_tokens = ?, output_tokens = ?, cache_read = ?, cache_write = ?, cost_micro = ?
+		profile = ?, image_digest = ?, input_tokens = ?, output_tokens = ?, cache_read = ?, cache_write = ?, cost_micro = ?,
+		child_run_id = ?, child_version = ?
 		WHERE run_id = ? AND step_id = ?`,
 		st.Status, st.Attempt, st.SessionID, st.ContainerID, exit, st.OutputsJSON, st.LogPath, st.LogSize, st.LogLines,
 		tsPtr(st.StartedAt), tsPtr(st.FinishedAt), st.Error,
-		st.Profile, st.ImageDigest, u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CostMicro, st.RunID, st.StepID)
+		st.Profile, st.ImageDigest, u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CostMicro, st.ChildRunID, st.ChildVersion, st.RunID, st.StepID)
 	if err != nil {
 		return err
 	}

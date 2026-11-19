@@ -273,7 +273,7 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 
 	s.AddTool(mcp.Tool{
 		Name: ToolGet, Title: "Get a workflow", InputSchema: schema(nameArgs), Annotations: readOnly,
-		Description: "Return a workflow's current YAML, version, status and the trigger.* fields manual runs must supply.",
+		Description: "Return a workflow's current YAML, version, status, the trigger.* fields manual runs (and call steps' input) must supply, whether it is callable, its outputs and the workflows that call it.",
 		Handler: func(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 			var in struct {
 				Name string `json:"name"`
@@ -287,13 +287,14 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 			}
 			out := summary(info)
 			out["yaml"] = info.YAML
+			out["callers"] = orNone(info.Callers)
 			return mcp.JSONResult(out), nil
 		},
 	})
 
 	s.AddTool(mcp.Tool{
 		Name: ToolList, Title: "List workflows", InputSchema: schema(noArgs), Annotations: readOnly,
-		Description: "List workflows with version, status, steps and triggers.",
+		Description: "List workflows with version, status, steps and triggers. A workflow with callable: true has a call trigger: reuse it from a call step (with its trigger_fields as input and its outputs as the step's outputs) instead of copying its steps.",
 		Handler: func(ctx context.Context, _ json.RawMessage) (*mcp.ToolResult, error) {
 			ws, err := d.Workflows.ListWorkflows(ctx)
 			if err != nil {
@@ -337,7 +338,7 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 	s.AddTool(mcp.Tool{
 		Name: ToolGetRun, Title: "Get a run", Annotations: readOnly,
 		InputSchema: schema(`{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"},"log_tail_bytes":{"type":"integer","minimum":0,"maximum":32768,"description":"Bytes of each step's log tail to include (default 4096)."},"step":{"type":"string","description":"Only include this step's log."}}}`),
-		Description: "Return a run's status, per-step status, outputs and errors, and a size-capped tail of each step's log (secret values are redacted).",
+		Description: "Return a run's status, per-step status, outputs and errors, and a size-capped tail of each step's log (secret values are redacted). A call step names its child run (get_run it for the child's logs); a child run names its parent and root.",
 		Handler: func(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 			var in struct {
 				ID       string `json:"id"`
@@ -401,10 +402,22 @@ func (f filtered) AddTool(t mcp.Tool) {
 }
 
 func summary(w *service.WorkflowInfo) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"name": w.Name, "description": w.Description, "version": w.Version, "status": w.Status,
 		"steps": w.Steps, "triggers": w.Triggers, "trigger_fields": w.TriggerFields,
+		"callable": w.Callable, "outputs": w.Outputs,
 	}
+	if len(w.Warnings) > 0 {
+		out["warnings"] = w.Warnings
+	}
+	return out
+}
+
+func orNone(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func needWrite(ctx context.Context) (mcp.Caller, error) {

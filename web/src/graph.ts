@@ -2,7 +2,7 @@
 export interface GraphStep {
   id: string;
   needs?: string[];
-  kind: "image" | "uses" | "approval" | "wait" | "agent";
+  kind: "image" | "uses" | "approval" | "wait" | "agent" | "call";
   label: string;
 }
 
@@ -20,7 +20,17 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
     .map((s, i) => ({
       id: typeof s.id === "string" && s.id ? s.id : `step-${i + 1}`,
       needs: Array.isArray(s.needs) ? s.needs.filter((n): n is string => typeof n === "string") : [],
-      kind: s.uses ? "uses" : s.approval !== undefined ? "approval" : s.wait !== undefined ? "wait" : s.agent !== undefined ? "agent" : "image",
+      kind: s.uses
+        ? "uses"
+        : s.approval !== undefined
+          ? "approval"
+          : s.wait !== undefined
+            ? "wait"
+            : s.agent !== undefined
+              ? "agent"
+              : s.call !== undefined
+                ? "call"
+                : "image",
       label:
         s.approval !== undefined
           ? "approval"
@@ -28,8 +38,16 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
             ? `wait ${String(s.wait)}`
             : s.agent !== undefined
               ? agentLabel(s.agent)
-              : String(s.uses ?? s.image ?? ""),
+              : s.call !== undefined
+                ? callLabel(s.call)
+                : String(s.uses ?? s.image ?? ""),
     }));
+}
+
+// callLabel names a call step by the workflow it calls (ADR 0038).
+export function callLabel(c: unknown): string {
+  const w = c && typeof c === "object" ? (c as { workflow?: unknown }).workflow : undefined;
+  return typeof w === "string" && w ? `call · ${w}` : "call";
 }
 
 // agentLabel names an agent step by its profile (ADR 0037).

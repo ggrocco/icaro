@@ -13,6 +13,7 @@ const (
 	KindApproval = "approval"
 	KindWait     = "wait"
 	KindAgent    = "agent"
+	KindCall     = "call"
 )
 
 // Kind returns the step form, or "" when none or more than one is set.
@@ -21,7 +22,7 @@ func (s *StepSpec) Kind() string {
 	for _, f := range []struct {
 		set  bool
 		kind string
-	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}, {s.Agent != nil, KindAgent}} {
+	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}, {s.Agent != nil, KindAgent}, {s.Call != nil, KindCall}} {
 		if f.set {
 			kind, n = f.kind, n+1
 		}
@@ -33,11 +34,11 @@ func (s *StepSpec) Kind() string {
 }
 
 // Pauses reports whether the step runs no container or action: it waits
-// for a person (approval) or for time to pass (wait), and its run is
-// parked meanwhile (ADR 0030).
+// for a person (approval), for time to pass (wait) or for a child run
+// (call), and its run is parked meanwhile (ADRs 0030, 0038).
 func (s *StepSpec) Pauses() bool {
 	k := s.Kind()
-	return k == KindApproval || k == KindWait
+	return k == KindApproval || k == KindWait || k == KindCall
 }
 
 // ApprovalOutputs are the outputs an approval step produces.
@@ -79,6 +80,28 @@ func (s *Spec) CronTriggers() []string {
 	for _, t := range s.Triggers {
 		if t.Type == TriggerCron {
 			out = append(out, t.Cron)
+		}
+	}
+	return out
+}
+
+// Callable reports whether the workflow has a call trigger (ADR 0038).
+func (s *Spec) Callable() bool {
+	for _, t := range s.Triggers {
+		if t.Type == TriggerCall {
+			return true
+		}
+	}
+	return false
+}
+
+// Calls returns the names of the workflows the spec's call steps call, in
+// step order, without duplicates.
+func (s *Spec) Calls() []string {
+	var out []string
+	for _, st := range s.Steps {
+		if st.Call != nil && !contains(out, st.Call.Workflow) {
+			out = append(out, st.Call.Workflow)
 		}
 	}
 	return out
