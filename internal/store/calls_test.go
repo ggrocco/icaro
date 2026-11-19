@@ -231,7 +231,7 @@ func TestCallTransactionsRollBack(t *testing.T) {
 	if _, err := s.GetRun(ctx, "boom"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("the child survived its booking's failure")
 	}
-	child.ID = ""
+	child.ID = "kid"
 	if _, err := s.EnqueueCall(ctx, child, nil, CallBooking{ParentRunID: parent.ID, StepID: "call", MaxRunsPerRoot: 10}); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestCallTransactionsRollBack(t *testing.T) {
 	}
 	// Cancelling goes down the tree in one transaction: a child that
 	// cannot be cancelled leaves its parent uncancelled too.
-	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER no_cancel BEFORE UPDATE OF status ON runs WHEN OLD.id = '`+child.ID+`' BEGIN SELECT RAISE(ABORT, 'cancel refused'); END`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER no_cancel BEFORE UPDATE OF status ON runs WHEN OLD.id = 'kid' BEGIN SELECT RAISE(ABORT, 'cancel refused'); END`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RequestCancel(ctx, parent.ID); err == nil || !strings.Contains(err.Error(), "cancel refused") {
