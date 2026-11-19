@@ -30,7 +30,7 @@ func main() {
 
 func run(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: sign keygen | sign sign -in FILE -out SIG | sign verify -pub KEY -in FILE -sig SIG")
+		return errors.New("usage: sign keygen | sign sign -in FILE -out SIG | sign verify -pub KEY -in FILE -sig SIG | sign pubkey")
 	}
 	switch args[0] {
 	case "keygen":
@@ -90,6 +90,16 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		}
 		fmt.Fprintln(stdout, "signature OK")
+		return nil
+	case "pubkey":
+		// Prints $ICARO_RELEASE_PUBKEY as one line of base64, whichever
+		// form it was given in. The release passes the key to the linker
+		// (-X), where a PEM block's spaces and newlines split the flags.
+		pub, err := update.ParsePublicKey(strings.TrimSpace(os.Getenv("ICARO_RELEASE_PUBKEY")))
+		if err != nil {
+			return fmt.Errorf("ICARO_RELEASE_PUBKEY: %w", err)
+		}
+		fmt.Fprintln(stdout, base64.StdEncoding.EncodeToString(pub))
 		return nil
 	case "embed":
 		// Writes install.sh with the release public key (PEM) in place of
