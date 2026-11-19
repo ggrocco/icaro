@@ -64,10 +64,11 @@ jobs:
       - name: memory search latency (10k documents)
         if: matrix.os == 'ubuntu-latest'
         run: go test -count=1 -run QueryLatency10k ./internal/memory
-      # Phase 11 load budget at full size: 500 runs x 5 steps, 200 SSE streams.
+      # Load budget at full size (ADR 0024): 500 runs x 5 steps, 200 SSE
+      # streams, one delivery against 1,000 waiting await steps.
       - name: load tests
         if: matrix.os == 'ubuntu-latest'
-        run: go test -count=1 -tags load -run Load ./internal/workflow/engine ./internal/api
+        run: go test -count=1 -tags load -run Load ./internal/workflow/engine ./internal/api ./internal/integration
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
       # Per-package target and justified exceptions (ADR 0025). Linux only:

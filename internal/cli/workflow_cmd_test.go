@@ -192,3 +192,53 @@ func TestApproveAndRejectCommands(t *testing.T) {
 	wantCLI(t, []string{"runs", "reject", "--json", id, "gate", "--comment", "not today"}, `"decision": "rejected"`)
 	failCLI(t, "", "runs", "approve", "run_nope", "gate")
 }
+
+// An await step resolved by hand from a payload file; following and
+// getting the run show what it waits for.
+func TestDeliverCommand(t *testing.T) {
+	home := startDaemon(t)
+	dir := t.TempDir()
+	file := writeFile(t, dir, "awaits.yaml",
+		"version: 1\nname: awaits\nsteps:\n  - {id: ci, await: {integration: github, event: check_suite.completed, key: k, match: event.head_sha}, timeout: 1h}\n")
+	wantCLI(t, []string{"workflow", "validate", file}, "valid: awaits", "warning: step ci awaits github.check_suite.completed")
+	wantCLI(t, []string{"workflow", "apply", file}, "applied awaits version 1", "warning: step ci awaits")
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.SQLite, paths.Layout{Root: home}.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	id := strings.Fields(mustCLI(t, "run", "awaits"))[1]
+	if _, err := st.ClaimRun(ctx, "daemon"); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := st.GetStepRun(ctx, id, "ci")
+	now := store.Now()
+	row.Status, row.Attempt, row.StartedAt = store.StepWaiting, 1, &now
+	if err := st.UpdateStepRun(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.OpenAwait(ctx, &store.StepAwait{RunID: id, StepID: "ci", Integration: "github", Event: "check_suite.completed",
+		Workflow: "awaits", Key: "k", Match: "event.head_sha", Deadline: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ParkRun(ctx, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	ctxF, cancel := context.WithTimeout(ctx, 3*time.Second)
+	out, _ := runCLICtx(ctxF, "runs", "logs", id, "--follow")
+	cancel()
+	if !strings.Contains(out, `[ci] waiting for github.check_suite.completed with key "k"`) || !strings.Contains(out, "icaro runs deliver "+id+" ci --payload FILE") {
+		t.Fatalf("follow: %q", out)
+	}
+	wantCLI(t, []string{"runs", "get", id}, `ci awaits github.check_suite.completed key="k"  state=waiting`)
+
+	failCLI(t, "--payload", "runs", "deliver", id, "ci")
+	failCLI(t, "JSON object", "runs", "deliver", id, "ci", "--payload", writeFile(t, dir, "bad.json", "[1]"))
+	failCLI(t, "does not declare payload field", "runs", "deliver", id, "ci", "--payload", writeFile(t, dir, "extra.json", `{"nope": 1}`))
+	good := writeFile(t, dir, "p.json", `{"head_sha": "k", "conclusion": "success"}`)
+	wantCLI(t, []string{"runs", "deliver", id, "ci", "--payload", good}, "step ci of run "+id+" resolved")
+	failCLI(t, "already resolved", "runs", "deliver", id, "ci", "--payload", good)
+	wantCLI(t, []string{"runs", "get", id}, "state=matched", "delivery=manual:")
+	failCLI(t, "", "runs", "deliver", "run_nope", "ci", "--payload", good)
+}

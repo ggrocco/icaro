@@ -31,6 +31,7 @@ type Service struct {
 	onChange   []func()
 	logsDir    string
 	maxTimeout time.Duration
+	publicURL  string
 	log        *slog.Logger
 }
 
@@ -45,7 +46,10 @@ type Options struct {
 	Events     *events.Bus
 	LogsDir    string
 	MaxTimeout time.Duration
-	Log        *slog.Logger
+	// PublicURL is daemon.public_url; without it no provider can deliver
+	// the events await steps wait for, which Warnings says.
+	PublicURL string
+	Log       *slog.Logger
 }
 
 // New creates a Service.
@@ -57,7 +61,7 @@ func New(o Options) *Service {
 		o.MaxTimeout = 30 * time.Minute
 	}
 	return &Service{
-		store: o.Store, key: o.Key, runner: o.Runner, catalog: o.Catalog, secrets: o.Secrets, events: o.Events,
+		store: o.Store, key: o.Key, runner: o.Runner, catalog: o.Catalog, secrets: o.Secrets, events: o.Events, publicURL: o.PublicURL,
 		logsDir: o.LogsDir, maxTimeout: o.MaxTimeout, log: o.Log,
 	}
 }

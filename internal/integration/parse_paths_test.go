@@ -112,7 +112,7 @@ func TestDoctorChecksEdgeCases(t *testing.T) {
 	// A user pack shadowing a builtin is a warning in the detail.
 	_ = os.MkdirAll(filepath.Join(dir, "mine"), 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "mine", "slack.yaml"), []byte("version: 1\nname: slack\nhosts: [slack.com]\n"), 0o600)
-	reps := doctor.Run(ctx, DoctorChecks(dir, db), false)
+	reps := doctor.Run(ctx, DoctorChecks(dir, db, ""), false)
 	if reps[0].Severity != doctor.OK || !strings.Contains(reps[0].Detail, "shadows the builtin slack") {
 		t.Fatalf("%+v", reps[0])
 	}
@@ -142,7 +142,7 @@ func TestDoctorChecksEdgeCases(t *testing.T) {
 	if _, err := MissingWebhookSecrets(ctx, snap, specs, db); err == nil {
 		t.Fatal("store errors are returned")
 	}
-	reps = doctor.Run(ctx, DoctorChecks(dir, db), false)
+	reps = doctor.Run(ctx, DoctorChecks(dir, db, ""), false)
 	if reps[1].Severity != doctor.Error {
 		t.Fatalf("an unreadable store is an error: %+v", reps[1])
 	}

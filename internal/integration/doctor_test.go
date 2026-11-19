@@ -29,7 +29,7 @@ func TestDoctorChecks(t *testing.T) {
 	if _, err := db.ApplyWorkflow(ctx, "review", wf, "{}", "t"); err != nil {
 		t.Fatal(err)
 	}
-	reps := doctor.Run(ctx, DoctorChecks(dir, db), false)
+	reps := doctor.Run(ctx, DoctorChecks(dir, db, ""), false)
 	if reps[0].Severity != doctor.OK || reps[1].Severity != doctor.Error || !strings.Contains(reps[1].Detail, "icaro credential add github webhook_secret") {
 		t.Fatalf("%+v", reps)
 	}
@@ -39,9 +39,45 @@ func TestDoctorChecks(t *testing.T) {
 	}
 	_ = os.MkdirAll(filepath.Join(dir, "bad"), 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "bad", "x.yaml"), []byte("version: 2\n"), 0o600)
-	reps = doctor.Run(ctx, DoctorChecks(dir, db), false)
+	reps = doctor.Run(ctx, DoctorChecks(dir, db, ""), false)
 	if reps[0].Severity != doctor.Error || !strings.Contains(reps[0].Detail, "bad/x.yaml") || reps[1].Severity != doctor.OK {
 		t.Fatalf("%+v", reps)
+	}
+	if reps[2].Severity != doctor.OK || !strings.Contains(reps[2].Detail, "no workflow awaits") {
+		t.Fatalf("%+v", reps[2])
+	}
+}
+
+// Awaiting an integration needs its webhook secret, and a daemon the
+// provider can reach.
+func TestDoctorAwaitedEvents(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, store.SQLite, filepath.Join(t.TempDir(), "d.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wf := "version: 1\nname: ci-wait\nsteps:\n  - {id: ci, await: {integration: github, event: push, key: k, match: event.after}, timeout: 1h}\n"
+	if _, err := db.ApplyWorkflow(ctx, "ci-wait", wf, "{}", "t"); err != nil {
+		t.Fatal(err)
+	}
+	reps := doctor.Run(ctx, DoctorChecks(t.TempDir(), db, ""), false)
+	if reps[1].Severity != doctor.Error || !strings.Contains(reps[1].Detail, "github.webhook_secret") {
+		t.Fatalf("%+v", reps[1])
+	}
+	if reps[2].Severity != doctor.Warning || !strings.Contains(reps[2].Detail, "ci-wait") || !strings.Contains(reps[2].Detail, "icaro runs deliver") {
+		t.Fatalf("%+v", reps[2])
+	}
+	reps = doctor.Run(ctx, DoctorChecks(t.TempDir(), db, "https://icaro.example"), false)
+	if reps[2].Severity != doctor.OK || !strings.Contains(reps[2].Detail, "https://icaro.example") {
+		t.Fatalf("%+v", reps[2])
+	}
+	_ = db.Close()
+	if reps = doctor.Run(ctx, DoctorChecks(t.TempDir(), db, ""), false); reps[2].Severity != doctor.Error {
+		t.Fatalf("%+v", reps[2])
 	}
 }
 

@@ -38,6 +38,7 @@ var (
 	typeStep       = reflect.TypeOf(StepSpec{})
 	typeRepository = reflect.TypeOf(RepositoryRef{})
 	typeApproval   = reflect.TypeOf(ApprovalSpec{})
+	typeAwait      = reflect.TypeOf(AwaitSpec{})
 )
 
 // triggerVariants splits TriggerSpec into the builtin and integration forms.
@@ -49,7 +50,8 @@ var triggerVariants = []defSpec{
 var objectDefs = []defSpec{
 	{name: "repositoryRef", typ: typeRepository, required: []string{"ref"}, description: repositoryRefDescription},
 	{name: "approval", typ: typeApproval, description: approvalDescription},
-	{name: "step", typ: typeStep, required: []string{"id"}, description: stepDescription, oneOfRequired: []string{"image", "uses", "approval", "wait"}},
+	{name: "await", typ: typeAwait, required: []string{"integration", "event", "key", "match"}, description: awaitDescription},
+	{name: "step", typ: typeStep, required: []string{"id"}, description: stepDescription, oneOfRequired: []string{"image", "uses", "approval", "wait", "await"}},
 }
 
 // refName maps a Go type to its $defs entry.
@@ -63,6 +65,8 @@ func refName(t reflect.Type) string {
 		return "repositoryRef"
 	case typeApproval:
 		return "approval"
+	case typeAwait:
+		return "await"
 	}
 	return ""
 }

@@ -68,15 +68,29 @@
         "message": {"type": "string", "description": "What the approver is asked, shown in the UI and the CLI. Supports interpolation over steps, trigger, env, run and workflow; secrets are not allowed, since the text is displayed.", "maxLength": 2000}
       }
     },
+    "await": {
+      "type": "object",
+      "description": "Waits for a verified integration event correlated to the run by a rendered key (ADR 0032).",
+      "required": ["integration", "event", "key", "match"],
+      "additionalProperties": false,
+      "properties": {
+        "integration": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$", "description": "Integration manifest name, resolved across installed packs."},
+        "event": {"type": "string", "description": "Event name declared by the manifest's triggers section.", "maxLength": 200},
+        "key": {"type": "string", "description": "Template rendered once when the step starts, over steps (of needs ancestors), trigger, env, run and workflow; not secrets, since the key is stored and shown.", "minLength": 1, "maxLength": 2000},
+        "match": {"type": "string", "description": "Expression over the incoming event's normalized payload (event.*); the event correlates when its value, as a string, equals the rendered key.", "minLength": 1, "maxLength": 2000},
+        "filter": {"type": "string", "description": "Optional boolean expression over event.*, evaluated after match; a correlated event that fails it is ignored and the step keeps waiting.", "maxLength": 2000}
+      }
+    },
     "step": {
       "type": "object",
-      "description": "A step takes exactly one of four forms. `image` runs a container image — the general compute primitive (an agent, a shell command, a JS runtime are all just images); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container (ADR 0007). `approval` waits for a person to approve or reject the run, and `wait` pauses it for a duration; neither runs anything, and the run is parked while they wait (ADR 0030). All forms are full DAG citizens of needs and when; retry, command, env, input and outputs apply to image and uses steps only. Conditional execution is expressed with `when` rather than a dedicated step type.",
+      "description": "A step takes exactly one of five forms. `image` runs a container image — the general compute primitive (an agent, a shell command, a JS runtime are all just images); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container (ADR 0007). `approval` waits for a person to approve or reject the run, `wait` pauses it for a duration, and `await` waits for a matching integration event; none of them runs anything, and the run is parked while they wait (ADRs 0030, 0032). All forms are full DAG citizens of needs and when; retry, command, env, input and outputs apply to image and uses steps only. Conditional execution is expressed with `when` rather than a dedicated step type.",
       "required": ["id"],
       "oneOf": [
         {"required": ["image"]},
         {"required": ["uses"]},
         {"required": ["approval"]},
-        {"required": ["wait"]}
+        {"required": ["wait"]},
+        {"required": ["await"]}
       ],
       "additionalProperties": false,
       "properties": {
@@ -108,7 +122,8 @@
           "maxLength": 2000
         },
         "approval": {"$ref": "#/$defs/approval", "description": "Waits for a person to approve or reject the run (ADR 0030). Approving succeeds the step with outputs approved_by and comment; rejecting fails it, so steps that need it are skipped. The step's timeout, when set, is the decision deadline; without one the step waits until someone decides or cancels the run."},
-        "wait": {"type": "string", "pattern": "^[0-9]+(s|m|h)$", "description": "Pauses the run for this long (e.g. 10m, 24h; at most 720h) before steps that need this one start (ADR 0030)."}
+        "wait": {"type": "string", "pattern": "^[0-9]+(s|m|h)$", "description": "Pauses the run for this long (e.g. 10m, 24h; at most 720h) before steps that need this one start (ADR 0030)."},
+        "await": {"$ref": "#/$defs/await", "description": "Waits for a verified integration event that matches the step's key (ADR 0032). The step's timeout is required (at most 720h) and is the deadline; past it the step fails. Outputs are the event's payload fields plus delivery_id."}
       }
     }
   }

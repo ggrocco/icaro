@@ -74,7 +74,7 @@ type State struct {
 	// Remote is a TCP daemon (daemon.url), which the app does not start.
 	Remote    bool
 	Running   []Run
-	Waiting   []Run // parked on an approval or a wait step
+	Waiting   []Run // parked on an approval, wait or await step
 	Queued    []Run
 	Failed    []Run // the most recent first
 	Previews  []Preview

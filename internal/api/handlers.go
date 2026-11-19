@@ -62,6 +62,11 @@ func (s *Server) handleValidateWorkflow(w http.ResponseWriter, r *http.Request) 
 	resp := map[string]any{"valid": len(issues) == 0, "issues": issues}
 	if wf != nil {
 		resp["name"] = wf.Name
+		if len(issues) == 0 {
+			if ws := s.svc.Warnings(wf); len(ws) > 0 {
+				resp["warnings"] = ws
+			}
+		}
 	}
 	if issues == nil {
 		resp["issues"] = []workflow.Issue{}
@@ -206,6 +211,24 @@ func (s *Server) handleDecide(approve bool) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, run)
 	}
+}
+
+// handleDeliver resolves a waiting await step by hand with an event
+// payload, recording the caller: {"payload": {...}}.
+func (s *Server) handleDeliver(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	run, err := s.svc.DeliverAwait(r.Context(), r.PathValue("id"), r.PathValue("step"), in.Payload, actor(r))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }
 
 // handleStepLogs serves a step attempt's log as text: ?attempt= (default

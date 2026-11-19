@@ -61,6 +61,9 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 				return printJSON(cmd.OutOrStdout(), info)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "applied %s version %d\n", info.Name, info.Version)
+			for _, w := range info.Warnings {
+				fmt.Fprintf(cmd.OutOrStdout(), "warning: %s\n", w)
+			}
 			if len(info.TriggerFields.Required) > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "manual runs need: --set %s\n", strings.Join(info.TriggerFields.Required, "=... --set ")+"=...")
 			}
@@ -92,6 +95,9 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 				}
 			case res.Valid:
 				fmt.Fprintf(cmd.OutOrStdout(), "valid: %s\n", res.Name)
+				for _, w := range res.Warnings {
+					fmt.Fprintf(cmd.OutOrStdout(), "warning: %s\n", w)
+				}
 			default:
 				for _, is := range res.Issues {
 					fmt.Fprintln(cmd.OutOrStdout(), is.String())
@@ -430,7 +436,43 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 		}
 		return c
 	}
-	cmd.AddCommand(list, get, logs, cancel, rerun, decide(true), decide(false))
+	var payloadFile string
+	deliver := &cobra.Command{
+		Use:   "deliver ID STEP --payload FILE",
+		Short: "Resolve a run's waiting await step with an event payload",
+		Long: "Resolve a run's waiting await step by hand, for a daemon its integration cannot reach.\n" +
+			"FILE (- for stdin) holds a JSON object of the event's declared payload fields; key, match\n" +
+			"and filter are not applied. The step's delivery_id output is manual:<id>.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if payloadFile == "" {
+				return errors.New("give the event payload with --payload FILE (- for stdin)")
+			}
+			raw, err := readInputArg(payloadFile)
+			if err != nil {
+				return err
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
+				return fmt.Errorf("--payload must hold a JSON object of the event's fields: %v", err)
+			}
+			c, err := opts.client(cmd.Context())
+			if err != nil {
+				return err
+			}
+			run, err := c.DeliverAwait(cmd.Context(), args[0], args[1], payload)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), run)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "step %s of run %s resolved\n", args[1], run.ID)
+			return nil
+		},
+	}
+	deliver.Flags().StringVar(&payloadFile, "payload", "", "JSON file with the event payload (- for stdin)")
+	cmd.AddCommand(list, get, logs, cancel, rerun, decide(true), decide(false), deliver)
 	return cmd
 }
 

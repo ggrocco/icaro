@@ -7,8 +7,9 @@ description: Author, validate, run and debug Ícaro workflows through the icaro 
 
 Ícaro workflows are YAML DAGs of steps. Each step is an `image` step (a
 container), a `uses` step (an integration action the daemon runs over
-HTTP), an `approval` step (a person approves or rejects) or a `wait` step
-(a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
+HTTP), an `approval` step (a person approves or rejects), a `wait` step
+(a pause, such as `wait: 2h`) or an `await` step (a matching integration
+event, such as CI finishing on a commit). You work through the `icaro` MCP server's tools; the
 schema and the validator are the source of truth, not your memory.
 
 ## The loop
@@ -76,13 +77,25 @@ steps:
 
 ## Rules the validator enforces
 
-- A step has exactly one of `image`, `uses`, `approval` or `wait`.
+- A step has exactly one of `image`, `uses`, `approval`, `wait` or `await`.
   `command`, `env` and `outputs` are for image steps only; a `uses` step's
   outputs come from the action.
 - `approval: {message: "..."}` outputs `approved_by` and `comment`; its
   `timeout` is the decision deadline, and the message cannot read secrets.
   A rejection or an expired deadline fails the step. `wait` takes a
-  duration up to `720h` and has no outputs. Neither takes `retry`.
+  duration up to `720h` and has no outputs. None of them takes `retry`.
+- `await: {integration, event, key, match, filter}` waits for an event
+  the integration declares (`get_integration` lists them). `key` is
+  rendered when the step starts, from `trigger`, `env`, `run`, `workflow`
+  and `needs` ancestors' outputs, never `secrets`; `match` (and the
+  optional `filter`) read the payload under `event`, and the event
+  belongs to the step when `match` equals the key. `timeout` is required
+  (at most `720h`). Its outputs are the event's fields plus
+  `delivery_id`. Events since the run started count, so an event an
+  earlier step caused is not missed.
+- **You cannot deliver.** No tool resolves an await step by hand; when
+  `get_run` shows one `waiting`, tell the human its key and the
+  `deliver_with` command.
 - **You cannot approve.** No tool decides an approval: that is the point
   of the step. When `get_run` shows a step `waiting` with an `approval`,
   tell the human its message and the `decide_with` command.

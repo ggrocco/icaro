@@ -252,7 +252,7 @@ func TestShadowAndCollision(t *testing.T) {
 		t.Fatalf("%v", schema)
 	}
 	c := Catalog{R: reg}
-	if len(c.ActionRefs()) == 0 || len(c.Integrations()) < 9 || len(c.EventNames("github")) != 5 {
+	if len(c.ActionRefs()) == 0 || len(c.Integrations()) < 9 || len(c.EventNames("github")) != 6 {
 		t.Fatalf("catalog %v %v", c.Integrations(), c.EventNames("github"))
 	}
 }

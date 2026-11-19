@@ -167,3 +167,45 @@ type Approval struct {
 	CreatedAt time.Time
 	DecidedAt *time.Time
 }
+
+// Await step states (ADR 0032). A row leaves AwaitWaiting only by
+// compare-and-set, so the first resolution is final.
+const (
+	AwaitWaiting   = "waiting"
+	AwaitMatched   = "matched"   // an event (or a person) resolved it
+	AwaitExpired   = "expired"   // the deadline passed first
+	AwaitCancelled = "cancelled" // the run was cancelled, replaced or deleted
+)
+
+// StepAwait is the state of one await step of a run: the event it waits
+// for, the key rendered when it started, its deadline and, once resolved,
+// the delivery ("manual:<id>" for a person), the payload and the actor.
+type StepAwait struct {
+	RunID       string
+	StepID      string
+	Integration string
+	Event       string
+	Workflow    string // the run's workflow; generic webhook events correlate only with it
+	Key         string
+	Match       string // the step's match expression over event.*
+	Filter      string // the step's filter, "" for none
+	State       string
+	Deadline    time.Time
+	DeliveryID  string
+	PayloadJSON string
+	Actor       string
+	CreatedAt   time.Time
+	DecidedAt   *time.Time
+}
+
+// DeliveryEvent is one normalized event a verified delivery matched, kept
+// so an await step that starts later can look back for it.
+type DeliveryEvent struct {
+	DeliveryID  string
+	Seq         int
+	Integration string
+	Event       string
+	Workflow    string // the generic webhook token's workflow, "" otherwise
+	PayloadJSON string
+	ReceivedAt  time.Time
+}
