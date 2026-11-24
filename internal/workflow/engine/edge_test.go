@@ -853,3 +853,31 @@ func TestUntarFirst(t *testing.T) {
 		t.Fatalf("too large: %v", err)
 	}
 }
+
+// Regression: a daemon shutdown that interrupted loading a run's step rows
+// failed the run ("load steps: context canceled") instead of leaving it
+// for re-attach, which failed a call tree restarted mid-start
+// (TestIntegrationCallTree). Every way a run can end before its DAG
+// starts treats a shutdown and a cancel alike.
+func TestEndEarly(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.KeepWorkspaceOnFailure = true
+	e := New(f.cfg, f.deps)
+
+	status, msg, keep, _ := e.endEarly(context.Background(), "load steps: %v", "boom")
+	if status != store.RunFailed || msg != "load steps: boom" || !keep {
+		t.Fatalf("live: %q %q %v", status, msg, keep)
+	}
+
+	shutdown, stop := context.WithCancel(context.Background())
+	stop()
+	if status, msg, keep, _ := e.endEarly(shutdown, "load steps: %v", context.Canceled); status != "" || msg != "" || keep {
+		t.Fatalf("a shutdown must leave the run for re-attach: %q %q %v", status, msg, keep)
+	}
+
+	cancelledCtx, cancel := context.WithCancelCause(context.Background())
+	cancel(errCancelled)
+	if status, msg, keep, _ := e.endEarly(cancelledCtx, "load steps: %v", context.Canceled); status != store.RunCancelled || msg != "cancelled" || keep {
+		t.Fatalf("a cancel stays a cancel: %q %q %v", status, msg, keep)
+	}
+}
