@@ -12,6 +12,7 @@ const (
 	KindUses     = "uses"
 	KindApproval = "approval"
 	KindWait     = "wait"
+	KindAgent    = "agent"
 )
 
 // Kind returns the step form, or "" when none or more than one is set.
@@ -20,7 +21,7 @@ func (s *StepSpec) Kind() string {
 	for _, f := range []struct {
 		set  bool
 		kind string
-	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}} {
+	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}, {s.Agent != nil, KindAgent}} {
 		if f.set {
 			kind, n = f.kind, n+1
 		}

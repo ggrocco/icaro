@@ -46,7 +46,8 @@ type BadOption struct{ Msg string }
 
 func (e *BadOption) Error() string { return e.Msg }
 
-// BuildReport collects the Claude Code transcripts under opts.Roots and
+// BuildReport collects the Claude Code transcripts under opts.Roots (and,
+// with a Store, the usage workflow agent steps recorded) and
 // fills in stored snapshots for rows whose transcript is gone. Provider
 // and snapshot failures become unavailable rows, as in Collect; only a
 // bad option is an error.
@@ -67,7 +68,11 @@ func BuildReport(ctx context.Context, opts ReportOptions) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	recs := Collect(ctx, []Provider{&ClaudeCode{Roots: opts.Roots}}, since, loc)
+	providers := []Provider{&ClaudeCode{Roots: opts.Roots}}
+	if opts.Store != nil {
+		providers = append(providers, &AgentSteps{Store: opts.Store})
+	}
+	recs := Collect(ctx, providers, since, loc)
 	if opts.Store != nil {
 		stored, err := Load(ctx, opts.Store, since.Format("2006-01-02"))
 		if err != nil {

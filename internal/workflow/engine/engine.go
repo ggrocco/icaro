@@ -79,6 +79,9 @@ type Config struct {
 	Heartbeat    time.Duration
 	// KeepWorkspaceOnFailure leaves a failed run's workspace for inspection.
 	KeepWorkspaceOnFailure bool
+	// AgentProfiles are workflows.agent_profiles (ADR 0037), in config
+	// order: the profiles agent steps may run under.
+	AgentProfiles []workflow.AgentProfile
 }
 
 // Deps are the engine's collaborators. Store and Docker are required;
@@ -95,7 +98,9 @@ type Deps struct {
 	Secrets  workflow.SecretResolver
 	Catalog  workflow.Catalog
 	Events   *events.Bus
-	Log      *slog.Logger
+	// Agents runs agent steps' sessions (ADR 0037); nil fails them.
+	Agents session.AgentSteps
+	Log    *slog.Logger
 }
 
 // RunnerID is the claim owner recorded on runs (one daemon, ADR 0001).

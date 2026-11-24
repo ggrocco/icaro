@@ -268,4 +268,13 @@ func TestWorkflowHandlerInputErrors(t *testing.T) {
 	if code, body := f.call("GET", "/api/v1/runs?workflow=hello&status=queued", nil); code != 200 || !strings.Contains(body, `"runs": []`) {
 		t.Fatalf("runs: %d %s", code, body)
 	}
+	// Agent steps are off until the operator lists a profile (ADR 0037).
+	if code, body := f.call("GET", "/api/v1/agent-profiles", nil); code != 200 || !strings.Contains(body, `"profiles": []`) {
+		t.Fatalf("agent profiles: %d %s", code, body)
+	}
+	agent := "version: 1\nname: agent-wf\nsteps:\n  - id: review\n    agent: {prompt: hi}\n"
+	code, body = f.call("POST", "/api/v1/workflows/validate", agent)
+	if code != 200 || !strings.Contains(body, "agent steps are off") || !strings.Contains(body, `"warnings": []`) {
+		t.Fatalf("validate agent: %d %s", code, body)
+	}
 }

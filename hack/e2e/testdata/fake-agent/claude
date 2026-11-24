@@ -8,12 +8,37 @@
 set -eu
 prompt=$(cat)
 sid=e2e-session
+step=
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-id|--resume) sid=$2; shift ;;
+    # The agent-step mode (ADR 0037) runs with no permission prompts.
+    --permission-mode) step=1; shift ;;
   esac
   shift
 done
+
+if [ -n "$step" ]; then
+  # An agent step: it works in /workspace, keeps a note in its own home
+  # (which the next step must not see), writes /icaro/output.json and
+  # answers with what it found.
+  seen=clean
+  [ -f "$HOME/notes.txt" ] && seen=dirty
+  echo "$prompt" > "$HOME/notes.txt"
+  echo "edited by the agent" > /workspace/agent.txt
+  memory=off
+  [ -S /icaro/mcp.sock ] && memory=on
+  # With credential injection the CLI sees a capability token, never the
+  # key: report its prefix and the whole environment's key-like values.
+  key=$(printf '%s' "${ANTHROPIC_API_KEY:-none}" | cut -c1-15)
+  printf '{"summary":"home %s, memory %s","key":"%s","env":"%s"}\n' "$seen" "$memory" "$key" "$(env | grep -c sk-ant- || true)" > /icaro/output.json
+  echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$sid\"}"
+  echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_w","name":"Write","input":{"file_path":"/workspace/agent.txt"}}]}}'
+  echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_w","content":"written"}]}}'
+  echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done: home $seen, memory $memory.\"}]}}"
+  echo '{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":200,"output_tokens":40}}'
+  exit 0
+fi
 
 mcp() {
   printf '%s\n%s\n%s\n' \

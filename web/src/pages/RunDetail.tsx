@@ -153,6 +153,7 @@ export function RunDetail({ id }: { id: string }) {
               </h2>
               {step.error && <div className="notice error">{step.error}</div>}
               {step.approval && <ApprovalFacts approval={step.approval} />}
+              {step.agent && <AgentFacts agent={step.agent} />}
               <dl className="kv">
                 <dt>Attempts</dt>
                 <dd>{step.attempt}</dd>
@@ -250,5 +251,49 @@ function ApprovalFacts({ approval: a }: { approval: NonNullable<StepInfo["approv
         </>
       )}
     </dl>
+  );
+}
+
+// AgentFacts shows what ran an agent step and what it used (ADR 0037).
+function AgentFacts({ agent: a }: { agent: NonNullable<StepInfo["agent"]> }) {
+  const u = a.usage;
+  const params = Object.entries(a.params ?? {});
+  return (
+    <>
+      <dl className="kv" aria-label="Agent step">
+        <dt>Profile</dt>
+        <dd>
+          {a.profile}
+          {a.cli && <span className="muted"> ({a.cli})</span>}
+        </dd>
+        {a.image_digest && (
+          <>
+            <dt>Image</dt>
+            <dd>
+              <code className="small">{a.image_digest}</code>
+            </dd>
+          </>
+        )}
+        {params.length > 0 && (
+          <>
+            <dt>Params</dt>
+            <dd>{params.map(([k, v]) => `${k}=${String(v)}`).join(" ")}</dd>
+          </>
+        )}
+        <dt>Memory</dt>
+        <dd>{a.memory ? "on" : "off"}</dd>
+        <dt>Tokens</dt>
+        <dd>
+          {u.input + (u.cache_read ?? 0)} in · {u.output} out
+          {u.cost_usd_estimate !== undefined ? ` · ~$${u.cost_usd_estimate.toFixed(4)} (estimate)` : ""}
+        </dd>
+      </dl>
+      {a.prompt && (
+        <details>
+          <summary>Prompt</summary>
+          <pre className="code">{a.prompt}</pre>
+        </details>
+      )}
+    </>
   );
 }

@@ -50,9 +50,10 @@ steps:
 
 ## Steps
 
-A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of four forms.
+A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of five forms.
 
-- An **`image` step** runs a container. `command` runs as `/bin/sh -c <command>`; without it, the image's entrypoint runs. An agent step is an image step whose image is the agent base image and whose command runs the agent CLI headless.
+- An **`image` step** runs a container. `command` runs as `/bin/sh -c <command>`; without it, the image's entrypoint runs.
+- An **`agent` step** runs an agent CLI (Claude Code or Codex) headless, under a profile the operator allows; see [Agent steps](#agent-steps).
 - A **`uses` step** calls an integration action, such as `uses: slack.post-message`, inside the daemon over HTTP. No container runs. `input` is checked against the action's typed inputs, and its outputs come from the manifest. Use `icaro integration show <name>` to list them.
 - An **`approval` step** waits until a person approves or rejects it; see [Approvals and waits](#approvals-and-waits).
 - A **`wait` step** waits for a duration, such as `wait: 2h`.
@@ -66,9 +67,9 @@ Every form takes the same scheduling fields, except as noted:
 | `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. Not on approval or wait steps. |
 | `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). On an approval step it is the decision deadline instead, with no ceiling; a wait step has none. |
 | `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. Both fields may use `${{ }}` (for example `https://github.com/${{ trigger.repo }}.git`) with the same root and `needs` rules as other fields, but not `secrets`. A rendered value that is empty (ref), starts with `-`, contains whitespace or carries a secret fails the step before git runs. |
-| `env` | Image steps only. Merged over the workflow `env`. |
+| `env` | Image and agent steps. Merged over the workflow `env`. |
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
-| `outputs` | Image steps only. A map from name to capture source; see below. |
+| `outputs` | Image and agent steps. A map from name to capture source; see below. |
 
 A step runs only when each of its `needs` **succeeded** or was **skipped by its own `when`**. If a need failed, was cancelled, or did not run, the step is recorded as `skipped` with `not run: needs <id> <status>`, its dependents skip in turn, and the run fails. If the run fails before any step starts (its session, egress or workflow `env` could not be set up), every step is recorded as `skipped` with `not run: <run error>`, or as `cancelled` if the run was cancelled. The details are in [ADR 0013](../blueprint/docs/adr/0013-workflow-execution-semantics.md).
 
@@ -132,6 +133,52 @@ steps:
 - **Message.** `approval.message` (at most 2000 characters) may use `trigger.*`, `env`, `run`, `workflow` and the outputs of the step's `needs` ancestors, but not `secrets`: the message is shown to whoever can read runs. The default is `Approve step <id>?`.
 - **Waits.** `wait` takes `s`, `m` or `h` units, at most `720h` (30 days). It ends on time even across a daemon restart: the step's start time is stored.
 - **Parked runs.** While a run has only approval and wait steps left, its status is `waiting` and it holds no `workflows.max_runs` slot, so other runs go ahead. It still counts as active for its workflow's [concurrency](#concurrency) policy. A decision, the end of a wait, or `icaro runs cancel` resumes it. Steps that do not depend on a pending approval keep running while it waits.
+
+## Agent steps
+
+An agent step gives a task to an agent CLI and lets it work in `/workspace`, under the operator's login and network policy ([ADR 0037](../blueprint/docs/adr/0037-agent-steps.md)). Its final answer is the built-in output `result`.
+
+```yaml workflow
+version: 1
+name: pr-review
+triggers:
+  - type: manual
+steps:
+  - id: review
+    repository:
+      ref: ${{ trigger.repo }}
+      revision: ${{ trigger.sha }}
+    agent:
+      profile: reviewer
+      prompt: |
+        Review the change in /workspace against main. Write the risks you
+        find to /icaro/output.json as {"risks": "..."}.
+      params:
+        model: sonnet
+        max_turns: 30
+    outputs:
+      risks: "json:risks"
+    timeout: 20m
+  - id: report
+    needs: [review]
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    env:
+      SUMMARY: ${{ steps.review.outputs.result }}
+      RISKS: ${{ steps.review.outputs.risks }}
+    command: echo "$SUMMARY" && echo "$RISKS"
+```
+
+- **Enabling a profile.** Agent steps are off until an operator lists the profiles workflows may use, in the config: `workflows: {agent_profiles: [reviewer]}`. A step without `profile` uses the first one. A workflow cannot pick any other profile: a profile decides whose login, egress allowlist and credentials the agent gets. `icaro config show` lists them; `icaro doctor` checks that each is signed in (or injects an API key), reaches its provider and has a recent enough CLI.
+- **The harness is the profile's agent.** `params` are the CLI's declared knobs, checked by the validator: `model` and `max_turns` for Claude Code, `model` for Codex. There is no free-form flag list; a different invocation is an image step.
+- **The prompt** may use `steps` (of `needs` ancestors), `trigger`, `env`, `run` and `workflow`, never `secrets`: it is stored with the run, shown in the UI and sent to the provider. Pass a secret the agent needs through `env`. The rendered prompt is fed to the CLI on stdin.
+- **Outputs.** `result` is the agent's last message (at most 1 MiB). Other outputs are captured from `/icaro/output.json` or the workspace as on image steps, so tell the agent to write them.
+- **Each attempt starts clean.** The step gets a fresh home layer over the profile's signed-in home, discarded when the attempt ends, so nothing it writes there reaches another step or run. `/workspace` keeps what a failed attempt wrote, as on image steps.
+- **Network and credentials.** The step uses its profile's egress allowlist, not `workflows.profile`'s. With an `inject` profile the API key stays on the host: the CLI gets a placeholder token and the daemon's relay.
+- **The image** is the profile's, resolved to a digest when the run starts and used by every attempt and agent step of that profile in the run, even if the tag moves. The run shows the digest.
+- **Memory.** The step gets the memory MCP tools unless it sets `memory: false`. The daemon scopes them to the run's project, else the step's repository, else the workflow.
+- **Failures.** An expired login fails the step with **Sign in required** and the `icaro login <profile>` command, without a retry. A usage limit or a CLI error fails the attempt, and `retry` runs it again from a fresh home. While a step of a profile runs, `icaro login <profile>` is refused.
+- **Usage.** The tokens the CLI reports are recorded on the step, shown on the run page and counted by `icaro usage` (per run and step). Subscription profiles show tokens only; `inject` profiles also show the CLI's cost, labelled an estimate.
+- **Untrusted input.** A prompt that reads `trigger.*` in a workflow with an integration trigger carries text an outsider may have written, so prompt injection is the expected case. Validation warns, naming the profile. The agent can still reach only its profile's allowlist, its workspace, its own home layer and its memory scope; it has no daemon API and no secrets you did not pass in `env`. Keep the profile's allowlist narrow and pass the agent only what it needs.
 
 ## Expressions
 

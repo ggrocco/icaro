@@ -1,5 +1,34 @@
 {
   "$defs": {
+    "agent": {
+      "additionalProperties": false,
+      "description": "An agent step (ADR 0037): the profile's agent CLI runs one unattended, one-shot task in /workspace.",
+      "properties": {
+        "memory": {
+          "description": "Whether the step gets the memory MCP server, scoped server-side (default true).",
+          "type": "boolean"
+        },
+        "params": {
+          "description": "The harness's declared params (for example model and max_turns), validated against the agent catalog.",
+          "type": "object"
+        },
+        "profile": {
+          "description": "The agent profile to run under; it must be listed in the operator's workflows.agent_profiles. Defaults to the first listed profile.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "What the agent is asked to do, fed on stdin. Supports interpolation over steps, trigger, env, run and workflow; secrets are not allowed, since the prompt is stored, displayed and sent to the provider. Pass secrets the agent needs through env.",
+          "maxLength": 100000,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
     "approval": {
       "additionalProperties": false,
       "description": "A human approval gate (ADR 0030).",
@@ -78,7 +107,7 @@
     },
     "step": {
       "additionalProperties": false,
-      "description": "A step takes exactly one of four forms. `image` runs a container image — the general compute primitive (an agent, a shell command, a JS runtime are all just images); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container (ADR 0007). `approval` waits for a person to approve or reject the run, and `wait` pauses it for a duration; neither runs anything, and the run is parked while they wait (ADR 0030). All forms are full DAG citizens of needs and when; retry, command, env, input and outputs apply to image and uses steps only. Conditional execution is expressed with `when` rather than a dedicated step type.",
+      "description": "A step takes exactly one of five forms. `image` runs a container image — the general compute primitive (a shell command, a JS runtime, any tool); `agent` runs an agent profile's CLI headless under the operator's login and network policy (ADR 0037); `uses` invokes a declarative integration action (e.g. slack.post-message) executed in-process by the daemon — no container (ADR 0007). `approval` waits for a person to approve or reject the run, and `wait` pauses it for a duration; neither runs anything, and the run is parked while they wait (ADR 0030). All forms are full DAG citizens of needs and when; retry, env, input and outputs apply to image, agent and uses steps, and command to image steps only. Conditional execution is expressed with `when` rather than a dedicated step type.",
       "oneOf": [
         {
           "required": [
@@ -99,9 +128,18 @@
           "required": [
             "wait"
           ]
+        },
+        {
+          "required": [
+            "agent"
+          ]
         }
       ],
       "properties": {
+        "agent": {
+          "$ref": "#/$defs/agent",
+          "description": "Runs an agent profile's CLI (Claude Code or Codex) headless as the step, under the operator's login, egress allowlist and credential injection (ADR 0037). Its final answer is the built-in output `result`; declared outputs are captured from /icaro/output.json as on image steps."
+        },
         "approval": {
           "$ref": "#/$defs/approval",
           "description": "Waits for a person to approve or reject the run (ADR 0030). Approving succeeds the step with outputs approved_by and comment; rejecting fails it, so steps that need it are skipped. The step's timeout, when set, is the decision deadline; without one the step waits until someone decides or cancels the run."

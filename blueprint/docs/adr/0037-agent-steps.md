@@ -1,6 +1,6 @@
 # ADR 0037 — Agent steps: an agent CLI as a first-class workflow step
 
-**Status:** Proposed. Would lift [MVP cut 8](../02-decisions-risks.md#mandatory-mvp-cuts) for one more step form, `agent`, and take the "`agent` step type" row out of the [deferred designs](../02-decisions-risks.md#deferred-designs). Amends [ADR 0010](0010-run-sessions.md) on which profile a step runs under. Builds on the headless agent adapter of [ADR 0035](0035-workflow-assistant-chat.md), and is gated by the same spike, S11.
+**Status:** Accepted. The open questions are settled below; spike S11 (step mode) still runs before release. Lifts [MVP cut 8](../02-decisions-risks.md#mandatory-mvp-cuts) for one more step form, `agent`, and takes the "`agent` step type" row out of the [deferred designs](../02-decisions-risks.md#deferred-designs). Amends [ADR 0010](0010-run-sessions.md) on which profile a step runs under. Builds on the headless agent adapter of [ADR 0035](0035-workflow-assistant-chat.md), and is gated by the same spike, S11.
 
 ## Context
 
@@ -76,6 +76,13 @@ A prompt that interpolates `trigger.*` from an integration event carries text an
 - It has the step's workspace, its own discarded home layer, and its memory scope.
 - It has no daemon API, no secrets except those the step passes explicitly in `env`, and no in-container workflow tools. ADR 0035 proposes authoring tools for assistant sessions only, where a person applies every write; for agent steps, in-container MCP stays [deferred](../02-decisions-risks.md#deferred-designs).
 - Validation **warns** (it does not fail) when an agent step's prompt references `trigger.*` and the workflow has an integration trigger. The warning names the profile whose egress and credentials the agent will have.
+
+## Settled questions
+
+1. **`workflows.agent_profiles` is empty by default.** Agent steps are off until the operator lists a profile; a workflow with an agent step fails validation with an issue that names the setting.
+2. **Memory follows `memory`, whatever the trigger.** An agent step gets the memory MCP server unless it sets `memory: false`, including in workflows with an integration trigger. The scope is still derived server-side from the run session and the step's repository.
+3. **A home layer per attempt.** Each attempt starts from the profile's seed and its layer is discarded when the attempt ends, so a retry never inherits a broken state and two agent steps never share a home.
+4. **Untrusted prompts get a warning.** A prompt that reads `trigger.*` in a workflow with an integration trigger validates, with a warning that names the profile; there is no opt-in field.
 
 ## Alternatives considered
 

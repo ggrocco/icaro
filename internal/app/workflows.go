@@ -53,6 +53,9 @@ func wireWorkflows(_ context.Context, a *App) error {
 	if a.Secrets != nil {
 		deps.Secrets = a.Secrets
 	}
+	if a.Sessions != nil {
+		deps.Agents = a.Sessions
+	}
 	w.Engine = engine.New(engine.Config{
 		Concurrency:    cfg.Workflows.Concurrency,
 		MaxRuns:        cfg.Workflows.MaxRuns,
@@ -70,7 +73,13 @@ func wireWorkflows(_ context.Context, a *App) error {
 		User:    stepUser(a),
 		LogsDir: a.Layout.Logs(),
 		RunsDir: a.Layout.Runs(),
+		// Agent steps (ADR 0037): the profiles the operator listed.
+		AgentProfiles: AgentOptions(cfg).Profiles,
 	}, deps)
+
+	for _, c := range AgentStepsChecks(context.Background(), cfg, a.Store, a.Docker) {
+		a.AddCheck(c)
+	}
 
 	a.Service.SetRunner(w.Engine)
 	a.Service.SetEvents(bus)

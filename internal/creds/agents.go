@@ -27,6 +27,9 @@ type Agent struct {
 	// chat builds one headless assistant turn (ADR 0035); nil when the
 	// agent has no headless chat mode.
 	chat func(t ChatTurn) []string
+	// step is the unattended workflow step mode (ADR 0037); nil when the
+	// agent cannot run steps.
+	step *StepSpec
 }
 
 // ChatTurn is one headless assistant turn. The user's message goes in on
@@ -116,8 +119,8 @@ type HomeFiles interface {
 
 // Agents is the catalog, keyed by profiles' `agent` field.
 var Agents = map[string]Agent{
-	"claude": {Name: "claude", Run: []string{"claude"}, Login: []string{"claude"}, configure: configureClaude, chat: chatClaude},
-	"codex":  {Name: "codex", Run: []string{"codex"}, Login: []string{"codex", "login"}, configure: configureCodex, chat: chatCodex},
+	"claude": {Name: "claude", Run: []string{"claude"}, Login: []string{"claude"}, configure: configureClaude, chat: chatClaude, step: stepClaude},
+	"codex":  {Name: "codex", Run: []string{"codex"}, Login: []string{"codex", "login"}, configure: configureCodex, chat: chatCodex, step: stepCodex},
 	"":       {Name: "shell", Run: nil, Login: nil, configure: nil},
 }
 

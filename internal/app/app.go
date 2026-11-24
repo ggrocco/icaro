@@ -30,6 +30,7 @@ import (
 	"icaro/internal/service"
 	"icaro/internal/session"
 	"icaro/internal/store"
+	"icaro/internal/workflow"
 )
 
 // Component is a long-running part of the daemon. Run blocks until ctx is
@@ -109,7 +110,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 
 	// The workflow engine is attached by the "workflows" wirer
 	// (internal/app/workflows.go).
-	a.Service = service.New(service.Options{Store: st, Key: key, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Log: log})
+	a.Service = service.New(service.Options{Store: st, Key: key, LogsDir: a.Layout.Logs(), MaxTimeout: cfg.Limits.Timeout, Agents: AgentOptions(cfg), Log: log})
 	a.API = api.New(a.Service, log)
 
 	a.checks = append(a.checks, BaseChecks(cfg, st, eng, nil)...)
@@ -285,3 +286,13 @@ func dockerHint() string {
 // CheckFactory builds doctor checks for a component from shared handles;
 // used by `icaro doctor`, which runs without the daemon.
 type CheckFactory func(ctx context.Context, cfg *config.Config, st *store.Store, eng *docker.Engine) []doctor.Check
+
+// AgentOptions are the profiles agent steps may use (ADR 0037), from
+// workflows.agent_profiles in config order.
+func AgentOptions(cfg *config.Config) *workflow.AgentOptions {
+	o := &workflow.AgentOptions{Profiles: []workflow.AgentProfile{}}
+	for _, name := range cfg.Workflows.AgentProfiles {
+		o.Profiles = append(o.Profiles, workflow.AgentProfile{Name: name, Agent: cfg.Profiles[name].Agent})
+	}
+	return o
+}

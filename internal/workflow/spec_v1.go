@@ -68,7 +68,30 @@ type StepSpec struct {
 	When       string            `json:"when,omitempty" yaml:"when,omitempty"`
 	Approval   *ApprovalSpec     `json:"approval,omitempty" yaml:"approval,omitempty"`
 	Wait       string            `json:"wait,omitempty" yaml:"wait,omitempty"`
+	Agent      *AgentSpec        `json:"agent,omitempty" yaml:"agent,omitempty"`
 }
+
+// AgentSpec runs an agent profile's CLI headless as the step (ADR 0037).
+// The operator lists the profiles agent steps may use in
+// workflows.agent_profiles; the harness is the profile's agent.
+type AgentSpec struct {
+	// Profile is one of workflows.agent_profiles; empty means the first.
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	// Prompt is a template over steps, trigger, env, run and workflow; it
+	// is fed to the CLI on stdin.
+	Prompt string `json:"prompt" yaml:"prompt"`
+	// Params are the harness's declared knobs (model, max_turns, ...).
+	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	// Memory gives the step the memory MCP server (default true).
+	Memory *bool `json:"memory,omitempty" yaml:"memory,omitempty"`
+}
+
+// MemoryOn reports whether the agent step gets the memory MCP server.
+func (a *AgentSpec) MemoryOn() bool { return a.Memory == nil || *a.Memory }
+
+// ResultOutput is the built-in output of an agent step: the agent's final
+// answer from its event stream.
+const ResultOutput = "result"
 
 // ApprovalSpec makes a step wait for a person to approve or reject the run
 // (ADR 0030). The step's timeout, when set, is the decision deadline.
@@ -83,6 +106,10 @@ var (
 	// RootsApproval are the names an approval message may reference: no
 	// secrets, since the message is displayed.
 	RootsApproval = []string{"steps", "trigger", "env", "run", "workflow"}
+	// RootsPrompt are the names an agent step's prompt may reference: no
+	// secrets, since the prompt is stored, displayed and sent to the
+	// provider (ADR 0037).
+	RootsPrompt = []string{"steps", "trigger", "env", "run", "workflow"}
 	// RootsFilter are the names a trigger filter may reference.
 	RootsFilter = []string{"trigger"}
 )

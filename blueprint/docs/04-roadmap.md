@@ -21,7 +21,7 @@ SPINE + 2 + 4 + 7 + 8 + 10 ──> 11
 2 + ADR 0033 accepted ──> 13  (post-GA)
 4 + ADR 0035 accepted ──> 14  (post-GA; S11 before release)
 6 + 14 + ADR 0036 accepted ──> 15  (post-GA; S12 before release)
-2 + 14 (agent adapters) + ADR 0037 accepted + S11 ──> 16  (post-GA)
+2 + 14 (agent adapters) + ADR 0037 accepted ──> 16  (post-GA; S11 step mode before release)
 2 + ADR 0038 accepted ──> 17  (post-GA)
 3 + ADR 0041 accepted (+ S13 for step access) ──> 18  (post-GA)
 2 + ADR 0040 accepted ──> 19  (post-GA)
@@ -79,7 +79,7 @@ State of each phase against its acceptance criteria. Each phase file ticks what 
 | [13 — Workflow library](phases/13-workflow-library.md) | Not started | Waits on [ADR 0033](adr/0033-workflow-library.md) being accepted |
 | [14 — Workflow assistant chat](phases/14-workflow-assistant.md) | Built; S11 open | Every deliverable is built and tested end to end with a fake CLI. Open: spike S11 (real Claude/Codex logins: flags, recorded streams, start-up time), and the two acceptance runs that need a real subscription and a real API key |
 | [15 — Memory distiller](phases/15-memory-distiller.md) | In progress | [ADR 0036](adr/0036-local-memory-distiller.md) is accepted. Spike S12 passed on the build machine's CPU; the 8 GB laptop, Mac, GPU and person-graded set are still open |
-| [16 — Agent steps](phases/16-agent-steps.md) | Not started | Waits on [ADR 0037](adr/0037-agent-steps.md) being accepted, spike S11, and Phase 14's agent adapters |
+| [16 — Agent steps](phases/16-agent-steps.md) | Built; S11 open | Every deliverable is built and tested, end to end against Docker with a fake CLI. Open: spike S11 in step mode (real Claude/Codex logins: flags, recorded streams, inject) and the acceptance run with a real subscription |
 | [17 — Call steps](phases/17-call-steps.md) | Not started | Waits on [ADR 0038](adr/0038-call-workflow-steps.md) being accepted |
 | [18 — GitHub App mode](phases/18-github-app.md) | Not started | Waits on [ADR 0041](adr/0041-github-app-mode.md) being accepted; step access also on spike S13 |
 | [19 — Multi-runner scale-out](phases/19-multi-runner.md) | Not started | Waits on [ADR 0040](adr/0040-multi-runner-scale-out.md) being accepted |

@@ -48,6 +48,7 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
   const [saved, setSaved] = useState(false);
   const schema = useLoad(api.schema, []);
   const integrations = useLoad(api.integrationDetails, []);
+  const agentProfiles = useLoad(api.agentProfiles, []);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -151,7 +152,7 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
       <div className={assistOpen && chatId ? "with-assistant" : undefined}>
       <div className="split">
         <div className="pane">
-          {tab === "form" && <FormEditor yaml={yaml} onChange={setYaml} integrations={integrations.data ?? []} />}
+          {tab === "form" && <FormEditor yaml={yaml} onChange={setYaml} integrations={integrations.data ?? []} agentProfiles={agentProfiles.data ?? []} />}
           {tab === "yaml" && <YamlEditor label="Workflow YAML" value={yaml} onChange={setYaml} issues={issues} schema={schema.data} />}
           {tab === "json" && <pre className="code">{doc.errors.length ? "(YAML does not parse)" : canonicalJSON(doc)}</pre>}
         </div>
