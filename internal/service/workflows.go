@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"sort"
 	"time"
 
 	"icaro/internal/store"
@@ -21,11 +23,20 @@ type WorkflowInfo struct {
 	Steps       []string               `json:"steps"`
 	// TriggerFields are the trigger.* keys the workflow reads; manual
 	// runs must supply the required ones.
-	TriggerFields TriggerFields   `json:"trigger_fields"`
-	CreatedAt     string          `json:"created_at"`
-	UpdatedAt     string          `json:"updated_at"`
-	YAML          string          `json:"yaml,omitempty"`
-	Spec          json.RawMessage `json:"spec,omitempty"`
+	TriggerFields TriggerFields `json:"trigger_fields"`
+	// Callable is true when the workflow has a call trigger; Outputs are
+	// its workflow output names, and Callers the workflows that call it
+	// (ADR 0038, on a single workflow only).
+	Callable bool     `json:"callable"`
+	Outputs  []string `json:"outputs"`
+	Callers  []string `json:"callers,omitempty"`
+	// Warnings are what ApplyWorkflow found valid but worth a second
+	// look, such as the callers the new version breaks (ADR 0038).
+	Warnings  workflow.Issues `json:"warnings,omitempty"`
+	CreatedAt string          `json:"created_at"`
+	UpdatedAt string          `json:"updated_at"`
+	YAML      string          `json:"yaml,omitempty"`
+	Spec      json.RawMessage `json:"spec,omitempty"`
 }
 
 // TriggerFields lists referenced trigger payload keys.
@@ -45,7 +56,14 @@ type VersionInfo struct {
 const tsFormat = "2006-01-02T15:04:05Z"
 
 func (s *Service) validateOptions(ctx context.Context) workflow.Options {
-	opts := workflow.Options{MaxTimeout: s.maxTimeout, Catalog: s.catalog}
+	opts := workflow.Options{MaxTimeout: s.maxTimeout, Catalog: s.catalog, Agents: s.agents}
+	if s.store != nil {
+		if cat, err := s.workflowCatalog(ctx); err == nil {
+			opts.Workflows = cat
+		} else {
+			s.log.Warn("list workflows for call checks", "err", err)
+		}
+	}
 	if s.secrets != nil {
 		if names, err := s.secrets.Names(ctx); err == nil {
 			set := map[string]bool{}
@@ -60,6 +78,67 @@ func (s *Service) validateOptions(ctx context.Context) workflow.Options {
 		}
 	}
 	return opts
+}
+
+// Warnings are what is valid in spec but worth a second look: an agent
+// prompt that carries untrusted trigger text (ADR 0037), and what saving
+// spec would break in the workflows that call it (ADR 0038).
+func (s *Service) Warnings(ctx context.Context, spec *workflow.Spec) workflow.Issues {
+	opts := s.validateOptions(ctx)
+	return append(workflow.Warnings(spec, opts), workflow.CallerWarnings(spec, opts)...)
+}
+
+// workflowCatalog resolves call steps against the current version of
+// every stored workflow (ADR 0038).
+func (s *Service) workflowCatalog(ctx context.Context) (workflowSpecs, error) {
+	ws, err := s.store.ListWorkflows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := workflowSpecs{}
+	for _, w := range ws {
+		if spec, err := decodeSpec(w.SpecJSON); err == nil {
+			out[w.Name] = spec
+		}
+	}
+	return out, nil
+}
+
+// workflowSpecs is a workflow.WorkflowCatalog over decoded specs.
+type workflowSpecs map[string]*workflow.Spec
+
+func (w workflowSpecs) Workflow(name string) (*workflow.Spec, bool) {
+	spec, ok := w[name]
+	return spec, ok
+}
+
+func (w workflowSpecs) WorkflowNames() []string {
+	out := make([]string, 0, len(w))
+	for n := range w {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Callers lists the workflows whose current version calls name, sorted.
+func (s *Service) Callers(ctx context.Context, name string) ([]string, error) {
+	cat, err := s.workflowCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, n := range cat.WorkflowNames() {
+		if slices.Contains(cat[n].Calls(), name) {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// AgentProfiles lists the profiles agent steps may use, in config order.
+func (s *Service) AgentProfiles() []workflow.AgentProfile {
+	return append([]workflow.AgentProfile{}, s.agents.Profiles...)
 }
 
 // ValidateWorkflow parses and validates YAML without storing it. Decode
@@ -81,6 +160,8 @@ func (s *Service) ApplyWorkflow(ctx context.Context, yaml, actor string) (*Workf
 	if len(issues) > 0 {
 		return nil, &ValidationError{Issues: issues}
 	}
+	// Against the versions stored before this one: what the save breaks.
+	warnings := s.Warnings(ctx, spec)
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -91,7 +172,9 @@ func (s *Service) ApplyWorkflow(ctx context.Context, yaml, actor string) (*Workf
 	}
 	s.log.Info("workflow applied", "name", w.Name, "version", w.Version, "actor", actor)
 	s.changed()
-	return s.info(w, spec, true), nil
+	info := s.info(w, spec, true)
+	info.Warnings = warnings
+	return info, nil
 }
 
 func (s *Service) lookup(ctx context.Context, name string) (*store.Workflow, error) {
@@ -102,13 +185,17 @@ func (s *Service) lookup(ctx context.Context, name string) (*store.Workflow, err
 	return w, err
 }
 
-// GetWorkflow returns a workflow with its YAML.
+// GetWorkflow returns a workflow with its YAML and its callers.
 func (s *Service) GetWorkflow(ctx context.Context, name string) (*WorkflowInfo, error) {
 	w, err := s.lookup(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	return s.info(w, nil, true), nil
+	info := s.info(w, nil, true)
+	if info.Callers, err = s.Callers(ctx, w.Name); err != nil {
+		return nil, err
+	}
+	return info, nil
 }
 
 // ListWorkflows returns summaries.
@@ -158,6 +245,7 @@ func (s *Service) DeleteWorkflow(ctx context.Context, name string) error {
 	// readable.
 	for _, r := range active {
 		s.stopActive(r)
+		s.stopDescendants(ctx, r.ID)
 	}
 	s.log.Info("workflow deleted", "name", w.Name, "cancelled_runs", len(active))
 	s.changed()
@@ -233,13 +321,23 @@ func (s *Service) info(w *store.Workflow, spec *workflow.Spec, full bool) *Workf
 		Name: w.Name, Description: spec.Description, Version: w.Version, Status: w.Status,
 		Concurrency: spec.ConcurrencyPolicy(), Triggers: spec.Triggers, Steps: spec.StepIDs(),
 		TriggerFields: TriggerFields{Required: orEmpty(req), Optional: orEmpty(opt)},
-		CreatedAt:     w.CreatedAt.UTC().Format(tsFormat), UpdatedAt: w.UpdatedAt.UTC().Format(tsFormat),
+		Callable:      spec.Callable(), Outputs: outputNames(spec),
+		CreatedAt: w.CreatedAt.UTC().Format(tsFormat), UpdatedAt: w.UpdatedAt.UTC().Format(tsFormat),
 	}
 	if full {
 		info.YAML = w.SpecYAML
 		info.Spec = json.RawMessage(w.SpecJSON)
 	}
 	return info
+}
+
+func outputNames(spec *workflow.Spec) []string {
+	out := make([]string, 0, len(spec.Outputs))
+	for k := range spec.Outputs {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func orEmpty(s []string) []string {

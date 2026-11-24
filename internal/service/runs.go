@@ -30,12 +30,16 @@ type RunInfo struct {
 	Actor       string          `json:"actor,omitempty"`
 	RootRunID   string          `json:"root_run_id"`
 	ParentRunID string          `json:"parent_run_id,omitempty"`
-	RerunOf     string          `json:"rerun_of,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	CreatedAt   string          `json:"created_at"`
-	StartedAt   *string         `json:"started_at,omitempty"`
-	FinishedAt  *string         `json:"finished_at,omitempty"`
-	Steps       []StepInfo      `json:"steps,omitempty"`
+	// Depth is how many calls deep the run is (0: a root, ADR 0038), and
+	// Outputs its workflow outputs once it succeeded.
+	Depth      int             `json:"depth"`
+	Outputs    json.RawMessage `json:"outputs"`
+	RerunOf    string          `json:"rerun_of,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	CreatedAt  string          `json:"created_at"`
+	StartedAt  *string         `json:"started_at,omitempty"`
+	FinishedAt *string         `json:"finished_at,omitempty"`
+	Steps      []StepInfo      `json:"steps,omitempty"`
 }
 
 // StepInfo is the API view of a step of a run.
@@ -52,6 +56,78 @@ type StepInfo struct {
 	StartedAt  *string         `json:"started_at,omitempty"`
 	FinishedAt *string         `json:"finished_at,omitempty"`
 	Approval   *ApprovalInfo   `json:"approval,omitempty"`
+	Agent      *AgentStepInfo  `json:"agent,omitempty"`
+	Call       *CallStepInfo   `json:"call,omitempty"`
+}
+
+// CallStepInfo is the API view of a call step (ADR 0038): the workflow it
+// calls and the child run of its latest attempt, with that run's status
+// and the called version. Its outputs are the child's workflow outputs.
+type CallStepInfo struct {
+	Workflow string `json:"workflow"`
+	RunID    string `json:"run_id,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Version  int    `json:"version,omitempty"`
+}
+
+// AgentStepInfo is the API view of an agent step (ADR 0037): what ran it,
+// what it was asked and what it used. Its final answer is outputs.result.
+type AgentStepInfo struct {
+	Profile     string         `json:"profile"`
+	CLI         string         `json:"cli,omitempty"`
+	ImageDigest string         `json:"image_digest,omitempty"`
+	Params      map[string]any `json:"params,omitempty"`
+	Memory      bool           `json:"memory"`
+	// Prompt is the rendered, secret-redacted prompt of the latest attempt.
+	Prompt string         `json:"prompt,omitempty"`
+	Usage  AgentUsageInfo `json:"usage"`
+}
+
+// AgentUsageInfo is an agent step's token usage over its attempts.
+// CostUSD is the CLI's own figure, an estimate, set only for inject
+// (API-key) profiles.
+type AgentUsageInfo struct {
+	Input      int64    `json:"input"`
+	Output     int64    `json:"output"`
+	CacheRead  int64    `json:"cache_read,omitempty"`
+	CacheWrite int64    `json:"cache_write,omitempty"`
+	CostUSD    *float64 `json:"cost_usd_estimate,omitempty"`
+}
+
+// maxPromptShown caps the prompt returned with a run.
+const maxPromptShown = 64 << 10
+
+// agentInfo describes an agent step from its row and its spec.
+func (s *Service) agentInfo(st *store.StepRun, spec *workflow.AgentSpec) *AgentStepInfo {
+	a := &AgentStepInfo{Profile: st.Profile, ImageDigest: st.ImageDigest, Memory: true,
+		Usage: AgentUsageInfo{Input: st.Usage.Input, Output: st.Usage.Output, CacheRead: st.Usage.CacheRead, CacheWrite: st.Usage.CacheWrite}}
+	if st.Usage.CostMicro > 0 {
+		c := float64(st.Usage.CostMicro) / 1e6
+		a.Usage.CostUSD = &c
+	}
+	if spec != nil {
+		a.Params, a.Memory = spec.Params, spec.MemoryOn()
+		if a.Profile == "" {
+			if p, ok := s.agents.AgentStepProfile(spec); ok {
+				a.Profile = p.Name
+			} else {
+				a.Profile = spec.Profile
+			}
+		}
+	}
+	for _, p := range s.agents.Profiles {
+		if p.Name == a.Profile {
+			a.CLI = p.Agent
+		}
+	}
+	if st.LogPath != "" {
+		if f, err := os.Open(strings.TrimSuffix(st.LogPath, ".log") + ".prompt.md"); err == nil {
+			b, _ := io.ReadAll(io.LimitReader(f, maxPromptShown))
+			_ = f.Close()
+			a.Prompt = string(b)
+		}
+	}
+	return a
 }
 
 // ApprovalInfo is the API view of an approval step's request and decision.
@@ -90,7 +166,7 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 	}
 	if req.IdempotencyKey != "" {
 		if prev, err := s.store.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
-			return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true}, nil
+			return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true, Version: prev.WorkflowVersion}, nil
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return workflow.EnqueueResult{}, err
 		}
@@ -139,11 +215,23 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 		IdempotencyKey: req.IdempotencyKey, Concurrency: policy, DeliveryID: req.DeliveryID, Actor: req.Actor,
 		RerunOf: req.RerunOf,
 	}
-	out, err := s.store.EnqueueRun(ctx, run, steps)
+	var out store.PolicyOutcome
+	if req.ParentRunID != "" {
+		booking, err := s.callChild(ctx, req, spec, run)
+		if err != nil {
+			return workflow.EnqueueResult{}, err
+		}
+		out, err = s.store.EnqueueCall(ctx, run, steps, booking)
+		if errors.Is(err, store.ErrRootBudget) {
+			return workflow.EnqueueResult{}, &Conflict{Msg: fmt.Sprintf("workflows.max_runs_per_root (%d) reached: the tree of run %s has run %d times; nothing was started", s.maxRunsPerRoot, run.RootRunID, s.maxRunsPerRoot)}
+		}
+	} else {
+		out, err = s.store.EnqueueRun(ctx, run, steps)
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) && req.IdempotencyKey != "" {
 			if prev, err := s.store.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
-				return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true}, nil
+				return workflow.EnqueueResult{RunID: prev.ID, Deduplicated: true, Version: prev.WorkflowVersion}, nil
 			}
 		}
 		return workflow.EnqueueResult{}, err
@@ -161,8 +249,33 @@ func (s *Service) EnqueueRun(ctx context.Context, req workflow.EnqueueRequest) (
 		s.runner.Wake()
 	}
 	s.events.Publish(events.Event{Type: events.TypeRun, RunID: run.ID, Status: store.RunQueued})
-	s.log.Info("run queued", "run", run.ID, "workflow", w.Name, "trigger", kind, "policy", policy)
-	return workflow.EnqueueResult{RunID: run.ID}, nil
+	s.log.Info("run queued", "run", run.ID, "workflow", w.Name, "trigger", kind, "policy", run.Concurrency)
+	return workflow.EnqueueResult{RunID: run.ID, Version: version}, nil
+}
+
+// callChild makes run the child of a call step (ADR 0038): it joins the
+// parent's tree one level down, the depth cap applies here and the
+// per-root budget in the store's transaction, and replace acts as queue
+// so a call never cancels a run another parent may be waiting on.
+func (s *Service) callChild(ctx context.Context, req workflow.EnqueueRequest, spec *workflow.Spec, run *store.Run) (store.CallBooking, error) {
+	parent, err := s.store.GetRun(ctx, req.ParentRunID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.CallBooking{}, badRequest("parent run %s does not exist", req.ParentRunID)
+	}
+	if err != nil {
+		return store.CallBooking{}, err
+	}
+	if !spec.Callable() {
+		return store.CallBooking{}, badRequest("workflow %s has no call trigger (version %d), so it cannot be called", run.WorkflowName, run.WorkflowVersion)
+	}
+	run.RootRunID, run.ParentRunID, run.Depth = parent.RootRunID, parent.ID, parent.Depth+1
+	if run.Depth > s.maxCallDepth {
+		return store.CallBooking{}, &Conflict{Msg: fmt.Sprintf("workflows.max_call_depth (%d) reached: run %s is already %d calls deep; nothing was started", s.maxCallDepth, parent.ID, parent.Depth)}
+	}
+	if run.Concurrency == workflow.ConcurrencyReplace {
+		run.Concurrency = workflow.ConcurrencyQueue
+	}
+	return store.CallBooking{ParentRunID: parent.ID, StepID: req.ParentStep, MaxRunsPerRoot: s.maxRunsPerRoot}, nil
 }
 
 // MissingTriggerFieldsError lists required trigger fields a manual run
@@ -249,10 +362,12 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 	}
 	needs := map[string][]string{}
 	timeouts := map[string]string{}
+	agents := map[string]*workflow.AgentSpec{}
+	calls := map[string]*workflow.CallSpec{}
 	if v, err := s.store.GetWorkflowVersion(ctx, r.WorkflowID, r.WorkflowVersion); err == nil {
 		if spec, _, err := workflow.Parse([]byte(v.SpecYAML), workflow.Options{}); err == nil && spec != nil {
 			for _, st := range spec.Steps {
-				needs[st.ID], timeouts[st.ID] = st.Needs, st.Timeout
+				needs[st.ID], timeouts[st.ID], agents[st.ID], calls[st.ID] = st.Needs, st.Timeout, st.Agent, st.Call
 			}
 		}
 	}
@@ -275,6 +390,20 @@ func (s *Service) GetRun(ctx context.Context, id string) (*RunInfo, error) {
 			si.Approval = &ApprovalInfo{Message: a.Message, Decision: a.Decision, Actor: a.Actor, Comment: a.Comment, DecidedAt: tsp(a.DecidedAt)}
 			if d, err := time.ParseDuration(timeouts[st.StepID]); err == nil && st.StartedAt != nil && a.Decision == "" {
 				si.Approval.Deadline = tsp(new(st.StartedAt.Add(d)))
+			}
+		}
+		if st.Kind == workflow.KindAgent {
+			si.Agent = s.agentInfo(st, agents[st.StepID])
+		}
+		if st.Kind == workflow.KindCall {
+			si.Call = &CallStepInfo{RunID: st.ChildRunID, Version: st.ChildVersion}
+			if c := calls[st.StepID]; c != nil {
+				si.Call.Workflow = c.Workflow
+			}
+			if st.ChildRunID != "" {
+				if child, err := s.store.GetRun(ctx, st.ChildRunID); err == nil {
+					si.Call.Status, si.Call.Workflow = child.Status, child.WorkflowName
+				}
 			}
 		}
 		info.Steps = append(info.Steps, si)
@@ -343,7 +472,20 @@ func (s *Service) stopActive(r *store.Run) {
 
 // ListRuns returns run summaries (no steps).
 func (s *Service) ListRuns(ctx context.Context, workflowName, status string, limit int) ([]*RunInfo, error) {
-	f := store.RunFilter{Status: status, Limit: limit}
+	return s.ListRunsFiltered(ctx, RunQuery{Workflow: workflowName, Status: status, Limit: limit})
+}
+
+// RunQuery filters ListRunsFiltered. Root lists one run tree
+// (ADR 0038): the root and every run that shares it.
+type RunQuery struct {
+	Workflow, Status, Root string
+	Limit                  int
+}
+
+// ListRunsFiltered returns run summaries (no steps), newest first.
+func (s *Service) ListRunsFiltered(ctx context.Context, q RunQuery) ([]*RunInfo, error) {
+	workflowName := q.Workflow
+	f := store.RunFilter{Status: q.Status, RootRunID: q.Root, Limit: q.Limit}
 	if workflowName != "" {
 		w, err := s.lookup(ctx, workflowName)
 		if err != nil {
@@ -377,7 +519,21 @@ func (s *Service) CancelRun(ctx context.Context, id string) (*RunInfo, error) {
 	case store.RunCancelled:
 		s.events.Publish(events.Event{Type: events.TypeRun, RunID: id, Status: store.RunCancelled})
 	}
+	s.stopDescendants(ctx, id)
 	return s.GetRun(ctx, id)
+}
+
+// stopDescendants acts on the cancel requests the store made down a run's
+// tree (ADR 0038), so each child stops now rather than on its heartbeat.
+func (s *Service) stopDescendants(ctx context.Context, id string) {
+	kids, err := s.store.ActiveDescendants(ctx, id)
+	if err != nil {
+		s.log.Warn("list child runs to stop", "run", id, "err", err)
+		return
+	}
+	for _, k := range kids {
+		s.stopActive(k)
+	}
 }
 
 // LogPage is a slice of a step attempt's log.
@@ -458,6 +614,7 @@ func runInfo(r *store.Run) *RunInfo {
 		ID: r.ID, Workflow: r.WorkflowName, Version: r.WorkflowVersion, Status: r.Status, TriggerKind: r.TriggerKind,
 		Trigger: json.RawMessage(orJSON(r.TriggerJSON)), Concurrency: r.Concurrency, SessionID: r.SessionID,
 		DeliveryID: r.DeliveryID, Actor: r.Actor, RootRunID: r.RootRunID, ParentRunID: r.ParentRunID, RerunOf: r.RerunOf, Error: r.Error,
+		Depth: r.Depth, Outputs: json.RawMessage(orJSON(r.OutputsJSON)),
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), StartedAt: tsp(r.StartedAt), FinishedAt: tsp(r.FinishedAt),
 	}
 }

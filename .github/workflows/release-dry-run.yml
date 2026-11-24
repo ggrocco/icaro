@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -48,6 +48,12 @@ jobs:
           seed=$(printf '%s\n' "$out" | sed -n 's/^ICARO_SIGNING_KEY=//p')
           pub=$(printf '%s\n' "$out" | sed -n 's/^public key (base64): //p')
           echo "::add-mask::$seed"
+          # The release accepts the variable as base64 or as the PEM block
+          # keygen prints, and builds with the base64 form either way.
+          pem=$(printf '%s\n' "$out" | sed -n '/^-----BEGIN/,/^-----END/p')
+          test "$(ICARO_RELEASE_PUBKEY="$pem" go run ./hack/sign pubkey)" = "$pub"
+          test "$(ICARO_RELEASE_PUBKEY="$(printf '%s' "$pem" | sed 's/$/\r/')" go run ./hack/sign pubkey)" = "$pub"
+          test "$(ICARO_RELEASE_PUBKEY="$pub" go run ./hack/sign pubkey)" = "$pub"
           { echo "ICARO_SIGNING_KEY=$seed"; echo "ICARO_RELEASE_PUBKEY=$pub"; } >> "$GITHUB_ENV"
       # The release's goreleaser, in snapshot mode: no publishing, and the
       # signing (ed25519 and cosign) and SBOM steps that need the release

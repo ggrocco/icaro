@@ -163,7 +163,7 @@ steps:
 	mustHave(t, issues, "/triggers/1/evnt", `unknown field "evnt"`, `did you mean "event"?`)
 	mustHave(t, issues, "/triggers/2", "a trigger needs type", "")
 	mustHave(t, issues, "/steps/0", "not both", "")
-	mustHave(t, issues, "/steps/1", "exactly one of: image, uses", "")
+	mustHave(t, issues, "/steps/1", "exactly one of: image, agent, uses", "")
 	// Dangerous mounts are not expressible: unknown fields are rejected.
 	mustHave(t, issues, "/steps/2/volumes", `unknown field "volumes"`, "")
 	mustHave(t, issues, "/steps/2/retry", "", "")

@@ -61,6 +61,9 @@ type ValidateResult struct {
 	Valid  bool            `json:"valid"`
 	Name   string          `json:"name,omitempty"`
 	Issues workflow.Issues `json:"issues"`
+	// Warnings are valid but worth a second look: untrusted text in an
+	// agent prompt (ADR 0037), callers a change would break (ADR 0038).
+	Warnings workflow.Issues `json:"warnings,omitempty"`
 }
 
 // Validate validates YAML without saving.
@@ -141,15 +144,23 @@ func (c *Client) GetRun(ctx context.Context, id string) (*service.RunInfo, error
 
 // ListRuns lists runs.
 func (c *Client) ListRuns(ctx context.Context, workflowName, status string, limit int) ([]*service.RunInfo, error) {
+	return c.ListRunsQuery(ctx, service.RunQuery{Workflow: workflowName, Status: status, Limit: limit})
+}
+
+// ListRunsQuery lists runs; Root lists one run tree (ADR 0038).
+func (c *Client) ListRunsQuery(ctx context.Context, rq service.RunQuery) ([]*service.RunInfo, error) {
 	q := url.Values{}
-	if workflowName != "" {
-		q.Set("workflow", workflowName)
+	if rq.Workflow != "" {
+		q.Set("workflow", rq.Workflow)
 	}
-	if status != "" {
-		q.Set("status", status)
+	if rq.Status != "" {
+		q.Set("status", rq.Status)
 	}
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
+	if rq.Root != "" {
+		q.Set("root", rq.Root)
+	}
+	if rq.Limit > 0 {
+		q.Set("limit", strconv.Itoa(rq.Limit))
 	}
 	var out struct {
 		Runs []*service.RunInfo `json:"runs"`

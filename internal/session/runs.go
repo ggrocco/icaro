@@ -159,6 +159,19 @@ func (m *Manager) FinishRun(ctx context.Context, sessionID string, keep bool) er
 			return err
 		}
 	}
+	// Agent-step sessions the engine could not finish (a crash between an
+	// attempt and its cleanup) end with the run.
+	steps, err := m.o.Store.ListSessions(ctx, store.SessionFilter{Kind: KindStep})
+	if err != nil {
+		return err
+	}
+	for _, s := range steps {
+		if s.RunID == row.RunID {
+			if err := m.FinishAgentStep(ctx, s.ID); err != nil {
+				m.o.Log.Warn("finish agent-step session", "session", s.ID, "err", err)
+			}
+		}
+	}
 	row.Status, row.ContainerID = StatusStopped, ""
 	return m.o.Store.UpdateSession(ctx, row)
 }

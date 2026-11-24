@@ -1,6 +1,6 @@
 # ADR 0038 — Sub-workflow steps: `call` runs another workflow and waits for it
 
-**Status:** Proposed. Would lift [MVP cut 8](../02-decisions-risks.md#mandatory-mvp-cuts) for one more step form, `call`. Takes the sub-workflow half of the "`call_workflow` and in-container MCP access" row out of the [deferred designs](../02-decisions-risks.md#deferred-designs); in-container MCP stays deferred, apart from what [ADR 0035](0035-workflow-assistant-chat.md) proposes for assistant sessions. Builds on [ADR 0013](0013-workflow-execution-semantics.md) (execution and re-runs) and [ADR 0030](0030-approval-wait-steps.md) (parking).
+**Status:** Accepted. The open questions are settled below. Lifts [MVP cut 8](../02-decisions-risks.md#mandatory-mvp-cuts) for one more step form, `call`. Takes the sub-workflow half of the "`call_workflow` and in-container MCP access" row out of the [deferred designs](../02-decisions-risks.md#deferred-designs); in-container MCP stays deferred, apart from what [ADR 0035](0035-workflow-assistant-chat.md) proposes for assistant sessions. Builds on [ADR 0013](0013-workflow-execution-semantics.md) (execution and re-runs) and [ADR 0030](0030-approval-wait-steps.md) (parking).
 
 ## Context
 
@@ -38,7 +38,7 @@ The engine already has the other pieces this needs:
 - **`workflow`** is a literal workflow name, never an expression. The call graph is therefore static, so validation can check it and the UI can draw it.
 - **`input`** becomes the child run's `trigger.*` payload. Values may use `steps` (of `needs` ancestors), `trigger`, `env`, `run` and `workflow`, but not `secrets`: the payload is stored with the child run and shown wherever runs are. A child that needs a secret resolves its own `${{ secrets.* }}`.
 - **`timeout`** (optional) is a deadline for the child run, exempt from the `limits.timeout` ceiling like an approval deadline. Past it, the child is cancelled and the step fails. Without one, the step waits for the child however long it takes, approvals in the child included.
-- **`retry`** works as on image steps: each attempt starts a new child run.
+- **`retry`** works as on image steps: each attempt starts a new child run, at once rather than after the image steps' backoff, since a child run is already slow to start.
 - `command`, `image`, `env`, `outputs` and `repository` are not allowed. The child has its own steps and workspace, and its outputs are declared by the child (below).
 
 ### Being callable
@@ -105,6 +105,13 @@ The authoring tools ([architecture §10](../01-architecture.md#10-agent-interfac
 
 This ADR adds **no** way for a running step to start a workflow. A child is started only by a `call` step written in a saved workflow version. The `invoke` level of in-container MCP stays deferred. If it is designed later, it reuses this lineage, depth cap and per-root budget.
 
+## Settled questions
+
+1. **The brakes default to a depth of 4 and 64 runs per root.** `workflows.max_call_depth` is 4 and `workflows.max_runs_per_root` is 64, both validated at load.
+2. **`replace` on a called workflow acts as `queue`.** A call waits its turn and never cancels a run of the callee; a `replace` run started any other way also leaves runs that a parent waits on alone, and waits for them to finish.
+3. **The parent links to the child's logs.** Logs stay per run: the `call` step's log records the enqueue, the child's id and version, and its outcome, and every client links to the child run.
+4. **The step `timeout` is optional.** Without one, the step waits for the child however long it takes, approvals in the child included.
+
 ## Alternatives considered
 
 - **`call_workflow` as a `uses` action.** `uses` actions run in the daemon and return at once ([ADR 0016](0016-pack-loading-action-execution.md)). Waiting on a run, mapping its outcome and parking would all be special cases inside the action executor.
@@ -117,5 +124,5 @@ This ADR adds **no** way for a running step to start a workflow. A child is star
 - A sequence is written once and called from many workflows, with its own approvals, retries, concurrency and history.
 - Parked callers keep slots free, so nested calls do not deadlock the engine. A tree of runs still uses one run session and container set per active run.
 - New schema: the `call` step form, the `call` trigger type and workflow-level `outputs` (drift-tested against [the contract](../schemas/workflow.schema.json)). New config: `workflows.max_call_depth` and `workflows.max_runs_per_root`. The existing lineage columns get used, and step runs gain the child run id and version.
-- A child's edit changes every caller's next run. Validation of the callers catches broken inputs and outputs only when they are validated or run. The child's page lists its callers, and `icaro workflow validate` on a child also validates the workflows that call it.
+- A child's edit changes every caller's next run. Validation of the callers catches broken inputs and outputs only when they are validated or run. The child's page lists its callers, and `icaro workflow validate` (and apply) on a child also validates the workflows that call it. What would break in a caller is a **warning** naming the caller, not an error: an error would make an interface change impossible, since the caller cannot be updated first either. The caller then fails its own validation until it is updated.
 - Implementation is [Phase 17](../phases/17-call-steps.md).

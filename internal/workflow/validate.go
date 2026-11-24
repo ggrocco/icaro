@@ -43,6 +43,12 @@ type Options struct {
 	// integration credential). Nil skips the binding check; credentials
 	// named after an integration in Catalog are refused regardless.
 	SecretBound func(name string) bool
+	// Agents lists the profiles agent steps may use (ADR 0037). Nil skips
+	// the profile and param checks.
+	Agents *AgentOptions
+	// Workflows resolves the workflows call steps name (ADR 0038). Nil
+	// skips the callee, input, output and call-graph checks.
+	Workflows WorkflowCatalog
 }
 
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
@@ -167,6 +173,8 @@ func (s *Spec) Validate(opts Options) Issues {
 		v.add("/version", fmt.Sprintf("unsupported version %d", s.Version), "use version: 1")
 	}
 	v.checkSteps()
+	v.checkCallGraph()
+	v.checkWorkflowOutputs()
 	v.checkTriggers()
 	v.checkWorkflowEnv()
 	v.checkExpressions()
@@ -227,8 +235,16 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 	base := v.stepPath(i)
 	switch st.Kind() {
 	case "":
-		v.add(base, "a step must have exactly one of: image, uses, approval, wait")
+		if st.Agent != nil && st.Image != "" {
+			v.add(base+"/image", "image is not valid on agent steps", "the agent profile supplies the image")
+			return
+		}
+		v.add(base, "a step must have exactly one of: image, agent, uses, call, approval, wait")
 		return
+	case KindAgent:
+		v.checkAgent(i, st)
+	case KindCall:
+		v.checkCall(i, st)
 	case KindApproval, KindWait:
 		for _, f := range []struct {
 			set  bool
@@ -268,31 +284,16 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 		}
 		v.checkAction(i, st)
 	case KindImage:
-		for _, k := range sortedKeys(st.Outputs) {
-			if !outputKeyRe.MatchString(k) {
-				v.add(base+"/outputs/"+escape(k), fmt.Sprintf("invalid output name %q", k), "use letters, digits, '_' and '-'")
-			}
-			if _, err := ParseCapture(st.Outputs[k]); err != nil {
-				v.add(base+"/outputs/"+escape(k), err.Error(), "one of "+CaptureForms)
-			}
-		}
-		for _, k := range sortedKeys(st.Env) {
-			if !envNameRe.MatchString(k) {
-				v.add(base+"/env/"+escape(k), fmt.Sprintf("invalid environment variable name %q", k))
-			}
-		}
-		if st.Repository != nil && strings.TrimSpace(st.Repository.Ref) == "" {
-			v.add(base+"/repository/ref", "repository ref is empty")
-		}
+		v.checkOutputsAndEnv(base, st)
 	}
 	if st.Timeout != "" && st.Kind() != KindWait {
 		d, err := time.ParseDuration(st.Timeout)
 		switch {
 		case err != nil || d <= 0:
 			v.add(base+"/timeout", "must be a positive duration such as 90s, 10m or 1h")
-		case st.Kind() == KindApproval:
-			// A decision deadline holds no container, so limits.timeout
-			// does not cap it.
+		case st.Kind() == KindApproval || st.Kind() == KindCall:
+			// A decision deadline, or a deadline for a child run, holds no
+			// container, so limits.timeout does not cap it.
 		case v.opts.MaxTimeout > 0 && d > v.opts.MaxTimeout:
 			v.add(base+"/timeout", fmt.Sprintf("exceeds the configured maximum of %s", v.opts.MaxTimeout), "lower it or raise limits.timeout in the config")
 		}
@@ -382,7 +383,7 @@ func (v *validator) checkTriggers() {
 			} else if _, err := ParseCron(t.Cron); err != nil {
 				v.add(base+"/cron", fmt.Sprintf("invalid cron expression: %v", err), "5 fields: minute hour day-of-month month day-of-week")
 			}
-		case t.Type == TriggerManual:
+		case t.Type == TriggerManual || t.Type == TriggerCall:
 			if t.Cron != "" {
 				v.add(base+"/cron", "cron is only valid on cron triggers")
 			}
@@ -473,6 +474,22 @@ func (v *validator) checkExpressions() {
 		}
 		if st.Approval != nil && st.Approval.Message != "" {
 			v.checkTemplate(base+"/approval/message", st.Approval.Message, RootsApproval, i)
+		}
+		if st.Agent != nil {
+			v.checkPrompt(base+"/agent/prompt", st.Agent.Prompt, i)
+		}
+		if st.Call != nil && st.Call.Input != nil {
+			expr.WalkTemplates(map[string]any(st.Call.Input), func(ptr, s string) {
+				if !expr.Contains(s) {
+					return
+				}
+				t, err := expr.ParseTemplate(s)
+				if err != nil {
+					v.addExpr(base+"/call/input"+ptr, "invalid expression: ", err)
+					return
+				}
+				v.checkCallRefs(base+"/call/input"+ptr, t.Refs(), i, "call input cannot read secrets", "the input is stored with the child run and shown wherever runs are; the called workflow resolves its own ${{ secrets.* }}")
+			})
 		}
 		if strings.TrimSpace(st.When) != "" {
 			e, err := expr.ParseCondition(st.When)
@@ -643,6 +660,9 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 	switch ts.Kind() {
 	case KindImage:
 		declared = sortedKeys(ts.Outputs)
+	case KindAgent:
+		declared = append(sortedKeys(ts.Outputs), ResultOutput)
+		sort.Strings(declared)
 	case KindUses:
 		if v.opts.Catalog == nil {
 			return
@@ -657,6 +677,20 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 	case KindWait:
 		v.add(path, fmt.Sprintf("step %s is a wait step and has no outputs", id))
 		return
+	case KindCall:
+		outs, ok := v.calledOutputs(ts)
+		if !ok {
+			return
+		}
+		if !contains(outs, key) {
+			msg := fmt.Sprintf("workflow %s declares no output %q", ts.Call.Workflow, key)
+			if h := expr.Nearest(key, outs); h != "" {
+				v.add(path, msg, fmt.Sprintf("did you mean steps.%s.outputs.%s?", id, h))
+			} else {
+				v.add(path, msg, fmt.Sprintf("declare it under %s's top-level outputs", ts.Call.Workflow))
+			}
+		}
+		return
 	default:
 		return
 	}
@@ -666,7 +700,7 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 	msg := fmt.Sprintf("step %s declares no output %q", id, key)
 	if h := expr.Nearest(key, declared); h != "" {
 		v.add(path, msg, fmt.Sprintf("did you mean steps.%s.outputs.%s?", id, h))
-	} else if ts.Kind() == KindImage {
+	} else if ts.Kind() == KindImage || ts.Kind() == KindAgent {
 		v.add(path, msg, fmt.Sprintf("declare it under steps[%d].outputs, e.g. %s: json:%s", target, key, key))
 	} else {
 		v.add(path, msg, "outputs: "+strings.Join(declared, ", "))
@@ -730,6 +764,9 @@ func TriggerFields(s *Spec) (required, optional []string) {
 	for _, val := range s.Env {
 		tmpl(val)
 	}
+	for _, val := range s.Outputs {
+		tmpl(val)
+	}
 	for _, st := range s.Steps {
 		tmpl(st.Command)
 		for _, val := range st.Env {
@@ -740,6 +777,12 @@ func TriggerFields(s *Spec) (required, optional []string) {
 		}
 		if st.Approval != nil {
 			tmpl(st.Approval.Message)
+		}
+		if st.Agent != nil {
+			tmpl(st.Agent.Prompt)
+		}
+		if st.Call != nil && st.Call.Input != nil {
+			expr.WalkTemplates(map[string]any(st.Call.Input), func(_, s string) { tmpl(s) })
 		}
 		if st.Repository != nil {
 			tmpl(st.Repository.Ref)
@@ -855,22 +898,25 @@ func oneOfIssues(e *jsonschema.ValidationError, path string, doc map[string]any)
 	switch {
 	case len(loc) == 2 && loc[0] == "steps":
 		var set []string
-		for _, k := range []string{"image", "uses", "approval", "wait"} {
+		for _, k := range []string{"image", "agent", "uses", "call", "approval", "wait"} {
 			if _, ok := obj[k]; ok {
 				set = append(set, k)
 			}
 		}
-		if len(set) > 1 {
-			return Issues{{Path: path, Message: "a step has exactly one of image, uses, approval or wait, not both " + strings.Join(set, " and ")}}
+		if _, agent := obj["agent"]; agent && len(set) == 2 && set[0] == "image" {
+			return Issues{{Path: path + "/image", Message: "image is not valid on agent steps", Hint: "the agent profile supplies the image; remove image"}}
 		}
-		return Issues{{Path: path, Message: "a step needs exactly one of: image, uses, approval, wait", Hint: "image: <container image> runs a container; uses: <integration>.<action> calls an integration; approval: {message: ...} waits for a person; wait: 10m pauses"}}
+		if len(set) > 1 {
+			return Issues{{Path: path, Message: "a step has exactly one of image, agent, uses, call, approval or wait, not both " + strings.Join(set, " and ")}}
+		}
+		return Issues{{Path: path, Message: "a step needs exactly one of: image, agent, uses, call, approval, wait", Hint: "image: <container image> runs a container; agent: {prompt: ...} runs an agent CLI; uses: <integration>.<action> calls an integration; call: {workflow: <name>} runs another workflow; approval: {message: ...} waits for a person; wait: 10m pauses"}}
 	case len(loc) == 2 && loc[0] == "triggers":
 		branch := 1 // integration
 		if _, ok := obj["type"]; ok {
 			branch = 0
 		} else if _, ok := obj["integration"]; !ok {
 			if _, ok := obj["event"]; !ok {
-				return Issues{{Path: path, Message: "a trigger needs type (manual|cron) or integration + event"}}
+				return Issues{{Path: path, Message: "a trigger needs type (manual|cron|call) or integration + event"}}
 			}
 		}
 		var out Issues

@@ -768,7 +768,7 @@ icaro runs get ID
 
 ## `icaro runs list`
 
-List runs
+List runs, newest first. With --root, list one tree of runs started by call steps: the root and its descendants, oldest first and indented by depth.
 
 ```text
 icaro runs list [flags]
@@ -776,6 +776,7 @@ icaro runs list [flags]
 
 ```text
       --limit int         max rows (default 50)
+      --root string       list the tree of runs under this root run (call steps)
       --status string     filter by status
       --workflow string   filter by workflow
 ```

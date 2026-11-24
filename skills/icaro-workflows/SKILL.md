@@ -6,9 +6,11 @@ description: Author, validate, run and debug Ícaro workflows through the icaro 
 # Authoring Ícaro workflows
 
 Ícaro workflows are YAML DAGs of steps. Each step is an `image` step (a
-container), a `uses` step (an integration action the daemon runs over
-HTTP), an `approval` step (a person approves or rejects) or a `wait` step
-(a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
+container), an `agent` step (an agent CLI such as Claude Code does a task
+under an operator-approved profile), a `uses` step (an integration action
+the daemon runs over HTTP), a `call` step (another workflow runs as a
+child run and returns its outputs), an `approval` step (a person approves
+or rejects) or a `wait` step (a pause, such as `wait: 2h`). You work through the `icaro` MCP server's tools; the
 schema and the validator are the source of truth, not your memory.
 
 ## The loop
@@ -76,9 +78,39 @@ steps:
 
 ## Rules the validator enforces
 
-- A step has exactly one of `image`, `uses`, `approval` or `wait`.
-  `command`, `env` and `outputs` are for image steps only; a `uses` step's
-  outputs come from the action.
+- A step has exactly one of `image`, `agent`, `uses`, `call`, `approval`
+  or `wait`. `command` is for image steps only; `env` and `outputs` are for
+  image and agent steps; a `uses` step's outputs come from the action, and
+  a `call` step's from the called workflow.
+- **Reuse before you copy.** Before writing a sequence of steps another
+  workflow already has (checkout and test, deploy and wait for health,
+  post a summary), call `list_workflows`: one with `callable: true` can be
+  called. Write `call: {workflow: <name>, input: {...}}`: the input must
+  supply exactly its required `trigger_fields` (from `get_workflow`),
+  cannot read `secrets`, and the step's outputs are its `outputs`
+  (`${{ steps.<id>.outputs.<name> }}`). The name is literal; a call that
+  would loop back (`a → b → a`) is refused. The step takes `retry` (a new
+  child per attempt) and an optional `timeout` that cancels the child;
+  not `command`, `env`, `outputs` or `repository`. The child's logs stay
+  with the child: `get_run` on a call step names it.
+- **Write workflows meant to be called** with a `- type: call` trigger and
+  top-level `outputs` that expose what callers need
+  (`outputs: {passed: "${{ steps.test.outputs.passed }}"}`). Saving one
+  can warn that a caller would break (a dropped output, a new required
+  input): tell the human which callers to update next.
+- **Agent steps.** Before writing one, call `list_agent_profiles`: it
+  lists the profiles the operator allows (`workflows.agent_profiles`, the
+  first is the default) and each one's params. If it is empty, agent steps
+  are off; ask the human to list a profile, and do not work around it with
+  an image step that runs an agent CLI. Write
+  `agent: {profile: <name>, prompt: "...", params: {...}}`, using only the
+  listed params. The prompt may read `steps`, `trigger`, `env`, `run` and
+  `workflow`, never `secrets`: pass a secret the agent needs through the
+  step's `env`. Its final answer is the output `result`; declare other
+  outputs as `json:<path>` from `/icaro/output.json` and tell the agent to
+  write that file. A `validate_workflow` warning about trigger data means
+  the prompt carries text an outsider may have written; keep it, but say so
+  to the human.
 - `approval: {message: "..."}` outputs `approved_by` and `comment`; its
   `timeout` is the decision deadline, and the message cannot read secrets.
   A rejection or an expired deadline fails the step. `wait` takes a

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"icaro/internal/creds"
 	"icaro/internal/integration"
 	"icaro/internal/mcp"
 	"icaro/internal/secrets"
@@ -27,6 +28,7 @@ const (
 	ToolListIntegration = "list_integrations"
 	ToolGetIntegration  = "get_integration"
 	ToolListSecrets     = "list_secrets"
+	ToolListAgents      = "list_agent_profiles"
 	ToolValidate        = "validate_workflow"
 	ToolCreate          = "create_workflow"
 	ToolUpdate          = "update_workflow"
@@ -39,6 +41,8 @@ const (
 // Workflows is the part of the service layer the tools use.
 type Workflows interface {
 	ValidateWorkflow(ctx context.Context, yaml string) (*workflow.Spec, workflow.Issues, error)
+	Warnings(ctx context.Context, spec *workflow.Spec) workflow.Issues
+	AgentProfiles() []workflow.AgentProfile
 	ApplyWorkflow(ctx context.Context, yaml, actor string) (*service.WorkflowInfo, error)
 	GetWorkflow(ctx context.Context, name string) (*service.WorkflowInfo, error)
 	ListWorkflows(ctx context.Context) ([]*service.WorkflowInfo, error)
@@ -92,7 +96,7 @@ const (
 func Register(s *mcp.Server, d Deps) { register(s, d, func(string) bool { return true }) }
 
 // ReadTools are the authoring tools that change nothing.
-var ReadTools = []string{ToolGetSchema, ToolListIntegration, ToolGetIntegration, ToolListSecrets, ToolValidate, ToolGet, ToolList, ToolGetRun}
+var ReadTools = []string{ToolGetSchema, ToolListIntegration, ToolGetIntegration, ToolListSecrets, ToolListAgents, ToolValidate, ToolGet, ToolList, ToolGetRun}
 
 // RegisterRead adds the resources and only the tools in ReadTools: the
 // workflow assistant's socket serves these, and writes go through its own
@@ -190,6 +194,14 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 	})
 
 	s.AddTool(mcp.Tool{
+		Name: ToolListAgents, Title: "List agent profiles", InputSchema: schema(noArgs), Annotations: readOnly,
+		Description: "List the profiles agent steps may run under (the operator's workflows.agent_profiles, first is the default) with each one's agent CLI and declared params. Call it before writing an agent step; if the list is empty, agent steps are off and the human must add a profile to workflows.agent_profiles.",
+		Handler: func(ctx context.Context, _ json.RawMessage) (*mcp.ToolResult, error) {
+			return mcp.JSONResult(map[string]any{"profiles": AgentProfileInfos(d.Workflows.AgentProfiles())}), nil
+		},
+	})
+
+	s.AddTool(mcp.Tool{
 		Name: ToolValidate, Title: "Validate a workflow", InputSchema: schema(yamlArgs), Annotations: readOnly,
 		Description: "Validate a workflow without saving it. Returns structured issues: a JSON Pointer `path`, a `message` and often a `hint`. Fix exactly what each path points at and validate again until `valid` is true.",
 		Handler: func(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
@@ -203,9 +215,12 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 			if err != nil {
 				return nil, err
 			}
-			out := map[string]any{"valid": len(issues) == 0, "issues": orEmpty(issues)}
+			out := map[string]any{"valid": len(issues) == 0, "issues": orEmpty(issues), "warnings": workflow.Issues{}}
 			if spec != nil && spec.Name != "" {
 				out["name"] = spec.Name
+			}
+			if spec != nil {
+				out["warnings"] = orEmpty(d.Workflows.Warnings(ctx, spec))
 			}
 			return mcp.JSONResult(out), nil
 		},
@@ -258,7 +273,7 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 
 	s.AddTool(mcp.Tool{
 		Name: ToolGet, Title: "Get a workflow", InputSchema: schema(nameArgs), Annotations: readOnly,
-		Description: "Return a workflow's current YAML, version, status and the trigger.* fields manual runs must supply.",
+		Description: "Return a workflow's current YAML, version, status, the trigger.* fields manual runs (and call steps' input) must supply, whether it is callable, its outputs and the workflows that call it.",
 		Handler: func(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 			var in struct {
 				Name string `json:"name"`
@@ -272,13 +287,14 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 			}
 			out := summary(info)
 			out["yaml"] = info.YAML
+			out["callers"] = orNone(info.Callers)
 			return mcp.JSONResult(out), nil
 		},
 	})
 
 	s.AddTool(mcp.Tool{
 		Name: ToolList, Title: "List workflows", InputSchema: schema(noArgs), Annotations: readOnly,
-		Description: "List workflows with version, status, steps and triggers.",
+		Description: "List workflows with version, status, steps and triggers. A workflow with callable: true has a call trigger: reuse it from a call step (with its trigger_fields as input and its outputs as the step's outputs) instead of copying its steps.",
 		Handler: func(ctx context.Context, _ json.RawMessage) (*mcp.ToolResult, error) {
 			ws, err := d.Workflows.ListWorkflows(ctx)
 			if err != nil {
@@ -322,7 +338,7 @@ func register(srv *mcp.Server, d Deps, keep func(string) bool) {
 	s.AddTool(mcp.Tool{
 		Name: ToolGetRun, Title: "Get a run", Annotations: readOnly,
 		InputSchema: schema(`{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"},"log_tail_bytes":{"type":"integer","minimum":0,"maximum":32768,"description":"Bytes of each step's log tail to include (default 4096)."},"step":{"type":"string","description":"Only include this step's log."}}}`),
-		Description: "Return a run's status, per-step status, outputs and errors, and a size-capped tail of each step's log (secret values are redacted).",
+		Description: "Return a run's status, per-step status, outputs and errors, and a size-capped tail of each step's log (secret values are redacted). A call step names its child run (get_run it for the child's logs); a child run names its parent and root.",
 		Handler: func(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 			var in struct {
 				ID       string `json:"id"`
@@ -386,10 +402,22 @@ func (f filtered) AddTool(t mcp.Tool) {
 }
 
 func summary(w *service.WorkflowInfo) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"name": w.Name, "description": w.Description, "version": w.Version, "status": w.Status,
 		"steps": w.Steps, "triggers": w.Triggers, "trigger_fields": w.TriggerFields,
+		"callable": w.Callable, "outputs": w.Outputs,
 	}
+	if len(w.Warnings) > 0 {
+		out["warnings"] = w.Warnings
+	}
+	return out
+}
+
+func orNone(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func needWrite(ctx context.Context) (mcp.Caller, error) {
@@ -425,4 +453,28 @@ func orEmpty(is workflow.Issues) workflow.Issues {
 func mustJSON(v any) string {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	return string(b)
+}
+
+// AgentProfileInfo is a profile agent steps may use, with its harness's
+// declared params (ADR 0037).
+type AgentProfileInfo struct {
+	Name    string        `json:"name"`
+	Agent   string        `json:"agent"`
+	Default bool          `json:"default,omitempty"`
+	Params  []creds.Param `json:"params"`
+}
+
+// AgentProfileInfos describes profiles for clients and agents.
+func AgentProfileInfos(ps []workflow.AgentProfile) []AgentProfileInfo {
+	out := make([]AgentProfileInfo, 0, len(ps))
+	for i, p := range ps {
+		info := AgentProfileInfo{Name: p.Name, Agent: p.Agent, Default: i == 0, Params: []creds.Param{}}
+		if a, err := creds.LookupAgent(p.Agent); err == nil {
+			if st, err := a.Step(); err == nil {
+				info.Params = st.Params
+			}
+		}
+		out = append(out, info)
+	}
+	return out
 }

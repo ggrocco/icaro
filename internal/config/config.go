@@ -152,7 +152,26 @@ type WorkflowsConfig struct {
 	Profile        string `yaml:"profile"`
 	// AllowHost permits image steps to run on the host (MVP cut 4: off).
 	AllowHost bool `yaml:"allow_host"`
+	// AgentProfiles are the profiles agent steps may run under (ADR 0037),
+	// empty by default: agent steps are off until the operator lists one.
+	// A step that names no profile uses the first entry.
+	AgentProfiles []string `yaml:"agent_profiles"`
+	// MaxCallDepth bounds how deep call steps nest (ADR 0038): a run's
+	// depth is its caller's plus one, and a call past it fails its step.
+	MaxCallDepth int `yaml:"max_call_depth"`
+	// MaxRunsPerRoot bounds the runs, retries included, that share one
+	// root run: a call past it fails its step.
+	MaxRunsPerRoot int `yaml:"max_runs_per_root"`
 }
+
+// Call-step brakes (ADR 0038): their defaults and the largest values the
+// config accepts.
+const (
+	DefaultMaxCallDepth   = 4
+	DefaultMaxRunsPerRoot = 64
+	maxCallDepthCeiling   = 32
+	maxRunsPerRootCeiling = 10000
+)
 
 // PreviewsConfig governs per-worktree previews.
 type PreviewsConfig struct {
@@ -282,40 +301,42 @@ func DefaultProfiles() map[string]ProfileConfig {
 // Defaults returns the baseline configuration as flat keys.
 func Defaults() map[string]any {
 	return map[string]any{
-		"version":                    CurrentVersion,
-		"home":                       paths.Default().Root,
-		"database.driver":            "sqlite",
-		"daemon.ui_listen":           "127.0.0.1:8787",
-		"limits.timeout":             "30m",
-		"limits.memory_mb":           2048,
-		"limits.cpus":                2.0,
-		"limits.pids":                512,
-		"limits.nofile":              4096,
-		"sessions.max_active":        0,
-		"sessions.default_profile":   "claude",
-		"workflows.concurrency":      4,
-		"workflows.profile":          "workflow",
-		"previews.enabled":           true,
-		"previews.http_port":         8780,
-		"previews.traefik_image":     "traefik:v3.1",
-		"previews.debounce":          "2s",
-		"memory.preamble":            DefaultPreamble,
-		"assistant.max_active":       2,
-		"assistant.idle_timeout":     "15m",
-		"assistant.turn_timeout":     "10m",
-		"assistant.approval_timeout": "5m",
-		"assistant.memory_budget":    2000,
-		"memory.distill.enabled":     true,
-		"memory.distill.model":       "auto",
-		"memory.distill.cpus":        2.0,
-		"memory.distill.ttl":         "2160h",
-		"memory.distill.timeout":     "10m",
-		"webhooks.max_body_bytes":    1 << 20,
-		"webhooks.max_skew":          "5m",
-		"webhooks.rate_per_min":      120,
-		"webhooks.retention":         "720h",
-		"webhooks.max_rejected":      1000,
-		"usage.timezone":             "Local",
+		"version":                     CurrentVersion,
+		"home":                        paths.Default().Root,
+		"database.driver":             "sqlite",
+		"daemon.ui_listen":            "127.0.0.1:8787",
+		"limits.timeout":              "30m",
+		"limits.memory_mb":            2048,
+		"limits.cpus":                 2.0,
+		"limits.pids":                 512,
+		"limits.nofile":               4096,
+		"sessions.max_active":         0,
+		"sessions.default_profile":    "claude",
+		"workflows.concurrency":       4,
+		"workflows.profile":           "workflow",
+		"workflows.max_call_depth":    DefaultMaxCallDepth,
+		"workflows.max_runs_per_root": DefaultMaxRunsPerRoot,
+		"previews.enabled":            true,
+		"previews.http_port":          8780,
+		"previews.traefik_image":      "traefik:v3.1",
+		"previews.debounce":           "2s",
+		"memory.preamble":             DefaultPreamble,
+		"assistant.max_active":        2,
+		"assistant.idle_timeout":      "15m",
+		"assistant.turn_timeout":      "10m",
+		"assistant.approval_timeout":  "5m",
+		"assistant.memory_budget":     2000,
+		"memory.distill.enabled":      true,
+		"memory.distill.model":        "auto",
+		"memory.distill.cpus":         2.0,
+		"memory.distill.ttl":          "2160h",
+		"memory.distill.timeout":      "10m",
+		"webhooks.max_body_bytes":     1 << 20,
+		"webhooks.max_skew":           "5m",
+		"webhooks.rate_per_min":       120,
+		"webhooks.retention":          "720h",
+		"webhooks.max_rejected":       1000,
+		"usage.timezone":              "Local",
 	}
 }
 
@@ -471,6 +492,12 @@ func (c *Config) Validate() error {
 	if c.Workflows.RunParallelism < 0 {
 		errs = append(errs, errors.New("workflows.run_parallelism must be >= 0 (0 = no per-run cap)"))
 	}
+	if d := c.Workflows.MaxCallDepth; d < 1 || d > maxCallDepthCeiling {
+		errs = append(errs, fmt.Errorf("workflows.max_call_depth must be between 1 and %d", maxCallDepthCeiling))
+	}
+	if n := c.Workflows.MaxRunsPerRoot; n < 1 || n > maxRunsPerRootCeiling {
+		errs = append(errs, fmt.Errorf("workflows.max_runs_per_root must be between 1 and %d", maxRunsPerRootCeiling))
+	}
 	if c.Limits.Timeout <= 0 {
 		errs = append(errs, errors.New("limits.timeout must be > 0"))
 	}
@@ -503,6 +530,19 @@ func (c *Config) Validate() error {
 	}
 	if _, ok := c.Profiles[c.Workflows.Profile]; !ok {
 		errs = append(errs, fmt.Errorf("workflows.profile %q is not a profile", c.Workflows.Profile))
+	}
+	seen := map[string]bool{}
+	for _, p := range c.Workflows.AgentProfiles {
+		prof, ok := c.Profiles[p]
+		switch {
+		case !ok:
+			errs = append(errs, fmt.Errorf("workflows.agent_profiles: %q is not a profile", p))
+		case prof.Agent != "claude" && prof.Agent != "codex":
+			errs = append(errs, fmt.Errorf("workflows.agent_profiles: profile %q runs agent %q; agent steps need claude or codex", p, prof.Agent))
+		case seen[p]:
+			errs = append(errs, fmt.Errorf("workflows.agent_profiles: %q is listed twice", p))
+		}
+		seen[p] = true
 	}
 	if p := c.Assistant.Profile; p != "" {
 		if prof, ok := c.Profiles[p]; !ok {

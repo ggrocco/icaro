@@ -96,6 +96,9 @@ type Run struct {
 	// WakeAt is when the engine next looks at a waiting run; nil waits for
 	// a decision only.
 	WakeAt *time.Time
+	// OutputsJSON are the workflow outputs a succeeded run produced
+	// (ADR 0038), "{}" otherwise.
+	OutputsJSON string
 }
 
 // StepRun is the persisted state of one step of a run, keyed by step id.
@@ -116,6 +119,21 @@ type StepRun struct {
 	StartedAt   *time.Time
 	FinishedAt  *time.Time
 	Error       string
+	// Agent steps (ADR 0037): the profile, the image digest pinned for the
+	// run, and the token usage the agent's stream reported.
+	Profile     string
+	ImageDigest string
+	Usage       StepUsage
+	// ChildRunID and ChildVersion are the run a call step started for its
+	// latest attempt and the called workflow's version (ADR 0038).
+	ChildRunID   string
+	ChildVersion int
+}
+
+// StepUsage is an agent step's token count; CostMicro is the CLI's own
+// estimate in millionths of a dollar (inject profiles only).
+type StepUsage struct {
+	Input, Output, CacheRead, CacheWrite, CostMicro int64
 }
 
 // LogChunk indexes a step attempt's log file: after flush Seq the file
@@ -145,7 +163,10 @@ type APIToken struct {
 type RunFilter struct {
 	WorkflowID string
 	Status     string
-	Limit      int
+	// RootRunID lists one run tree (ADR 0038): the root and every run
+	// that shares it.
+	RootRunID string
+	Limit     int
 }
 
 // Approval decisions (ADR 0030).

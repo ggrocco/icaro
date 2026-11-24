@@ -358,6 +358,29 @@ func TestAssistantConfig(t *testing.T) {
 	}
 }
 
+func TestAgentProfilesConfig(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Workflows.AgentProfiles) != 0 {
+		t.Fatalf("agent steps are on by default: %v", cfg.Workflows.AgentProfiles)
+	}
+	cfg.Profiles["plain"] = ProfileConfig{Egress: []string{}}
+	cfg.Workflows.AgentProfiles = []string{"claude", "claude", "plain", "ghost"}
+	err = cfg.Validate()
+	for _, want := range []string{`"claude" is listed twice`, `profile "plain" runs agent ""`, `"ghost" is not a profile`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+	cfg.Workflows.AgentProfiles = []string{"claude"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDistillConfig(t *testing.T) {
 	isolate(t)
 	cfg, err := Load("")
@@ -375,5 +398,29 @@ func TestDistillConfig(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in %v", want, err)
 		}
+	}
+}
+
+func TestCallBrakesConfig(t *testing.T) {
+	isolate(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Workflows.MaxCallDepth != 4 || cfg.Workflows.MaxRunsPerRoot != 64 {
+		t.Fatalf("defaults %+v", cfg.Workflows)
+	}
+	for _, c := range []struct {
+		depth, runs int
+		want        string
+	}{{0, 64, "workflows.max_call_depth"}, {33, 64, "workflows.max_call_depth"}, {4, 0, "workflows.max_runs_per_root"}, {4, 10001, "workflows.max_runs_per_root"}} {
+		cfg.Workflows.MaxCallDepth, cfg.Workflows.MaxRunsPerRoot = c.depth, c.runs
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+	cfg.Workflows.MaxCallDepth, cfg.Workflows.MaxRunsPerRoot = 32, 10000
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
