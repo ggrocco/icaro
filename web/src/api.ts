@@ -68,6 +68,12 @@ export interface WorkflowInfo {
   steps: string[];
   triggers?: TriggerSpec[];
   trigger_fields?: { required: string[]; optional: string[] };
+  // Call steps (ADR 0038): a callable workflow has a call trigger; outputs
+  // are its workflow outputs, callers the workflows that call it (single
+  // workflow only).
+  callable?: boolean;
+  outputs?: string[];
+  callers?: string[];
   created_at: string;
   updated_at: string;
   yaml?: string;
@@ -95,6 +101,16 @@ export interface StepInfo {
   finished_at?: string;
   approval?: ApprovalInfo;
   agent?: AgentStepInfo;
+  call?: CallStepInfo;
+}
+
+// A call step (ADR 0038): the workflow it calls and the child run of its
+// latest attempt. Its outputs are the child's workflow outputs.
+export interface CallStepInfo {
+  workflow: string;
+  run_id?: string;
+  status?: string;
+  version?: number;
 }
 
 // An agent step (ADR 0037): what ran it, what it was asked and what it
@@ -136,6 +152,12 @@ export interface RunInfo {
   trigger_kind: string;
   trigger?: Record<string, unknown>;
   rerun_of?: string;
+  // Lineage (ADR 0038): a child of a call step names its parent; depth is
+  // 0 for a root. outputs are the workflow outputs of a succeeded run.
+  root_run_id?: string;
+  parent_run_id?: string;
+  depth?: number;
+  outputs?: Record<string, unknown>;
   error?: string;
   created_at: string;
   started_at?: string;

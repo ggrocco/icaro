@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"icaro/internal/service"
 	"icaro/internal/workflow"
 )
 
@@ -61,6 +63,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 				return printJSON(cmd.OutOrStdout(), info)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "applied %s version %d\n", info.Name, info.Version)
+			printWarnings(cmd.OutOrStdout(), info.Warnings)
 			if len(info.TriggerFields.Required) > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "manual runs need: --set %s\n", strings.Join(info.TriggerFields.Required, "=... --set ")+"=...")
 			}
@@ -92,6 +95,7 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 				}
 			case res.Valid:
 				fmt.Fprintf(cmd.OutOrStdout(), "valid: %s\n", res.Name)
+				printWarnings(cmd.OutOrStdout(), res.Warnings)
 			default:
 				for _, is := range res.Issues {
 					fmt.Fprintln(cmd.OutOrStdout(), is.String())
@@ -122,6 +126,9 @@ func newWorkflowCmd(opts *rootOpts) *cobra.Command {
 				return printJSON(cmd.OutOrStdout(), info)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "# %s v%d (%s)\n", info.Name, info.Version, info.Status)
+			if len(info.Callers) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "# called by: %s\n", strings.Join(info.Callers, ", "))
+			}
 			fmt.Fprint(cmd.OutOrStdout(), info.YAML)
 			return nil
 		},
@@ -254,19 +261,23 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 	var asJSON bool
 	cmd.PersistentFlags().BoolVar(&asJSON, "json", false, "print JSON")
 
-	var wfName, status string
+	var wfName, status, root string
 	var limit int
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List runs",
+		Long:  "List runs, newest first. With --root, list one tree of runs started by call steps: the root and its descendants, oldest first and indented by depth.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := opts.client(cmd.Context())
 			if err != nil {
 				return err
 			}
-			runs, err := c.ListRuns(cmd.Context(), wfName, status, limit)
+			runs, err := c.ListRunsQuery(cmd.Context(), service.RunQuery{Workflow: wfName, Status: status, Root: root, Limit: limit})
 			if err != nil {
 				return err
+			}
+			if root != "" {
+				runs = treeOrder(runs)
 			}
 			if asJSON {
 				return printJSON(cmd.OutOrStdout(), runs)
@@ -274,13 +285,18 @@ func newRunsCmd(opts *rootOpts) *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "ID\tWORKFLOW\tSTATUS\tTRIGGER\tCREATED\tERROR")
 			for _, r := range runs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.Workflow, r.Status, r.TriggerKind, r.CreatedAt, r.Error)
+				name := r.Workflow
+				if root != "" {
+					name = strings.Repeat("  ", r.Depth) + name
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, name, r.Status, r.TriggerKind, r.CreatedAt, r.Error)
 			}
 			return tw.Flush()
 		},
 	}
 	list.Flags().StringVar(&wfName, "workflow", "", "filter by workflow")
 	list.Flags().StringVar(&status, "status", "", "filter by status")
+	list.Flags().StringVar(&root, "root", "", "list the tree of runs under this root run (call steps)")
 	list.Flags().IntVar(&limit, "limit", 50, "max rows")
 
 	get := &cobra.Command{
@@ -442,5 +458,45 @@ func newSchemaCmd() *cobra.Command {
 			_, err := cmd.OutOrStdout().Write(workflow.SchemaJSON())
 			return err
 		},
+	}
+}
+
+// treeOrder puts a run tree in depth-first order: each run, then its
+// children oldest first (ADR 0038). Runs whose parent is not in the list
+// start a branch of their own.
+func treeOrder(runs []*service.RunInfo) []*service.RunInfo {
+	in := map[string]bool{}
+	for _, r := range runs {
+		in[r.ID] = true
+	}
+	kids := map[string][]*service.RunInfo{}
+	var tops []*service.RunInfo
+	for _, r := range runs {
+		if r.ParentRunID != "" && in[r.ParentRunID] {
+			kids[r.ParentRunID] = append(kids[r.ParentRunID], r)
+		} else {
+			tops = append(tops, r)
+		}
+	}
+	byAge := func(rs []*service.RunInfo) {
+		sort.SliceStable(rs, func(i, j int) bool { return rs[i].CreatedAt < rs[j].CreatedAt })
+	}
+	out := make([]*service.RunInfo, 0, len(runs))
+	var walk func(rs []*service.RunInfo)
+	walk = func(rs []*service.RunInfo) {
+		byAge(rs)
+		for _, r := range rs {
+			out = append(out, r)
+			walk(kids[r.ID])
+		}
+	}
+	walk(tops)
+	return out
+}
+
+// printWarnings shows what validation found valid but worth a second look.
+func printWarnings(w io.Writer, ws workflow.Issues) {
+	for _, is := range ws {
+		fmt.Fprintln(w, "warning: "+is.String())
 	}
 }

@@ -244,6 +244,18 @@ func TestClosedDatabase(t *testing.T) {
 			_, err := s.ClaimRun(ctx, "runner")
 			return err
 		},
+		"EnqueueCall": func() error {
+			_, err := s.EnqueueCall(ctx, &Run{}, nil, CallBooking{MaxRunsPerRoot: 1})
+			return err
+		},
+		"ActiveChildren": func() error {
+			_, err := s.ActiveChildren(ctx, "r")
+			return err
+		},
+		"ActiveDescendants": func() error {
+			_, err := s.ActiveDescendants(ctx, "r")
+			return err
+		},
 		"SetRunSession": func() error { return s.SetRunSession(ctx, "r", "s") },
 		"FinishRun":     func() error { return s.FinishRun(ctx, "r", RunSucceeded, "") },
 		"RequestCancel": func() error {

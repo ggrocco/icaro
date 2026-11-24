@@ -19,7 +19,11 @@ type Spec struct {
 	Concurrency string            `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	Env         map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 	Triggers    []TriggerSpec     `json:"triggers,omitempty" yaml:"triggers,omitempty"`
-	Steps       []StepSpec        `json:"steps" yaml:"steps"`
+	// Outputs are the workflow's outputs (ADR 0038): expressions over its
+	// steps, evaluated when a run succeeds, and the outputs of a call step
+	// that calls it.
+	Outputs map[string]string `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	Steps   []StepSpec        `json:"steps" yaml:"steps"`
 }
 
 // Concurrency policies (architecture §6).
@@ -40,10 +44,12 @@ type TriggerSpec struct {
 	Filter      string `json:"filter,omitempty" yaml:"filter,omitempty"`
 }
 
-// Builtin trigger types.
+// Builtin trigger types. A workflow with a call trigger can be called by
+// another workflow's call step (ADR 0038).
 const (
 	TriggerManual = "manual"
 	TriggerCron   = "cron"
+	TriggerCall   = "call"
 )
 
 // RepositoryRef selects a repository resolved once per (ref, revision).
@@ -69,6 +75,17 @@ type StepSpec struct {
 	Approval   *ApprovalSpec     `json:"approval,omitempty" yaml:"approval,omitempty"`
 	Wait       string            `json:"wait,omitempty" yaml:"wait,omitempty"`
 	Agent      *AgentSpec        `json:"agent,omitempty" yaml:"agent,omitempty"`
+	Call       *CallSpec         `json:"call,omitempty" yaml:"call,omitempty"`
+}
+
+// CallSpec runs another workflow as a child run and waits for it
+// (ADR 0038). Its outputs are the child's workflow outputs.
+type CallSpec struct {
+	// Workflow is the callee's literal name; it must have a call trigger.
+	Workflow string `json:"workflow" yaml:"workflow"`
+	// Input is the child run's trigger.* payload: it must cover exactly
+	// the trigger fields the child reads, and cannot read secrets.
+	Input map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
 }
 
 // AgentSpec runs an agent profile's CLI headless as the step (ADR 0037).
@@ -110,6 +127,10 @@ var (
 	// secrets, since the prompt is stored, displayed and sent to the
 	// provider (ADR 0037).
 	RootsPrompt = []string{"steps", "trigger", "env", "run", "workflow"}
+	// RootsCall are the names a call step's input and the workflow's
+	// outputs may reference: no secrets, since both are stored with runs
+	// and shown wherever runs are (ADR 0038).
+	RootsCall = []string{"steps", "trigger", "env", "run", "workflow"}
 	// RootsFilter are the names a trigger filter may reference.
 	RootsFilter = []string{"trigger"}
 )
@@ -197,6 +218,7 @@ const (
 	RunTriggerCron        = "cron"
 	RunTriggerIntegration = "integration"
 	RunTriggerRedeliver   = "redeliver"
+	RunTriggerCall        = "call"
 )
 
 // EnqueueRequest asks the engine to start a run. The engine applies the
@@ -213,6 +235,12 @@ type EnqueueRequest struct {
 	// one (a re-run); RerunOf links the new run to the run it repeats.
 	Version int
 	RerunOf string
+	// ParentRunID and ParentStep make the run a child of a call step
+	// (ADR 0038): it joins the parent's tree, the depth and per-root
+	// brakes apply, and the step records the child in the same
+	// transaction.
+	ParentRunID string
+	ParentStep  string
 }
 
 // EnqueueResult reports what happened to an EnqueueRequest.
@@ -220,6 +248,8 @@ type EnqueueResult struct {
 	RunID        string `json:"run_id,omitempty"`
 	Deduplicated bool   `json:"deduplicated,omitempty"` // an earlier run had the same key
 	Skipped      string `json:"skipped,omitempty"`      // reason when no run was created (e.g. concurrency forbid)
+	// Version is the workflow version the run executes.
+	Version int `json:"version,omitempty"`
 }
 
 // Enqueuer is implemented by the workflow service; integrations and the

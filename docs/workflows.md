@@ -45,16 +45,18 @@ steps:
 | `description` | Free text, at most 500 characters |
 | `concurrency` | `allow` (default), `forbid`, `queue` or `replace`; see [Concurrency](#concurrency) |
 | `env` | Environment for every step; values may use `${{ }}`, including `${{ secrets.NAME }}` |
-| `triggers` | `type: manual`, `type: cron` with `cron:`, or an integration event; see [Integrations](integrations.md) |
+| `triggers` | `type: manual`, `type: cron` with `cron:`, `type: call` (other workflows may [call it](#calling-workflows)), or an integration event; see [Integrations](integrations.md) |
+| `outputs` | Workflow outputs: a map from name to an expression over the steps' outputs, evaluated when a run succeeds. A [call step](#calling-workflows) that calls the workflow returns them. |
 | `steps` | The DAG; at least one step |
 
 ## Steps
 
-A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of five forms.
+A step has an `id` (`^[a-z][a-z0-9-]{1,62}$`) and exactly one of six forms.
 
 - An **`image` step** runs a container. `command` runs as `/bin/sh -c <command>`; without it, the image's entrypoint runs.
 - An **`agent` step** runs an agent CLI (Claude Code or Codex) headless, under a profile the operator allows; see [Agent steps](#agent-steps).
 - A **`uses` step** calls an integration action, such as `uses: slack.post-message`, inside the daemon over HTTP. No container runs. `input` is checked against the action's typed inputs, and its outputs come from the manifest. Use `icaro integration show <name>` to list them.
+- A **`call` step** runs another workflow as a child run, waits for it and returns its workflow outputs; see [Calling workflows](#calling-workflows).
 - An **`approval` step** waits until a person approves or rejects it; see [Approvals and waits](#approvals-and-waits).
 - A **`wait` step** waits for a duration, such as `wait: 2h`.
 
@@ -64,8 +66,8 @@ Every form takes the same scheduling fields, except as noted:
 |---|---|
 | `needs` | Step ids that must finish first. Independent steps run in parallel, within the [parallelism limits](#parallelism). |
 | `when` | A boolean expression; false records the step as `skipped`. It is evaluated once, after every need is final. |
-| `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute. Not on approval or wait steps. |
-| `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). On an approval step it is the decision deadline instead, with no ceiling; a wait step has none. |
+| `retry` | 0–5 extra attempts. The backoff before attempt k+1 is 2s·2^(k−1), capped at 1 minute; a call step starts its next child at once. Not on approval or wait steps. |
+| `timeout` | Per attempt, for example `90s`, `10m` or `1h`. The default and ceiling is `limits.timeout` (30m). On an approval step it is the decision deadline instead, and on a call step a deadline for the child run, both with no ceiling; a wait step has none. |
 | `repository` | `{ref, revision}`. The repository is fetched once per run into the repository cache, checked out as a worktree, and mounted at `/workspace` for this step and any other step of the run with the same ref and revision. Both fields may use `${{ }}` (for example `https://github.com/${{ trigger.repo }}.git`) with the same root and `needs` rules as other fields, but not `secrets`. A rendered value that is empty (ref), starts with `-`, contains whitespace or carries a secret fails the step before git runs. |
 | `env` | Image and agent steps. Merged over the workflow `env`. |
 | `input` | Inputs. Image steps receive them as `/icaro/input.json` and `ICARO_INPUT_<NAME>`; for `uses` steps they are the action's typed inputs. |
@@ -179,6 +181,68 @@ steps:
 - **Failures.** An expired login fails the step with **Sign in required** and the `icaro login <profile>` command, without a retry. A usage limit or a CLI error fails the attempt, and `retry` runs it again from a fresh home. While a step of a profile runs, `icaro login <profile>` is refused.
 - **Usage.** The tokens the CLI reports are recorded on the step, shown on the run page and counted by `icaro usage` (per run and step). Subscription profiles show tokens only; `inject` profiles also show the CLI's cost, labelled an estimate.
 - **Untrusted input.** A prompt that reads `trigger.*` in a workflow with an integration trigger carries text an outsider may have written, so prompt injection is the expected case. Validation warns, naming the profile. The agent can still reach only its profile's allowlist, its workspace, its own home layer and its memory scope; it has no daemon API and no secrets you did not pass in `env`. Keep the profile's allowlist narrow and pass the agent only what it needs.
+
+## Calling workflows
+
+A workflow with a `call` trigger can be run by another workflow's `call` step, as a child run ([ADR 0038](../blueprint/docs/adr/0038-call-workflow-steps.md)). A sequence written once, such as checking out and testing a repository, can then be called from many workflows, with its own approvals, retries, concurrency and history.
+
+The callee declares the trigger and its outputs:
+
+```yaml workflow
+version: 1
+name: run-tests
+triggers:
+  - type: call
+  - type: manual
+outputs:
+  passed: ${{ steps.test.outputs.passed }}
+steps:
+  - id: test
+    repository:
+      ref: ${{ trigger.repo }}
+      revision: ${{ trigger.sha }}
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    command: test -f /workspace/README.md && printf '{"passed":"yes"}' > /icaro/output.json
+    outputs:
+      passed: "json:passed"
+```
+
+A caller passes its `trigger.*` fields as `input`, and reads its outputs as the step's:
+
+```yaml workflow
+version: 1
+name: release
+triggers:
+  - type: manual
+steps:
+  - id: test
+    call:
+      workflow: run-tests
+      input:
+        repo: ${{ trigger.repo }}
+        sha: ${{ trigger.sha }}
+    timeout: 1h
+  - id: announce
+    needs: [test]
+    when: steps.test.outputs.passed == 'yes'
+    image: alpine:3.24@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    command: echo "release ${{ trigger.sha }} passed its tests"
+```
+
+- **Validation.** `workflow` is a literal name. The callee must exist and have a `call` trigger. `input` must supply every `trigger.*` field the callee reads (the ones `icaro run` would prompt for) and nothing it does not read, and it cannot read `secrets`: it is stored with the child run and shown wherever runs are. A child that needs a secret resolves its own `${{ secrets.* }}`. `${{ steps.<call>.outputs.<key> }}` must name one of the callee's `outputs`. `command`, `image`, `env`, `outputs` and `repository` are not allowed on a call step.
+- **Cycles.** Saving a workflow fails when its calls, followed through the current versions of the workflows they call, lead back to it, with the path (`run-tests → release → run-tests`). Saving a callee also warns about what it would break in the workflows that call it, such as a dropped output or a new required input, naming each caller; `icaro workflow get NAME` lists the callers.
+- **Running.** The child gets `trigger.*` from `input` and its own run session, workspace and profile; parent and child share nothing on disk. While the step waits, the caller is parked like a run on an approval: it holds no `workflows.max_runs` slot, so a chain of calls never deadlocks, even with `max_runs: 1`. The child's end wakes the caller. A child that succeeds succeeds the step with its outputs; a child that fails or is cancelled fails it, and `retry` starts a new child per attempt. Past the step's `timeout`, the child is cancelled and the step fails.
+- **Concurrency.** The callee's [policy](#concurrency) applies to calls as to any trigger, except that `replace` acts as `queue`: a call never cancels a run another caller may be waiting on, and a `replace` run started another way waits for runs that callers wait on. With `forbid`, a call while the callee is active fails the step with the policy's reason.
+- **Cancelling.** Cancelling a run, replacing it or deleting its workflow cancels its active child runs first, down the tree. Cancelling a child by hand fails only its caller's step; the caller's other branches keep running.
+- **Re-runs.** `icaro runs rerun` of a caller calls the same callee versions the original run recorded, and starts a new tree.
+- **Brakes.** Two config keys bound a tree of runs:
+
+  | Key | Default | Caps |
+  |---|---|---|
+  | `workflows.max_call_depth` | `4` | How deep calls nest; a call past it fails the step and starts nothing |
+  | `workflows.max_runs_per_root` | `64` | Runs in one tree, retries included; a call past it fails the step and starts nothing |
+
+- **Seeing it.** `icaro runs get` shows a call step's child run (id, status, version) and, on a child, its caller and root. `icaro runs list --root ID` lists a tree, indented by depth. The run page links caller and child, and the run graph's call box opens the child's run. Logs stay per run: the call step's log records the enqueue, the child's id and its outcome.
 
 ## Expressions
 

@@ -230,6 +230,13 @@ func triggerSummary(ts []workflow.TriggerSpec) string {
 
 func printRun(w io.Writer, run *service.RunInfo) {
 	fmt.Fprintf(w, "run %s  workflow=%s v%d  status=%s  trigger=%s\n", run.ID, run.Workflow, run.Version, run.Status, run.TriggerKind)
+	if run.ParentRunID != "" {
+		// A child of a call step (ADR 0038).
+		fmt.Fprintf(w, "called by run %s (root %s, depth %d)\n", run.ParentRunID, run.RootRunID, run.Depth)
+	}
+	if out := compactJSON(run.Outputs); out != "" && out != "{}" && out != "null" {
+		fmt.Fprintf(w, "outputs: %s\n", out)
+	}
 	if run.Error != "" {
 		fmt.Fprintf(w, "error: %s\n", run.Error)
 	}
@@ -243,11 +250,7 @@ func printRun(w io.Writer, run *service.RunInfo) {
 		if st.ExitCode != nil {
 			exit = strconv.Itoa(*st.ExitCode)
 		}
-		out := string(st.Outputs)
-		var compact bytes.Buffer
-		if json.Compact(&compact, st.Outputs) == nil {
-			out = compact.String()
-		}
+		out := compactJSON(st.Outputs)
 		if len(out) > 60 {
 			out = out[:57] + "..."
 		}
@@ -262,7 +265,27 @@ func printRun(w io.Writer, run *service.RunInfo) {
 		if st.Agent != nil {
 			printAgentStep(w, st.ID, st.Agent)
 		}
+		if st.Call != nil {
+			printCallStep(w, st.ID, st.Call)
+		}
 	}
+}
+
+// printCallStep shows the child run a call step started (ADR 0038).
+func printCallStep(w io.Writer, id string, c *service.CallStepInfo) {
+	if c.RunID == "" {
+		fmt.Fprintf(w, "\ncall step %s: workflow %s, not started\n", id, c.Workflow)
+		return
+	}
+	fmt.Fprintf(w, "\ncall step %s: workflow %s v%d, child run %s (%s)\n  icaro runs get %s\n", id, c.Workflow, c.Version, c.RunID, c.Status, c.RunID)
+}
+
+func compactJSON(raw json.RawMessage) string {
+	var b bytes.Buffer
+	if json.Compact(&b, raw) == nil {
+		return b.String()
+	}
+	return string(raw)
 }
 
 // printAgentStep shows what ran an agent step and what it used (ADR 0037).

@@ -61,6 +61,13 @@ describe("graph", () => {
       ["agent", "agent"],
     ]);
   });
+  it("marks call steps with the workflow they call", () => {
+    const steps = stepsFromSpec({ steps: [{ id: "test", call: { workflow: "run-tests" } }, { id: "bare", call: {} }] });
+    expect(steps.map((s) => [s.kind, s.label])).toEqual([
+      ["call", "call · run-tests"],
+      ["call", "call"],
+    ]);
+  });
   it("survives cycles", () => {
     const placed = layout([
       { id: "a", needs: ["b"], kind: "image", label: "" },

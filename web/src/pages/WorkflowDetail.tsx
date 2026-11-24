@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api, type RunInfo, type VersionInfo } from "../api";
+import { api, type RunInfo, type VersionInfo, type WorkflowInfo } from "../api";
 import { assistApi, type WorkflowNote } from "../assist";
 import { Editor } from "./Editor";
 import { RunGraph } from "../components/lazy";
@@ -80,6 +80,7 @@ export function WorkflowDetail({ name, tab = "overview" }: { name: string; tab?:
       {tab === "overview" && (
         <>
           <WorkflowNotes name={name} />
+          <CallFacts workflow={w} />
           {spec ? <RunGraph spec={spec} /> : <p className="muted">No graph.</p>}
         </>
       )}
@@ -92,6 +93,40 @@ export function WorkflowDetail({ name, tab = "overview" }: { name: string; tab?:
         </>
       )}
     </section>
+  );
+}
+
+// CallFacts says whether other workflows can call this one, with what
+// outputs, and which do (ADR 0038).
+function CallFacts({ workflow: w }: { workflow: WorkflowInfo }) {
+  const callers = w.callers ?? [];
+  if (!w.callable && callers.length === 0) return null;
+  return (
+    <dl className="kv" aria-label="Calls">
+      {w.callable && (
+        <>
+          <dt>Callable</dt>
+          <dd>
+            yes
+            {w.trigger_fields?.required.length ? <span className="muted"> · input {w.trigger_fields.required.join(", ")}</span> : null}
+            {w.outputs?.length ? <span className="muted"> · outputs {w.outputs.join(", ")}</span> : null}
+          </dd>
+        </>
+      )}
+      <dt>Called by</dt>
+      <dd>
+        {callers.length === 0 ? (
+          <span className="muted">no workflow</span>
+        ) : (
+          callers.map((c, i) => (
+            <span key={c}>
+              {i > 0 && ", "}
+              <a href={href("workflows", c)}>{c}</a>
+            </span>
+          ))
+        )}
+      </dd>
+    </dl>
   );
 }
 
