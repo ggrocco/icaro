@@ -23,6 +23,11 @@ test("ask the assistant for a workflow, accept its proposal and save it", async 
   await expect(panel.getByText("I proposed a hello workflow (valid)")).toBeVisible({ timeout: 60_000 });
   // The tools it used are listed on its reply.
   await expect(panel.getByRole("list", { name: "Tools the assistant used" }).getByText("propose_workflow")).toBeVisible();
+  // The editor sent its document before the message, so no late editor
+  // write replaced the proposal (the newest draft is the assistant's).
+  const chat = decodeURIComponent(new URL(page.url()).hash.split("/").pop()!);
+  const detail = await page.evaluate(async (id) => (await fetch(`/api/v1/chats/${encodeURIComponent(id)}`)).json(), chat);
+  expect(detail.draft.source).toBe("assistant");
 
   const proposal = panel.getByRole("group", { name: "Proposed change" });
   await expect(proposal).toBeVisible();
@@ -33,7 +38,6 @@ test("ask the assistant for a workflow, accept its proposal and save it", async 
 
   await page.getByRole("button", { name: "Validate & save" }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
-  const chat = decodeURIComponent(new URL(page.url()).hash.split("/").pop()!);
   const versions = await page.evaluate(async () => (await fetch("/api/v1/workflows/hello/versions")).json());
   expect(versions.versions[0].actor).toBe(`token:e2e via assistant ${chat}`);
 

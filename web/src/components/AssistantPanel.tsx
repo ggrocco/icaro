@@ -26,6 +26,10 @@ interface Props {
   yaml: string;
   // onAccept replaces the editor's document with the assistant's proposal.
   onAccept: (yaml: string) => void;
+  // beforeTurn runs before a message or a retry starts a turn: the editor
+  // sends its pending edits to the draft, so the turn reads them and they
+  // cannot overwrite what it proposes.
+  beforeTurn?: () => Promise<void>;
   onClose?: () => void;
   // onSettled runs when a turn ends (the chat's title or workflow may
   // have changed).
@@ -41,7 +45,7 @@ interface Proposal {
 // AssistantPanel is the chat docked beside the editor (ADR 0035). It
 // rebuilds its view from the chat's log, shows the assistant's proposals as
 // diffs to accept or discard, and asks the person before any run.
-export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: Props) {
+export function AssistantPanel({ chatId, yaml, onAccept, beforeTurn, onClose, onSettled }: Props) {
   const [detail, setDetail] = useState<ChatDetail | undefined>();
   const [error, setError] = useState<Error | undefined>();
   const [view, setView] = useState<ChatView>(() => emptyView());
@@ -126,6 +130,7 @@ export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: P
     if (!t || sending) return;
     setSending(true);
     await act(async () => {
+      await beforeTurn?.();
       await assistApi.send(chatId, t);
       setText("");
     });
@@ -255,7 +260,7 @@ export function AssistantPanel({ chatId, yaml, onAccept, onClose, onSettled }: P
 
           <MemorySection chatId={chatId} settled={settledCount} />
 
-          {stuck && <Blocker chatId={chatId} profile={detail.profile} status={stuck.status} error={stuck.error} resetAt={stuck.reset_at} messageId={stuck.id} onError={setActionError} />}
+          {stuck && <Blocker chatId={chatId} beforeTurn={beforeTurn} profile={detail.profile} status={stuck.status} error={stuck.error} resetAt={stuck.reset_at} messageId={stuck.id} onError={setActionError} />}
           {actionError && <ErrorBox error={actionError} />}
 
           <form className="composer" onSubmit={send}>
@@ -422,6 +427,7 @@ function ToolCalls({ calls }: { calls: ToolCall[] }) {
 
 function Blocker({
   chatId,
+  beforeTurn,
   profile,
   status,
   error,
@@ -430,6 +436,7 @@ function Blocker({
   onError,
 }: {
   chatId: string;
+  beforeTurn?: () => Promise<void>;
   profile: string;
   status: string;
   error?: string;
@@ -437,7 +444,10 @@ function Blocker({
   messageId: string;
   onError: (e: Error) => void;
 }) {
-  const retry = () => assistApi.retry(chatId, messageId).catch(onError);
+  const retry = () =>
+    (beforeTurn?.() ?? Promise.resolve())
+      .then(() => assistApi.retry(chatId, messageId))
+      .catch(onError);
   if (status === "auth_required")
     return (
       <div className="notice warn" role="status">

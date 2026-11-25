@@ -157,18 +157,10 @@ func (e *Engine) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, 
 // workflow outputs of a run that succeeded.
 func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (status, errMsg string, keep bool, outputs string) {
 	fail := func(format string, args ...any) (string, string, bool, string) {
-		if cancelled(ctx) {
-			// A cancel while the run is starting surfaces as whatever
-			// call it interrupted; it is still a cancel.
-			return store.RunCancelled, "cancelled", false, ""
-		}
-		return store.RunFailed, fmt.Sprintf(format, args...), e.cfg.KeepWorkspaceOnFailure, ""
+		return e.endEarly(ctx, format, args...)
 	}
 	ver, err := e.d.Store.GetWorkflowVersion(ctx, run.WorkflowID, run.WorkflowVersion)
 	if err != nil {
-		if ctx.Err() != nil && !cancelled(ctx) {
-			return "", "", false, ""
-		}
 		return fail("load workflow version: %v", err)
 	}
 	spec, issues, err := workflow.Parse([]byte(ver.SpecYAML), workflow.Options{})
@@ -199,9 +191,6 @@ func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (st
 		}
 	}
 	if err := rx.prepare(ctx); err != nil {
-		if ctx.Err() != nil && !cancelled(ctx) {
-			return "", "", false, ""
-		}
 		return fail("%v", err)
 	}
 	status, errMsg, keep = rx.schedule(ctx)
@@ -211,6 +200,20 @@ func (e *Engine) runToEnd(ctx context.Context, run *store.Run, resumed bool) (st
 		}
 	}
 	return status, errMsg, keep, outputs
+}
+
+// endEarly is runToEnd's result for a run that ends before its DAG
+// starts. Whatever load a cancel or a daemon shutdown interrupted, a
+// cancel is still a cancel, and a shutdown leaves the run running for
+// re-attach ("" status): the next engine starts it again.
+func (e *Engine) endEarly(ctx context.Context, format string, args ...any) (status, errMsg string, keep bool, outputs string) {
+	switch {
+	case cancelled(ctx):
+		return store.RunCancelled, "cancelled", false, ""
+	case ctx.Err() != nil:
+		return "", "", false, ""
+	}
+	return store.RunFailed, fmt.Sprintf(format, args...), e.cfg.KeepWorkspaceOnFailure, ""
 }
 
 func cancelled(ctx context.Context) bool { return errors.Is(context.Cause(ctx), errCancelled) }

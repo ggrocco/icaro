@@ -7,6 +7,7 @@ import { FormEditor } from "../components/FormEditor";
 import { YamlEditor } from "../components/lazy";
 import { RunGraph } from "../components/lazy";
 import { ErrorBox, Issues, useLoad } from "../components/common";
+import { draftSync } from "../draftsync";
 import { canonicalJSON, parse } from "../yamldoc";
 import { go } from "../router";
 
@@ -39,8 +40,8 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
   const [chatId, setChatId] = useState<string | undefined>(chat);
   const [assistOpen, setAssistOpen] = useState(chat !== undefined);
   const [assistError, setAssistError] = useState<Error | undefined>();
-  // The document the chat's draft last got, so edits are sent once.
-  const synced = useRef<string | undefined>(initial);
+  // The document the chat's draft held when the chat was opened.
+  const seed = useRef<string | undefined>(initial);
   const [tab, setTab] = useState<"form" | "yaml" | "json">("form");
   const [issues, setIssues] = useState<Issue[]>([]);
   const [saving, setSaving] = useState(false);
@@ -56,16 +57,12 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
     if (initial !== undefined) setYaml(initial);
   }, [initial]);
 
-  // The person's edits become the chat's draft (debounced), so the
-  // assistant's get_draft sees what is in the editor.
-  useEffect(() => {
-    if (!chatId || yaml === synced.current) return;
-    const t = window.setTimeout(() => {
-      synced.current = yaml;
-      assistApi.putDraft(chatId, yaml).catch(setAssistError);
-    }, 800);
-    return () => window.clearTimeout(t);
-  }, [chatId, yaml]);
+  // The person's edits become the chat's draft (debounced, and flushed
+  // before a message), so the assistant's get_draft sees what is in the
+  // editor.
+  const sync = useMemo(() => (chatId ? draftSync((y) => assistApi.putDraft(chatId, y), seed.current, setAssistError) : undefined), [chatId]);
+  useEffect(() => () => sync?.cancel(), [sync]);
+  useEffect(() => sync?.edit(yaml), [sync, yaml]);
 
   const openAssistant = async () => {
     setAssistError(undefined);
@@ -75,7 +72,7 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
     }
     try {
       const d = await assistApi.create({ workflow: name, yaml });
-      synced.current = yaml;
+      seed.current = yaml;
       setChatId(d.id);
       setAssistOpen(true);
     } catch (e) {
@@ -171,9 +168,10 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
           chatId={chatId}
           yaml={yaml}
           onAccept={(y) => {
-            synced.current = y; // the chat's draft already holds it
+            sync?.synced(y); // the chat's draft already holds it
             setYaml(y);
           }}
+          beforeTurn={sync?.flush}
           onClose={() => setAssistOpen(false)}
           onSettled={onChatSettled}
         />
