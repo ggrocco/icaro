@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"time"
@@ -85,7 +86,28 @@ func (s *Service) validateOptions(ctx context.Context) workflow.Options {
 // spec would break in the workflows that call it (ADR 0038).
 func (s *Service) Warnings(ctx context.Context, spec *workflow.Spec) workflow.Issues {
 	opts := s.validateOptions(ctx)
-	return append(workflow.Warnings(spec, opts), workflow.CallerWarnings(spec, opts)...)
+	out := append(workflow.Warnings(spec, opts), workflow.CallerWarnings(spec, opts)...)
+	return append(out, s.awaitWarnings(spec)...)
+}
+
+// awaitWarnings flag await steps on a daemon with no daemon.public_url,
+// which no provider can reach (ADR 0032).
+func (s *Service) awaitWarnings(spec *workflow.Spec) workflow.Issues {
+	if spec == nil || s.publicURL != "" {
+		return nil
+	}
+	var out workflow.Issues
+	for i, st := range spec.Steps {
+		if st.Await == nil {
+			continue
+		}
+		out = append(out, workflow.Issue{
+			Path:    fmt.Sprintf("/steps/%d/await", i),
+			Message: fmt.Sprintf("step %s awaits %s.%s, but daemon.public_url is unset, so no provider can reach this daemon", st.ID, st.Await.Integration, st.Await.Event),
+			Hint:    "set daemon.public_url, or resolve the step by hand with icaro runs deliver; otherwise it fails at its deadline",
+		})
+	}
+	return out
 }
 
 // workflowCatalog resolves call steps against the current version of

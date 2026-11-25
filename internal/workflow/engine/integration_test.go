@@ -287,3 +287,40 @@ steps:
 		}
 	}
 }
+
+// With real containers: a step pushes a sha, the await parks the run with
+// no container left, the daemon restarts, the event for that sha is
+// matched (as pipeline step 6b does), and the next container reads its
+// payload.
+func TestIntegrationAwaitAcrossRestart(t *testing.T) {
+	f, _ := newDockerFixture(t)
+	yaml := `
+version: 1
+name: it-await
+steps:
+  - id: push
+    image: ` + itImage + `
+    command: echo '{"sha":"c0ffee"}' > /icaro/output.json
+    outputs: { sha: json:sha }
+  - id: ci
+    needs: [push]
+    await: {integration: github, event: check_suite.completed, key: "${{ steps.push.outputs.sha }}", match: event.head_sha}
+    timeout: 10m
+  - id: after
+    image: ` + itImage + `
+    needs: [ci]
+    command: test '${{ steps.ci.outputs.conclusion }}' = success
+`
+	run := f.enqueue(yaml, nil)
+	_, stop := f.start()
+	f.waitLong(run.ID, store.RunWaiting)
+	stop()
+	_, stop2 := f.start()
+	defer stop2()
+	if _, err := f.st.ResolveAwait(f.ctx, run.ID, "ci", store.AwaitMatched, "d1", `{"head_sha":"c0ffee","conclusion":"success"}`, "integration:github"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.waitLong(run.ID, store.RunSucceeded, store.RunFailed); got.Status != store.RunSucceeded {
+		t.Fatalf("%s %s", got.Error, f.dump(run.ID))
+	}
+}

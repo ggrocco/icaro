@@ -239,13 +239,13 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 			v.add(base+"/image", "image is not valid on agent steps", "the agent profile supplies the image")
 			return
 		}
-		v.add(base, "a step must have exactly one of: image, agent, uses, call, approval, wait")
+		v.add(base, "a step must have exactly one of: image, agent, uses, call, approval, wait, await")
 		return
 	case KindAgent:
 		v.checkAgent(i, st)
 	case KindCall:
 		v.checkCall(i, st)
-	case KindApproval, KindWait:
+	case KindApproval, KindWait, KindAwait:
 		for _, f := range []struct {
 			set  bool
 			path string
@@ -254,7 +254,7 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 			{len(st.Outputs) > 0, "outputs"}, {st.Repository != nil, "repository"}, {st.Retry != 0, "retry"},
 		} {
 			if f.set {
-				v.add(base+"/"+f.path, fmt.Sprintf("%s is not valid on %s steps", f.path, st.Kind()), "approval and wait steps run nothing; only id, needs, when and (approval) timeout apply")
+				v.add(base+"/"+f.path, fmt.Sprintf("%s is not valid on %s steps", f.path, st.Kind()), "approval, wait and await steps run nothing; only id, needs, when and (approval, await) timeout apply")
 			}
 		}
 		if st.Kind() == KindWait {
@@ -268,6 +268,12 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 			if st.Timeout != "" {
 				v.add(base+"/timeout", "a wait step has no timeout; its duration is the wait")
 			}
+		}
+		if st.Kind() == KindAwait {
+			if st.Timeout == "" {
+				v.add(base+"/timeout", "an await step needs a timeout: the deadline for its event", "e.g. timeout: 2h (at most 720h)")
+			}
+			v.checkAwait(i, st)
 		}
 	case KindUses:
 		if st.Command != "" {
@@ -291,9 +297,11 @@ func (v *validator) checkStepShape(i int, st *StepSpec) {
 		switch {
 		case err != nil || d <= 0:
 			v.add(base+"/timeout", "must be a positive duration such as 90s, 10m or 1h")
-		case st.Kind() == KindApproval || st.Kind() == KindCall:
-			// A decision deadline, or a deadline for a child run, holds no
-			// container, so limits.timeout does not cap it.
+		case st.Kind() == KindAwait && d > MaxWait:
+			v.add(base+"/timeout", fmt.Sprintf("exceeds the maximum await deadline of %s", MaxWait))
+		case st.Kind() == KindApproval || st.Kind() == KindCall || st.Kind() == KindAwait:
+			// A decision deadline, an event deadline or a deadline for a
+			// child run holds no container, so limits.timeout does not cap it.
 		case v.opts.MaxTimeout > 0 && d > v.opts.MaxTimeout:
 			v.add(base+"/timeout", fmt.Sprintf("exceeds the configured maximum of %s", v.opts.MaxTimeout), "lower it or raise limits.timeout in the config")
 		}
@@ -393,28 +401,37 @@ func (v *validator) checkTriggers() {
 	}
 }
 
-func (v *validator) checkIntegrationTrigger(base string, t TriggerSpec) {
-	var info *EventInfo
-	if v.opts.Catalog != nil {
-		if ev, ok := v.opts.Catalog.Event(t.Integration, t.Event); ok {
-			info = &ev
-		} else if !contains(v.opts.Catalog.Integrations(), t.Integration) {
-			msg := fmt.Sprintf("unknown integration %q", t.Integration)
-			if h := expr.Nearest(t.Integration, v.opts.Catalog.Integrations()); h != "" {
-				v.add(base+"/integration", msg, fmt.Sprintf("did you mean %q?", h))
-			} else {
-				v.add(base+"/integration", msg, "installed: "+strings.Join(v.opts.Catalog.Integrations(), ", "))
-			}
-		} else {
-			events := v.opts.Catalog.EventNames(t.Integration)
-			msg := fmt.Sprintf("integration %s has no event %q", t.Integration, t.Event)
-			if h := expr.Nearest(t.Event, events); h != "" {
-				v.add(base+"/event", msg, fmt.Sprintf("did you mean %q?", h))
-			} else {
-				v.add(base+"/event", msg, "events: "+strings.Join(events, ", "))
-			}
-		}
+// resolveEvent looks an integration event up in the catalog, reporting
+// an unknown integration or event at base+"/integration" or
+// base+"/event". It returns nil without a catalog or on an issue.
+func (v *validator) resolveEvent(base, integration, event string) *EventInfo {
+	if v.opts.Catalog == nil {
+		return nil
 	}
+	if ev, ok := v.opts.Catalog.Event(integration, event); ok {
+		return &ev
+	}
+	if !contains(v.opts.Catalog.Integrations(), integration) {
+		msg := fmt.Sprintf("unknown integration %q", integration)
+		if h := expr.Nearest(integration, v.opts.Catalog.Integrations()); h != "" {
+			v.add(base+"/integration", msg, fmt.Sprintf("did you mean %q?", h))
+		} else {
+			v.add(base+"/integration", msg, "installed: "+strings.Join(v.opts.Catalog.Integrations(), ", "))
+		}
+		return nil
+	}
+	events := v.opts.Catalog.EventNames(integration)
+	msg := fmt.Sprintf("integration %s has no event %q", integration, event)
+	if h := expr.Nearest(event, events); h != "" {
+		v.add(base+"/event", msg, fmt.Sprintf("did you mean %q?", h))
+	} else {
+		v.add(base+"/event", msg, "events: "+strings.Join(events, ", "))
+	}
+	return nil
+}
+
+func (v *validator) checkIntegrationTrigger(base string, t TriggerSpec) {
+	info := v.resolveEvent(base, t.Integration, t.Event)
 	if strings.TrimSpace(t.Filter) == "" {
 		return
 	}
@@ -437,9 +454,50 @@ func (v *validator) checkIntegrationTrigger(base string, t TriggerSpec) {
 	}
 }
 
-func fieldHint(name string, fields []string) string {
+// checkAwait validates an await step's event, match and filter. Its key
+// is a template, checked with the other step fields (checkExpressions).
+func (v *validator) checkAwait(i int, st *StepSpec) {
+	base := v.stepPath(i) + "/await"
+	a := st.Await
+	info := v.resolveEvent(base, a.Integration, a.Event)
+	v.checkEventExpr(base+"/match", a.Match, a, info)
+	if strings.TrimSpace(a.Filter) != "" {
+		v.checkEventExpr(base+"/filter", a.Filter, a, info)
+	}
+}
+
+// checkEventExpr parses an await expression over event.* and checks that
+// it reads only fields the event declares.
+func (v *validator) checkEventExpr(path, src string, a *AwaitSpec, info *EventInfo) {
+	if strings.TrimSpace(src) == "" {
+		v.add(path, "expression is empty", "e.g. match: event.head_sha")
+		return
+	}
+	e, err := expr.ParseCondition(src)
+	if err != nil {
+		v.addExpr(path, "invalid expression: ", err)
+		return
+	}
+	refs := e.Refs()
+	if err := expr.CheckRoots(refs, RootsAwaitEvent); err != nil {
+		v.addExpr(path, "", err)
+		return
+	}
+	if info == nil {
+		return
+	}
+	for _, r := range refs {
+		if len(r.Path) >= 2 && !r.Guarded && !contains(info.Fields, r.Path[1]) {
+			v.add(path, fmt.Sprintf("%s/%s does not provide event.%s", a.Integration, a.Event, r.Path[1]), rootFieldHint("event", r.Path[1], info.Fields))
+		}
+	}
+}
+
+func fieldHint(name string, fields []string) string { return rootFieldHint("trigger", name, fields) }
+
+func rootFieldHint(root, name string, fields []string) string {
 	if h := expr.Nearest(name, fields); h != "" {
-		return fmt.Sprintf("did you mean trigger.%s?", h)
+		return fmt.Sprintf("did you mean %s.%s?", root, h)
 	}
 	return "fields: " + strings.Join(fields, ", ")
 }
@@ -490,6 +548,9 @@ func (v *validator) checkExpressions() {
 				}
 				v.checkCallRefs(base+"/call/input"+ptr, t.Refs(), i, "call input cannot read secrets", "the input is stored with the child run and shown wherever runs are; the called workflow resolves its own ${{ secrets.* }}")
 			})
+		}
+		if st.Await != nil && st.Await.Key != "" {
+			v.checkTemplate(base+"/await/key", st.Await.Key, RootsAwaitKey, i)
 		}
 		if strings.TrimSpace(st.When) != "" {
 			e, err := expr.ParseCondition(st.When)
@@ -691,6 +752,15 @@ func (v *validator) checkStepRef(path string, r expr.Ref, step int) {
 			}
 		}
 		return
+	case KindAwait:
+		if v.opts.Catalog == nil {
+			return
+		}
+		ev, ok := v.opts.Catalog.Event(ts.Await.Integration, ts.Await.Event)
+		if !ok {
+			return
+		}
+		declared = append(append([]string{}, ev.Fields...), AwaitOutputs...)
 	default:
 		return
 	}
@@ -783,6 +853,9 @@ func TriggerFields(s *Spec) (required, optional []string) {
 		}
 		if st.Call != nil && st.Call.Input != nil {
 			expr.WalkTemplates(map[string]any(st.Call.Input), func(_, s string) { tmpl(s) })
+		}
+		if st.Await != nil {
+			tmpl(st.Await.Key)
 		}
 		if st.Repository != nil {
 			tmpl(st.Repository.Ref)
@@ -898,7 +971,7 @@ func oneOfIssues(e *jsonschema.ValidationError, path string, doc map[string]any)
 	switch {
 	case len(loc) == 2 && loc[0] == "steps":
 		var set []string
-		for _, k := range []string{"image", "agent", "uses", "call", "approval", "wait"} {
+		for _, k := range []string{"image", "agent", "uses", "call", "approval", "wait", "await"} {
 			if _, ok := obj[k]; ok {
 				set = append(set, k)
 			}
@@ -907,9 +980,9 @@ func oneOfIssues(e *jsonschema.ValidationError, path string, doc map[string]any)
 			return Issues{{Path: path + "/image", Message: "image is not valid on agent steps", Hint: "the agent profile supplies the image; remove image"}}
 		}
 		if len(set) > 1 {
-			return Issues{{Path: path, Message: "a step has exactly one of image, agent, uses, call, approval or wait, not both " + strings.Join(set, " and ")}}
+			return Issues{{Path: path, Message: "a step has exactly one of image, agent, uses, call, approval, wait or await, not both " + strings.Join(set, " and ")}}
 		}
-		return Issues{{Path: path, Message: "a step needs exactly one of: image, agent, uses, call, approval, wait", Hint: "image: <container image> runs a container; agent: {prompt: ...} runs an agent CLI; uses: <integration>.<action> calls an integration; call: {workflow: <name>} runs another workflow; approval: {message: ...} waits for a person; wait: 10m pauses"}}
+		return Issues{{Path: path, Message: "a step needs exactly one of: image, agent, uses, call, approval, wait, await", Hint: "image: <container image> runs a container; agent: {prompt: ...} runs an agent CLI; uses: <integration>.<action> calls an integration; call: {workflow: <name>} runs another workflow; approval: {message: ...} waits for a person; wait: 10m pauses; await: {integration, event, key, match} waits for an event"}}
 	case len(loc) == 2 && loc[0] == "triggers":
 		branch := 1 // integration
 		if _, ok := obj["type"]; ok {

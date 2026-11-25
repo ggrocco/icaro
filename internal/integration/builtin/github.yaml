@@ -51,6 +51,16 @@ triggers:
         deleted: "${{ body.deleted }}"
         commit_count: "${{ length(body.commits) }}"
         compare_url: "${{ body.compare }}"
+    check_suite.completed:
+      description: A check suite (CI on a commit) finished; see trigger.conclusion.
+      match: "headers['x-github-event'] == 'check_suite' && body.action == 'completed'"
+      payload:
+        repo: "${{ body.repository.full_name }}"
+        head_sha: "${{ body.check_suite.head_sha }}"
+        head_branch: "${{ body.check_suite.head_branch }}"
+        conclusion: "${{ body.check_suite.conclusion }}"
+        app: "${{ body.check_suite.app.slug }}"
+        url: "${{ body.check_suite.url }}"
     issue_comment.created:
       description: A comment was added to an issue or pull request.
       match: "headers['x-github-event'] == 'issue_comment' && body.action == 'created'"

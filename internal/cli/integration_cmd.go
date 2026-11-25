@@ -28,7 +28,7 @@ func init() {
 	register(newDeliveriesCmd)
 	register(newSchedulesCmd)
 	extraDoctorChecks = append(extraDoctorChecks, func(_ context.Context, cfg *config.Config, st *store.Store, _ *docker.Engine) []doctor.Check {
-		return integration.DoctorChecks(cfg.Layout().Integrations(), st)
+		return integration.DoctorChecks(cfg.Layout().Integrations(), st, cfg.Daemon.PublicURL)
 	})
 }
 

@@ -71,6 +71,7 @@
 | Proxy without a dedicated network | error | recreates the network |
 | Local DNS for `.test` misconfigured | warning when enabled | shows the resolver state; suggests `localhost:<port>` |
 | Missing webhook secret | error when enabled | generates/requests a secret |
+| Awaited events unreachable (a workflow awaits an integration event and `daemon.public_url` is unset) | warning | set `daemon.public_url`, or resolve the steps by hand with `icaro runs deliver` ([ADR 0032](adr/0032-await-event-steps.md)) |
 | Dangerous compose | error | shows the blocked field |
 | Memory distiller model unverified or unreachable (a pulled model whose SHA-256 does not match its pin, an endpoint that does not answer, or a failed job) | error/warning | `icaro memory model rm NAME --yes` and pull it again, or fix `memory.distill.endpoint` ([ADR 0036](adr/0036-local-memory-distiller.md)) |
 | Workflow assistant unavailable (no profile runs claude or codex, its profile is not signed in, or its allowlist does not reach the provider) | warning | `icaro login <profile>`, or set `assistant.profile` ([ADR 0035](adr/0035-workflow-assistant-chat.md)) |

@@ -14,6 +14,7 @@ const (
 	KindWait     = "wait"
 	KindAgent    = "agent"
 	KindCall     = "call"
+	KindAwait    = "await"
 )
 
 // Kind returns the step form, or "" when none or more than one is set.
@@ -22,7 +23,7 @@ func (s *StepSpec) Kind() string {
 	for _, f := range []struct {
 		set  bool
 		kind string
-	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}, {s.Agent != nil, KindAgent}, {s.Call != nil, KindCall}} {
+	}{{s.Image != "", KindImage}, {s.Uses != "", KindUses}, {s.Approval != nil, KindApproval}, {s.Wait != "", KindWait}, {s.Agent != nil, KindAgent}, {s.Call != nil, KindCall}, {s.Await != nil, KindAwait}} {
 		if f.set {
 			kind, n = f.kind, n+1
 		}
@@ -34,12 +35,17 @@ func (s *StepSpec) Kind() string {
 }
 
 // Pauses reports whether the step runs no container or action: it waits
-// for a person (approval), for time to pass (wait) or for a child run
-// (call), and its run is parked meanwhile (ADRs 0030, 0038).
+// for a person (approval), for time to pass (wait), for a child run
+// (call) or for an integration event (await), and its run is parked
+// meanwhile (ADRs 0030, 0032, 0038).
 func (s *StepSpec) Pauses() bool {
 	k := s.Kind()
-	return k == KindApproval || k == KindWait || k == KindCall
+	return k == KindApproval || k == KindWait || k == KindCall || k == KindAwait
 }
+
+// AwaitOutputs are the outputs an await step adds to its event's payload
+// fields: the delivery that resumed it ("manual:<id>" when a person did).
+var AwaitOutputs = []string{"delivery_id"}
 
 // ApprovalOutputs are the outputs an approval step produces.
 var ApprovalOutputs = []string{"approved_by", "comment"}
@@ -116,4 +122,36 @@ func (s *Spec) IntegrationTriggers() []TriggerSpec {
 		}
 	}
 	return out
+}
+
+// GenericWebhook is the integration whose events arrive on a per-workflow
+// URL token (ADR 0015); its await steps correlate only with events
+// delivered on their own workflow's token (ADR 0032).
+const GenericWebhook = "webhook"
+
+// Awaits returns the workflow's await steps, in declaration order.
+func (s *Spec) Awaits() []*StepSpec {
+	var out []*StepSpec
+	for i := range s.Steps {
+		if s.Steps[i].Await != nil {
+			out = append(out, &s.Steps[i])
+		}
+	}
+	return out
+}
+
+// UsesGenericWebhook reports whether the workflow is triggered by, or
+// awaits, the generic webhook integration, and so needs a URL token.
+func (s *Spec) UsesGenericWebhook() bool {
+	for _, t := range s.Triggers {
+		if t.Integration == GenericWebhook {
+			return true
+		}
+	}
+	for _, st := range s.Steps {
+		if st.Await != nil && st.Await.Integration == GenericWebhook {
+			return true
+		}
+	}
+	return false
 }

@@ -141,8 +141,12 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
                 ? "agent"
                 : doc.hasIn(p("call"))
                   ? "call"
-                  : "image";
-        const pauses = kind === "approval" || kind === "wait";
+                  : doc.hasIn(p("await"))
+                    ? "await"
+                    : "image";
+        const pauses = kind === "approval" || kind === "wait" || kind === "await";
+        const aw = (k: string) => ["steps", i, "await", k];
+        const awaitIntg = String(getIn(doc, aw("integration")) ?? "");
         const action = actions.get(uses);
         const needs = (getIn<string[]>(doc, p("needs")) ?? []) as string[];
         return (
@@ -157,14 +161,18 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
                 onChange={(e) =>
                   mutate((d) => {
                     // Each form has its own fields; switching drops the old ones.
-                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent", "call", "repository"]) d.deleteIn(["steps", i, k]);
-                    if (e.target.value === "approval" || e.target.value === "wait") d.deleteIn(["steps", i, "retry"]);
+                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent", "call", "await", "repository"]) d.deleteIn(["steps", i, k]);
+                    if (e.target.value === "approval" || e.target.value === "wait" || e.target.value === "await") d.deleteIn(["steps", i, "retry"]);
                     if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
                     if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
                     else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
                     else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
                     else if (e.target.value === "agent") d.setIn(["steps", i, "agent"], { prompt: "Describe the task for the agent." });
                     else if (e.target.value === "call") d.setIn(["steps", i, "call"], { workflow: workflows.find((w) => w.callable)?.name ?? "" });
+                    else if (e.target.value === "await") {
+                      d.setIn(["steps", i, "await"], { integration: "github", event: "check_suite.completed", key: "", match: "event.head_sha" });
+                      if (!d.hasIn(["steps", i, "timeout"])) d.setIn(["steps", i, "timeout"], "2h");
+                    }
                     else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                   })
                 }
@@ -175,6 +183,7 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
                 <option value="call">call (run another workflow)</option>
                 <option value="approval">approval (a person decides)</option>
                 <option value="wait">wait (pause for a time)</option>
+                <option value="await">await (wait for an integration event)</option>
               </select>
             </Field>
             {kind === "approval" ? (
@@ -209,6 +218,48 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
                 input={(getIn<Record<string, unknown>>(doc, ["steps", i, "call", "input"]) ?? {}) as Record<string, unknown>}
                 update={(k, v) => update(["steps", i, "call", ...k], v)}
               />
+            ) : kind === "await" ? (
+              <>
+                <Field label="Integration">
+                  <select
+                    value={awaitIntg}
+                    onChange={(e) =>
+                      mutate((d) => {
+                        d.setIn(aw("integration"), e.target.value);
+                        d.setIn(aw("event"), "");
+                      })
+                    }
+                  >
+                    {!integrations.some((x) => x.name === awaitIntg) && <option value={awaitIntg}>{awaitIntg || "choose…"}</option>}
+                    {integrations
+                      .filter((x) => Object.keys(x.event_details ?? {}).length)
+                      .map((x) => (
+                        <option key={x.name} value={x.name}>
+                          {x.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+                <Field label="Event">
+                  <select value={String(getIn(doc, aw("event")) ?? "")} onChange={(e) => update(aw("event"), e.target.value)}>
+                    <option value="">choose an event…</option>
+                    {Object.values(integrations.find((x) => x.name === awaitIntg)?.event_details ?? {}).map((ev) => (
+                      <option key={ev.event} value={ev.event} title={ev.description}>
+                        {ev.event}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Key" hint="Rendered when the step starts, e.g. ${{ steps.push.outputs.sha }}">
+                  <input value={String(getIn(doc, aw("key")) ?? "")} onChange={(e) => update(aw("key"), e.target.value)} />
+                </Field>
+                <Field label="Match" hint="Over the event; must equal the key, e.g. event.head_sha">
+                  <input value={String(getIn(doc, aw("match")) ?? "")} onChange={(e) => update(aw("match"), e.target.value)} />
+                </Field>
+                <Field label="Filter" hint="Optional, e.g. event.conclusion != 'neutral'">
+                  <input value={String(getIn(doc, aw("filter")) ?? "")} onChange={(e) => update(aw("filter"), e.target.value || undefined)} />
+                </Field>
+              </>
             ) : isUses ? (
               <>
                 <Field label="Action">
@@ -274,10 +325,18 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
             <div className="row">
               {kind !== "wait" && (
                 <Field
-                  label={kind === "approval" ? "Deadline" : "Timeout"}
-                  hint={kind === "approval" ? "undecided after this, it fails" : kind === "call" ? "the child run is cancelled after this" : undefined}
+                  label={kind === "approval" || kind === "await" ? "Deadline" : "Timeout"}
+                  hint={
+                    kind === "approval"
+                      ? "undecided after this, it fails"
+                      : kind === "await"
+                        ? "required, at most 720h; with no event by then, it fails"
+                        : kind === "call"
+                          ? "the child run is cancelled after this"
+                          : undefined
+                  }
                 >
-                  <input placeholder={kind === "approval" ? "24h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
+                  <input placeholder={kind === "approval" ? "24h" : kind === "await" ? "2h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
                 </Field>
               )}
               {!pauses && (

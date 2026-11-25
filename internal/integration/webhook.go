@@ -240,6 +240,15 @@ type EventResult struct {
 	Event   string         `json:"event"`
 	Payload map[string]any `json:"payload,omitempty"`
 	Error   string         `json:"error,omitempty"`
+	// Resumed lists the await steps this event resumed (ADR 0032).
+	Resumed []ResumedStep `json:"resumed,omitempty"`
+}
+
+// ResumedStep is an await step a delivered event resumed.
+type ResumedStep struct {
+	Workflow string `json:"workflow"`
+	RunID    string `json:"run_id"`
+	Step     string `json:"step"`
 }
 
 // WorkflowResult is what happened for one subscribed workflow.
@@ -450,14 +459,27 @@ func (h *Hub) run(ctx context.Context, id, key, kind string, m *Manifest, in *in
 	if out.Events == nil {
 		out.Events = []EventResult{}
 	}
-	results, err := h.dispatch(ctx, in, id, key, kind, out.Events)
+	// Events are persisted before waiting steps are read, so an await
+	// step starting meanwhile finds them in its lookback (ADR 0032).
+	if err := h.recordEvents(ctx, id, in, out.Events); err != nil {
+		out.Status, out.Error = store.DeliveryError, "record events: "+err.Error()
+		h.finish(ctx, id, out)
+		h.log.Error("webhook events", "integration", in.integration, "delivery", id, "err", err)
+		return
+	}
+	// Step 6b resumes waiting await steps, then step 7 enqueues runs.
+	resumed, err := h.resume(ctx, id, in, out.Events)
+	results, derr := h.dispatch(ctx, in, id, key, kind, out.Events)
 	if results != nil {
 		out.Results = results
+	}
+	if err == nil {
+		err = derr
 	}
 	switch {
 	case err != nil:
 		out.Status, out.Error = store.DeliveryError, err.Error()
-	case len(out.Results) == 0:
+	case len(out.Results) == 0 && resumed == 0:
 		out.Status = store.DeliveryNoMatch
 	default:
 		out.Status = store.DeliveryProcessed
@@ -468,7 +490,73 @@ func (h *Hub) run(ctx context.Context, id, key, kind string, m *Manifest, in *in
 		}
 	}
 	h.finish(ctx, id, out)
-	h.log.Info("webhook processed", "integration", in.integration, "delivery", id, "status", out.Status, "runs", len(out.Results))
+	h.log.Info("webhook processed", "integration", in.integration, "delivery", id, "status", out.Status, "runs", len(out.Results), "resumed", resumed)
+}
+
+// recordEvents stores the normalized payload of every matched event.
+func (h *Hub) recordEvents(ctx context.Context, id string, in *inbound, events []EventResult) error {
+	var rows []store.DeliveryEvent
+	for i, ev := range events {
+		if ev.Error != "" {
+			continue
+		}
+		b, err := json.Marshal(ev.Payload)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, store.DeliveryEvent{DeliveryID: id, Seq: i, Integration: in.integration, Event: ev.Event, Workflow: in.workflow, PayloadJSON: string(b)})
+	}
+	return h.store.AddDeliveryEvents(ctx, rows)
+}
+
+// resume is pipeline step 6b: every await step waiting for one of the
+// delivery's events is resumed by the first event that correlates with
+// it. A step already resolved (by an earlier event, its lookback, a
+// person or its deadline) loses the compare-and-set and is left alone,
+// so a provider's retry resumes nothing twice. It returns how many steps
+// were resumed.
+func (h *Hub) resume(ctx context.Context, id string, in *inbound, events []EventResult) (int, error) {
+	c := workflow.NewCorrelator()
+	n := 0
+	for i := range events {
+		ev := &events[i]
+		if ev.Error != "" {
+			continue
+		}
+		waiting, err := h.store.ListWaitingAwaits(ctx, in.integration, ev.Event)
+		if err != nil {
+			return n, fmt.Errorf("list waiting steps: %w", err)
+		}
+		var payload []byte
+		for _, a := range waiting {
+			if in.integration == workflow.GenericWebhook && a.Workflow != in.workflow {
+				continue
+			}
+			ok, err := c.Correlates(a.Match, a.Filter, a.Key, ev.Payload)
+			if err != nil {
+				h.log.Warn("await correlate", "delivery", id, "run", a.RunID, "step", a.StepID, "err", err)
+				continue
+			}
+			if !ok {
+				continue
+			}
+			if payload == nil {
+				if payload, err = json.Marshal(ev.Payload); err != nil {
+					return n, err
+				}
+			}
+			_, err = h.store.ResolveAwait(ctx, a.RunID, a.StepID, store.AwaitMatched, id, string(payload), "integration:"+in.integration)
+			if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return n, fmt.Errorf("resume %s/%s: %w", a.RunID, a.StepID, err)
+			}
+			ev.Resumed = append(ev.Resumed, ResumedStep{Workflow: a.Workflow, RunID: a.RunID, Step: a.StepID})
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (h *Hub) finish(ctx context.Context, id string, out *Outcome) {

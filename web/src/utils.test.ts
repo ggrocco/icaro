@@ -46,12 +46,22 @@ describe("graph", () => {
       ["b", 1],
     ]);
   });
-  it("labels approval and wait steps", () => {
-    const steps = stepsFromSpec({ steps: [{ id: "gate", approval: {} }, { id: "soak", needs: ["gate"], wait: "1h" }, { id: "run", image: "a/b:1" }] });
+  it("labels approval, wait and await steps", () => {
+    const steps = stepsFromSpec({
+      steps: [
+        { id: "gate", approval: {} },
+        { id: "soak", needs: ["gate"], wait: "1h" },
+        { id: "run", image: "a/b:1" },
+        { id: "ci", await: { integration: "github", event: "check_suite.completed" } },
+        { id: "odd", await: null },
+      ],
+    });
     expect(steps.map((s) => [s.kind, s.label])).toEqual([
       ["approval", "approval"],
       ["wait", "wait 1h"],
       ["image", "a/b:1"],
+      ["await", "await github.check_suite.completed"],
+      ["await", "await "],
     ]);
   });
   it("marks agent steps with their profile", () => {
