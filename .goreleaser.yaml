@@ -51,13 +51,15 @@ sboms:
 
 signs:
   # Offline-verifiable detached signature used by install.sh and icaro update.
+  # The command inherits ICARO_SIGNING_KEY from goreleaser's environment.
+  # No `env:` entry: a template there sees only the entries above it in
+  # that list, not the process environment, so
+  # ICARO_SIGNING_KEY={{ .Env.ICARO_SIGNING_KEY }} fails the release.
   - id: ed25519
     cmd: go
     args: ["run", "./hack/sign", "sign", "-in", "${artifact}", "-out", "${signature}"]
     signature: "${artifact}.sig"
     artifacts: checksum
-    env:
-      - ICARO_SIGNING_KEY={{ .Env.ICARO_SIGNING_KEY }}
   # Sigstore keyless signature (transparency log), for `cosign verify-blob`.
   - id: cosign
     cmd: cosign

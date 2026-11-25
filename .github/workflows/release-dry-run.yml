@@ -55,19 +55,24 @@ jobs:
           test "$(ICARO_RELEASE_PUBKEY="$(printf '%s' "$pem" | sed 's/$/\r/')" go run ./hack/sign pubkey)" = "$pub"
           test "$(ICARO_RELEASE_PUBKEY="$pub" go run ./hack/sign pubkey)" = "$pub"
           { echo "ICARO_SIGNING_KEY=$seed"; echo "ICARO_RELEASE_PUBKEY=$pub"; } >> "$GITHUB_ENV"
+      # The release's config minus the cosign keyless signature, which needs
+      # the release environment's OIDC token. The ed25519 sign runs exactly
+      # as in a release (with the ephemeral key), so a broken signs entry
+      # fails here rather than on a tag.
+      - name: the release config without cosign
+        run: yq 'del(.signs[] | select(.id == "cosign"))' .goreleaser.yaml > "$RUNNER_TEMP/goreleaser.yaml"
       # The release's goreleaser, in snapshot mode: no publishing, and the
-      # signing (ed25519 and cosign) and SBOM steps that need the release
-      # environment are skipped; the next step signs as the release does.
+      # SBOM step that needs the release environment is skipped.
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: v2.19.0
-          args: release --snapshot --clean --skip=sign,sbom,publish
+          args: release --snapshot --clean --skip=sbom,publish --config ${{ runner.temp }}/goreleaser.yaml
         env:
           HOMEBREW_TAP_TOKEN: dry-run
-      - name: sign checksums.txt and verify it offline, as the release does
+      - name: verify goreleaser's signature over checksums.txt offline, as the release does
         run: |
-          go run ./hack/sign sign -in dist/checksums.txt -out dist/checksums.txt.sig
+          test -s dist/checksums.txt.sig
           printf '%s' "$ICARO_RELEASE_PUBKEY" > "$RUNNER_TEMP/pub.b64"
           go run ./hack/sign verify -pub "$RUNNER_TEMP/pub.b64" -in dist/checksums.txt -sig dist/checksums.txt.sig
       - name: the artifacts a release publishes
