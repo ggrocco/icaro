@@ -78,3 +78,4 @@ Domain packages:
 - **Security boundaries** (container baseline, egress allowlist, mount policy, secret handling/redaction, credential injection, `internal/api` auth, release signing in `internal/update` and `hack/sign`) are listed in `.github/CODEOWNERS` and `blueprint/docs/03-security.md`; don't weaken them.
 - Destructive CLI commands require `--yes`.
 - Logs are secret-redacted as they are written; keep bulky output in append-only log files, not SQL cells.
+- **Keep the README current.** A change to the web UI, the desktop app, or user-visible behaviour also checks `README.md` and refreshes the screenshots in `docs/images/` when what they show changed (procedure in `docs/images/README.md`).
