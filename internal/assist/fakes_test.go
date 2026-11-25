@@ -41,6 +41,7 @@ type sessState struct {
 	turns     []session.TurnRequest
 	cancels   []string
 	stops     []string
+	stopTries int // every Stop call, failed ones included
 	removed   []string
 	script    []turnScript
 	createErr error
@@ -144,6 +145,7 @@ func (f *fakeSessions) Stop(_ context.Context, id string) (*session.Session, err
 	var out *session.Session
 	var err error
 	f.do(func(st *sessState) {
+		st.stopTries++
 		if err = st.stopErr; err != nil {
 			return
 		}
@@ -228,6 +230,10 @@ func blockUntilCancel(started chan<- struct{}) turnScript {
 	}
 }
 
+// env is a running Service over fakes. The service's goroutines read cfg
+// without synchronization, as the daemon's config is fixed once it starts:
+// set it through newEnv's mods, or before the test's first turn, never
+// after.
 type env struct {
 	t    *testing.T
 	ctx  context.Context

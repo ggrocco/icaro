@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"icaro/internal/config"
 	"icaro/internal/session"
 	"icaro/internal/store"
 )
@@ -159,17 +160,38 @@ func TestSessionErrors(t *testing.T) {
 	}
 	e.sess.do(func(st *sessState) { st.getErr = nil })
 
-	// Stopping an idle container can fail; the chat goes on.
-	e.cfg.Assistant.IdleTimeout = 10 * time.Millisecond
-	e.sess.do(func(st *sessState) { st.stopErr = errors.New("docker down") })
-	e.sess.push(lines(0, `{"type":"result","is_error":false}`))
-	m, _ = e.s.Send(e.ctx, d.ID, "hi", "local")
-	e.waitMessage(d.ID, m[1].ID)
-	time.Sleep(50 * time.Millisecond)
-
 	e.sess.do(func(st *sessState) { st.removeErr = errors.New("busy") })
 	if err := e.s.Delete(e.ctx, d.ID); err == nil || !strings.Contains(err.Error(), "busy") {
 		t.Fatalf("delete: %v", err)
+	}
+}
+
+// Stopping an idle container can fail; the chat goes on. The idle timeout
+// is set before the service starts: the chat's actor reads it when a turn
+// finishes, which is after the turn's message has settled, so writing it
+// between turns raced with the actor (go test -race under load).
+func TestIdleStopFails(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.Assistant.IdleTimeout = 10 * time.Millisecond })
+	e.sess.do(func(st *sessState) { st.stopErr = errors.New("docker down") })
+	d, _ := e.s.CreateChat(e.ctx, CreateRequest{}, "local")
+	e.sess.push(lines(0, `{"type":"result","is_error":false}`))
+	m, _ := e.s.Send(e.ctx, d.ID, "hi", "local")
+	e.waitMessage(d.ID, m[1].ID)
+	e.waitFor("the idle stop", func() bool {
+		n := 0
+		e.sess.do(func(st *sessState) { n = st.stopTries })
+		return n > 0
+	})
+	for _, en := range e.entries(d.ID) {
+		if strings.Contains(en.Note, "quiet period") {
+			t.Fatal("a failed stop was reported as done")
+		}
+	}
+	e.sess.do(func(st *sessState) { st.stopErr = nil })
+	e.sess.push(lines(0, `{"type":"result","is_error":false}`))
+	m, _ = e.s.Send(e.ctx, d.ID, "again", "local")
+	if got := e.waitMessage(d.ID, m[1].ID); got.Status != store.TurnDone {
+		t.Fatalf("%+v", got)
 	}
 }
 
