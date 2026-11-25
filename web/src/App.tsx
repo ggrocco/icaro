@@ -94,7 +94,7 @@ function Shell({ me }: { me: Me }) {
         {section === "assistant" && !a && <Assistant />}
         {section === "assistant" && a && <AssistantChat id={a} />}
         {section === "runs" && !a && <AllRuns />}
-        {section === "runs" && a && <RunDetail id={a} />}
+        {section === "runs" && a && <RunDetail key={a} id={a} />}
         {section === "deliveries" && <Deliveries />}
         {section === "integrations" && !a && <Integrations />}
         {section === "integrations" && a && <ManifestEditor name={a} />}

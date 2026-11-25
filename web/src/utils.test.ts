@@ -5,6 +5,7 @@ import { canonicalJSON, parse, pointerToPath, rangeFor, setIn } from "./yamldoc"
 import { pathAtLine, propertiesAt } from "./schema";
 import { triggerFields } from "./pages/WorkflowDetail";
 import { fmtCost, summarizeUsage } from "./usage";
+import { deadlinePrefix, duration } from "./components/common";
 
 const wf = `version: 1
 name: demo
@@ -84,6 +85,32 @@ describe("graph", () => {
       { id: "b", needs: ["a"], kind: "image", label: "" },
     ]);
     expect(placed).toHaveLength(2);
+  });
+});
+
+describe("duration", () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 0, 1) + s * 1000).toISOString();
+  it("formats elapsed time in the relative-time units", () => {
+    expect(duration(at(0), at(0.4))).toBe("<1 s");
+    expect(duration(at(0), at(42))).toBe("42 s");
+    expect(duration(at(0), at(180))).toBe("3 min");
+    expect(duration(at(0), at(185))).toBe("3 min 5 s");
+    expect(duration(at(0), at(7200))).toBe("2 h");
+    expect(duration(at(0), at(7800))).toBe("2 h 10 min");
+  });
+  it("gives nothing without both ends or for a negative span", () => {
+    expect(duration(undefined, at(1))).toBeUndefined();
+    expect(duration(at(1), undefined)).toBeUndefined();
+    expect(duration(at(5), at(1))).toBeUndefined();
+    expect(duration("nope", at(1))).toBeUndefined();
+  });
+});
+
+describe("deadlinePrefix", () => {
+  const now = new Date(Date.UTC(2026, 0, 1));
+  it("adds by only before a calendar date", () => {
+    expect(deadlinePrefix(new Date(now.getTime() + 3 * 3600_000), now)).toBe("");
+    expect(deadlinePrefix(new Date(now.getTime() + 30 * 86400_000), now)).toBe("by ");
   });
 });
 

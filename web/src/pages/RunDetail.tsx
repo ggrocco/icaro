@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, subscribeRun, terminal, type RunInfo, type StepInfo } from "../api";
 import { RunGraph } from "../components/lazy";
-import { ErrorBox, Loading, PageHeader, Status, When } from "../components/common";
+import { Deadline, ErrorBox, Loading, PageHeader, Status, When, duration } from "../components/common";
 import { Icon } from "../components/icons";
 import { go, href } from "../router";
 import { parse } from "../yamldoc";
@@ -73,7 +73,11 @@ export function RunDetail({ id }: { id: string }) {
 
   if (error) return <ErrorBox error={error} />;
   if (!run) return <Loading what="run" />;
-  const step = run.steps?.find((s) => s.id === selected);
+  // Until the person picks one, show the step that needs attention: the
+  // first that failed, waits or runs.
+  const focus = selected ?? ["failed", "waiting", "running"].map((st) => run.steps?.find((s) => s.status === st)).find(Boolean)?.id;
+  const step = run.steps?.find((s) => s.id === focus);
+  const took = duration(run.started_at, run.finished_at);
 
   return (
     <section aria-labelledby="run-title">
@@ -130,6 +134,11 @@ export function RunDetail({ id }: { id: string }) {
             Finished <strong><When ts={run.finished_at} /></strong>
           </span>
         )}
+        {took && (
+          <span>
+            Took <strong>{took}</strong>
+          </span>
+        )}
         <span aria-live="polite" className={live ? "live" : undefined}>
           {live ? "Live" : ""}
         </span>
@@ -145,19 +154,24 @@ export function RunDetail({ id }: { id: string }) {
         .map((s) => (
           <AwaitRequest key={s.id} runId={run.id} step={s} onDelivered={(r) => apply(r)} />
         ))}
-      {spec ? <RunGraph spec={spec} steps={run.steps} selected={selected} onSelect={setSelected} /> : <Loading what="graph" />}
+      {spec ? <RunGraph spec={spec} steps={run.steps} selected={focus} onSelect={setSelected} /> : <Loading what="graph" />}
       <div className="split">
         <div className="pane">
           <h2 className="h3">Steps</h2>
           <ul className="steps">
-            {(run.steps ?? []).map((s) => (
-              <li key={s.id}>
-                <button className={selected === s.id ? "step active" : "step"} onClick={() => setSelected(s.id)} aria-pressed={selected === s.id}>
-                  <Status status={s.status} /> {s.id}
-                  {s.attempt > 1 && <span className="muted small"> attempt {s.attempt}</span>}
-                </button>
-              </li>
-            ))}
+            {(run.steps ?? []).map((s) => {
+              // A skipped or cancelled step never ran; it has no duration.
+              const took = s.status === "skipped" || s.status === "cancelled" ? undefined : duration(s.started_at, s.finished_at);
+              return (
+                <li key={s.id}>
+                  <button className={focus === s.id ? "step active" : "step"} onClick={() => setSelected(s.id)} aria-pressed={focus === s.id}>
+                    <Status status={s.status} /> {s.id}
+                    {s.attempt > 1 && <span className="muted small"> attempt {s.attempt}</span>}
+                    {took && <span className="step-time muted small">{took}</span>}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
         <div className="pane side">
@@ -175,6 +189,12 @@ export function RunDetail({ id }: { id: string }) {
               <dl className="kv">
                 <dt>Attempts</dt>
                 <dd>{step.attempt}</dd>
+                {duration(step.started_at, step.finished_at) && (
+                  <>
+                    <dt>Took</dt>
+                    <dd>{duration(step.started_at, step.finished_at)}</dd>
+                  </>
+                )}
                 {step.exit_code !== undefined && (
                   <>
                     <dt>Exit code</dt>
@@ -183,11 +203,21 @@ export function RunDetail({ id }: { id: string }) {
                 )}
               </dl>
               <h3 className="h4">Outputs</h3>
-              <pre className="code">{JSON.stringify(step.outputs ?? {}, null, 2)}</pre>
+              {Object.keys(step.outputs ?? {}).length ? (
+                <pre className="code">{JSON.stringify(step.outputs, null, 2)}</pre>
+              ) : (
+                <p className="muted small">No outputs.</p>
+              )}
               <h3 className="h4">Logs</h3>
-              <pre className="code logs" ref={logRef} aria-live="polite" aria-label={`Logs for ${step.id}`}>
-                {logs[step.id] || (step.log_size ? "…" : "(no output)")}
-              </pre>
+              {logs[step.id] || step.log_size ? (
+                <pre className="code logs" ref={logRef} aria-live="polite" aria-label={`Logs for ${step.id}`}>
+                  {logs[step.id] || "…"}
+                </pre>
+              ) : (
+                <p className="muted small" aria-live="polite">
+                  {step.status === "running" ? "No output yet." : "No output."}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -221,7 +251,7 @@ function ApprovalRequest({ runId, step, onDecided }: { runId: string; step: Step
       <p className="approval-message">{a.message}</p>
       {a.deadline && (
         <p className="muted small">
-          Fails if undecided by <When ts={a.deadline} />
+          Fails if still undecided <Deadline ts={a.deadline} />
         </p>
       )}
       <label className="field">
@@ -279,7 +309,7 @@ function AwaitRequest({ runId, step, onDelivered }: { runId: string; step: StepI
         Key <code>{a.key}</code>
       </p>
       <p className="muted small">
-        Fails if no matching event arrives by <When ts={a.deadline} />
+        Fails if no matching event arrives <Deadline ts={a.deadline} />
       </p>
       <details>
         <summary>Resolve by hand</summary>
