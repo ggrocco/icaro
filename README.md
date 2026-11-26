@@ -19,7 +19,8 @@ When several agents work on the same project, they need room to work independent
 | Work on several tasks at once | Run agents in separate worktrees and containers, with a configurable concurrency cap. |
 | Review a change while an agent works | Open a live preview at a predictable `<name>.localhost` URL when the project has a Compose stack. |
 | Stop repeating context | Share decisions, findings, tasks, and handoffs through project-scoped memory over MCP. |
-| Turn a repeated task into automation | Connect container steps, integration actions, approvals, and waits in a workflow. Run it manually, on a schedule, or from an event. |
+| Turn a repeated task into automation | Connect container steps, agent steps, integration actions, approvals, and waits in a workflow, and call one workflow from another. Run it manually, on a schedule, or from an event. |
+| Write workflows faster | Describe what you want to the workflow assistant. It drafts and validates the YAML with your own Claude Code or Codex login, and you review each change as a diff before saving. |
 | Follow what is happening | Inspect workflow graphs, step outputs, live logs, and estimated usage in the web UI. Get desktop notifications when runs fail. |
 | Control what agents can access | Use profile-based network allowlists, a strict mount policy, and host-bound integration credentials. |
 
@@ -31,13 +32,13 @@ Built-in integrations connect workflows to **GitHub, GitLab, Slack, Jira, Linear
 
 ![Ícaro web UI showing the successful hello workflow, its two connected steps, outputs, and logs.](docs/images/web-run.png)
 
-The run view shows each step's status and outputs, with logs streamed live. Build workflows with the form or YAML editor, inspect version history, and approve requests when a workflow needs a human decision. [Explore the web UI](docs/ui.md).
+The run view shows each step's status and outputs, with logs streamed live. Build workflows with the form or YAML editor or with the [workflow assistant](docs/assistant.md), inspect version history, and approve requests when a workflow needs a human decision. [Explore the web UI](docs/ui.md).
 
 ### App: build workflows and keep track of runs
 
-![Ícaro native Linux desktop window editing the hello workflow, with form fields, validation status, and a graph of its steps.](docs/images/desktop-app.png)
+![Ícaro native Linux desktop window editing the hello workflow, with form fields, validation status, an Ask the assistant button, and a graph of its steps.](docs/images/desktop-app.png)
 
-Shown here is the Linux build. The desktop app opens the same UI in its own window and adds a menu with active runs, recent failures, previews, usage, and quick actions. It can launch at login and notify you about failed runs or daemon outages. [Desktop setup and platform status](docs/desktop.md).
+Shown here is the Linux build. The desktop app opens the same UI in its own window and adds a menu with active runs, recent failures, previews, usage, the assistant, and quick actions. It can launch at login and notify you about failed runs or daemon outages. [Desktop setup and platform status](docs/desktop.md).
 
 These captures use local demo workflows. See the [screenshot notes](docs/images/README.md) for the capture environment and how to refresh them.
 
@@ -82,9 +83,10 @@ The [full quickstart](docs/quickstart.md) walks through a session, a first workf
 | --- | --- |
 | Terminal | `icaro --help` and the [CLI reference](docs/cli.md) |
 | Browser | `icaro ui` and the [web UI guide](docs/ui.md) |
-| macOS app | Download `Icaro_<version>_macos_universal.zip` from [Releases](https://github.com/ggrocco/icaro/releases), move the app to Applications, and follow the [desktop guide](docs/desktop.md). |
+| macOS app | Download `Icaro_<version>_macos_universal.dmg` from [Releases](https://github.com/ggrocco/icaro/releases), drag the app to Applications, and follow the [desktop guide](docs/desktop.md). |
+| Linux app | Download `Icaro_<version>_linux_<arch>.tar.gz` from [Releases](https://github.com/ggrocco/icaro/releases), extract it into `~/.local`, and follow the [desktop guide](docs/desktop.md). |
 
-**Desktop status:** CI builds and tests the app on macOS and Linux; a clean-install test on a Mac is still pending. Releases attach it as `Icaro.app` for macOS and as a tarball for Linux (amd64 and arm64). See the desktop guide for signing and first-launch details.
+**Desktop status:** CI builds and tests the app on macOS and Linux; a clean-install test on a Mac is still pending. Releases attach it as a disk image (and a zip) for macOS and as a tarball for Linux (amd64 and arm64). See the desktop guide for signing and first-launch details.
 
 ## Teach your agent to use Ícaro
 
@@ -120,7 +122,9 @@ Terminal / Web UI / Desktop app / MCP client
      Agent sessions           Workflows
      own worktree             container steps
      own container            integration actions
-     live preview             approvals and waits
+     live preview             agent steps
+          |                   approvals and waits
+          |                   calls to other workflows
           |
      shared project memory
 ```
@@ -132,7 +136,8 @@ Workflows support parallel steps with dependencies, retries, timeouts, cancellat
 | Guide | What you will find |
 | --- | --- |
 | [Sessions](docs/sessions.md) and [previews](docs/previews.md) | Profiles, worktrees, provider logins, network policy, and per-session preview URLs |
-| [Workflows](docs/workflows.md) and [examples](examples/) | Steps, inputs and outputs, schedules, approvals, and runnable YAML |
+| [Workflows](docs/workflows.md) and [examples](examples/) | Steps, agent and call steps, inputs and outputs, schedules, approvals, and runnable YAML |
+| [Workflow assistant](docs/assistant.md) | Draft workflows in a chat beside the editor, using your own agent CLI login |
 | [Integrations](docs/integrations.md) | Events, credentials, webhooks, deliveries, actions, and packs |
 | [MCP and skills](docs/agents.md) and [shared memory](docs/memory.md) | Agent setup, workflow authoring, project context, and handoffs |
 | [Installing and upgrading](docs/upgrading.md) | Signed releases, rollback, and startup services |

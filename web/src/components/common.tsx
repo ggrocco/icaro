@@ -115,6 +115,36 @@ export function When({ ts }: { ts?: string }) {
   );
 }
 
+// Deadline reads after "fails if …": "in 3 h" when it is close enough for
+// a relative time, "by Mar 4" when relativeTime shows a date.
+export function Deadline({ ts }: { ts: string }) {
+  return (
+    <>
+      {deadlinePrefix(new Date(ts))}
+      <When ts={ts} />
+    </>
+  );
+}
+
+export function deadlinePrefix(d: Date, now = new Date()): string {
+  return /^(in |just now)|ago$/.test(relativeTime(d, now)) ? "" : "by ";
+}
+
+// duration formats how long something took, in the units relativeTime
+// uses: "<1 s", "42 s", "3 min 5 s", "2 h 10 min".
+export function duration(from?: string, to?: string): string | undefined {
+  if (!from || !to) return undefined;
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  if (Number.isNaN(ms) || ms < 0) return undefined;
+  const s = Math.floor(ms / 1000);
+  if (s < 1) return "<1 s";
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+}
+
 export function relativeTime(d: Date, now = new Date()): string {
   const s = Math.round((now.getTime() - d.getTime()) / 1000);
   if (Number.isNaN(s)) return "—";

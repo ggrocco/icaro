@@ -158,7 +158,7 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
         </div>
         <div className="pane side">
           <h2 className="h3">Graph</h2>
-          {spec ? <RunGraph spec={spec} /> : <p className="muted">Fix the YAML to see the graph.</p>}
+          {spec ? <RunGraph spec={spec} vertical /> : <p className="muted">Fix the YAML to see the graph.</p>}
           <h2 className="h3">Issues</h2>
           {issues.length ? <Issues issues={issues} /> : <p className="muted">No issues.</p>}
         </div>
