@@ -16,4 +16,5 @@
 
 - [x] The quickstart passes in the CI/documentation test (`go test -tags e2e ./hack/quickstart` runs the `sh quickstart` blocks of [docs/quickstart.md](../../../docs/quickstart.md) against a real daemon and Docker in the `e2e` job).
 - [x] No broken links (`hack/linkcheck` runs in the [docs workflow](../../../.github/workflows/docs.yml) on every PR).
+- [x] The landing page, its XML sitemap, and the repository README agree on the [canonical GitHub Pages URL](../adr/0042-landing-page-discovery.md).
 - [x] Examples use images pinned by digest (`hack/docscheck` fails on an unpinned `image:` in `examples/` or in a docs workflow block).
