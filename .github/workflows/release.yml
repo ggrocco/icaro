@@ -289,7 +289,7 @@ jobs:
       - name: build the tarball
         run: |
           tarball=$(desktop/build/package-linux.sh dist "$GITHUB_REF_NAME")
-          test "$(basename "$tarball")" = "Icaro_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}.tar.gz"
+          test "$(basename "$tarball")" = "Icaro_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}_desktop.tar.gz"
           echo "TARBALL=$tarball" >> "$GITHUB_ENV"
       - name: attach to the release
         env:

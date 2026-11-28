@@ -5,7 +5,9 @@
 #
 #   desktop/build/package-linux.sh OUT_DIR VERSION
 #
-# Writes OUT_DIR/Icaro_<version>_linux_<arch>.tar.gz and prints its path.
+# Writes OUT_DIR/Icaro_<version>_linux_<arch>_desktop.tar.gz and prints its
+# path. The _desktop suffix matters: release asset names are unique
+# ignoring case, and the CLI archive is icaro_<version>_linux_<arch>.tar.gz.
 # Install it with
 #   tar -xzf Icaro_*.tar.gz --strip-components=1 -C ~/.local
 #
@@ -23,7 +25,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 desktop=$(dirname "$here")
 root=$(dirname "$desktop")
 arch=$(go env GOARCH)
-name=Icaro_${version#v}_linux_$arch
+name=Icaro_${version#v}_linux_${arch}_desktop
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 tmp=$(mktemp -d)

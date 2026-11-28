@@ -7,7 +7,7 @@ or GNOME with the AppIndicator extension).
 
 Install into ~/.local, from the directory that holds the archive:
 
-  tar -xzf Icaro_@VERSION@_linux_*.tar.gz --strip-components=1 -C ~/.local
+  tar -xzf Icaro_@VERSION@_linux_*_desktop.tar.gz --strip-components=1 -C ~/.local
 
 That places:
 
