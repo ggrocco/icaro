@@ -84,7 +84,7 @@ The [full quickstart](docs/quickstart.md) walks through a session, a first workf
 | Terminal | `icaro --help` and the [CLI reference](docs/cli.md) |
 | Browser | `icaro ui` and the [web UI guide](docs/ui.md) |
 | macOS app | Download `Icaro_<version>_macos_universal.dmg` from [Releases](https://github.com/ggrocco/icaro/releases), drag the app to Applications, and follow the [desktop guide](docs/desktop.md). |
-| Linux app | Download `Icaro_<version>_linux_<arch>.tar.gz` from [Releases](https://github.com/ggrocco/icaro/releases), extract it into `~/.local`, and follow the [desktop guide](docs/desktop.md). |
+| Linux app | Download `Icaro_<version>_linux_<arch>_desktop.tar.gz` from [Releases](https://github.com/ggrocco/icaro/releases), extract it into `~/.local`, and follow the [desktop guide](docs/desktop.md). |
 
 **Desktop status:** CI builds and tests the app on macOS and Linux; a clean-install test on a Mac is still pending. Releases attach it as a disk image (and a zip) for macOS and as a tarball for Linux (amd64 and arm64). See the desktop guide for signing and first-launch details.
 

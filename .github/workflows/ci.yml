@@ -333,6 +333,13 @@ jobs:
         run: |
           sudo apt-get install -y desktop-file-utils
           tarball=$(desktop/build/package-linux.sh "$RUNNER_TEMP/dist" v0.0.0-ci)
+          # Release asset names are unique ignoring case, and goreleaser
+          # attaches the CLI as icaro_<version>_linux_<arch>.tar.gz first.
+          cli="icaro_0.0.0-ci_linux_$(go env GOARCH).tar.gz"
+          if [ "$(basename "$tarball" | tr '[:upper:]' '[:lower:]')" = "$cli" ]; then
+            echo "::error::$(basename "$tarball") collides with the CLI archive $cli on a release"
+            exit 1
+          fi
           mkdir "$RUNNER_TEMP/prefix"
           tar -xzf "$tarball" --strip-components=1 -C "$RUNNER_TEMP/prefix"
           "$RUNNER_TEMP/prefix/bin/icaro" version

@@ -82,7 +82,7 @@ clean:
 # The desktop app (ADR 0027) is its own module under desktop/ and needs cgo:
 # Xcode command line tools on macOS, GTK 4 and WebKitGTK 6 headers on Linux
 # (libgtk-4-dev libwebkitgtk-6.0-dev). app-macos builds bin/Icaro.app;
-# app-linux builds bin/Icaro_<version>_linux_<arch>.tar.gz.
+# app-linux builds bin/Icaro_<version>_linux_<arch>_desktop.tar.gz.
 APP_BIN ?= bin/icaro-app
 
 .PHONY: app app-test app-macos app-linux
