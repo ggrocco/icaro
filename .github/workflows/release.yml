@@ -138,8 +138,8 @@ jobs:
             dist/checksums.txt
 
   macos-app:
-    # Icaro.app, attached to the release as a disk image with a SHA-256
-    # file and an ed25519 signature (go run ./hack/sign verify).
+    # Icaro.app, attached to the release as a zip and as a disk image, each
+    # with a SHA-256 file and an ed25519 signature (go run ./hack/sign verify).
     needs: release
     runs-on: macos-latest
     environment: release
@@ -230,12 +230,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ICARO_SIGNING_KEY: ${{ secrets.ICARO_SIGNING_KEY }}
         run: |
-          (cd dist && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
-          go run ./hack/sign sign -in "$DMG" -out "$DMG.sig"
-          gh release upload "$GITHUB_REF_NAME" "$DMG" "$DMG.sha256" "$DMG.sig" --clobber
+          zip="dist/Icaro_${GITHUB_REF_NAME#v}_macos_universal.zip"
+          ditto -c -k --keepParent dist/Icaro.app "$zip"
+          for f in "$zip" "$DMG"; do
+            (cd dist && shasum -a 256 "$(basename "$f")" > "$(basename "$f").sha256")
+            go run ./hack/sign sign -in "$f" -out "$f.sig"
+            gh release upload "$GITHUB_REF_NAME" "$f" "$f.sha256" "$f.sig" --clobber
+          done
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/*.dmg
+          subject-path: |
+            dist/*.zip
+            dist/*.dmg
 
   linux-app:
     # The desktop app for Linux (ADR 0027), attached to the release as one

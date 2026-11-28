@@ -6,7 +6,7 @@ The desktop app (`Icaro.app` on macOS, `icaro-app` on Linux) is a menu bar app o
 
 ## Install and start
 
-**macOS:** download `Icaro_<version>_macos_universal.dmg` from the [releases](https://github.com/ggrocco/icaro/releases), open it, and drag `Icaro.app` onto **Applications**. The bundle includes the `icaro` CLI, which the app uses to start the daemon.
+**macOS:** download `Icaro_<version>_macos_universal.dmg` from the [releases](https://github.com/ggrocco/icaro/releases), open it, and drag `Icaro.app` onto **Applications**. The same app is also attached as `Icaro_<version>_macos_universal.zip`. The bundle includes the `icaro` CLI, which the app uses to start the daemon.
 
 **Linux:** download `Icaro_<version>_linux_amd64_desktop.tar.gz` or `Icaro_<version>_linux_arm64_desktop.tar.gz` from the [releases](https://github.com/ggrocco/icaro/releases) and extract it into `~/.local`:
 
