@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/xml"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -55,5 +57,41 @@ func TestCheck(t *testing.T) {
 	}
 	if Slug("ADR 0005 — Credentials: persistent home + egress") != "adr-0005--credentials-persistent-home--egress" {
 		t.Fatal(Slug("ADR 0005 — Credentials: persistent home + egress"))
+	}
+}
+
+func TestLandingPageDiscovery(t *testing.T) {
+	const home = "https://ggrocco.github.io/icaro/"
+	root := filepath.Join("..", "..")
+	html, err := os.ReadFile(filepath.Join(root, "site", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := regexp.MustCompile(`<link\s+rel="canonical"\s+href="([^"]+)"\s*>`).FindAllStringSubmatch(string(html), -1)
+	if len(canonical) != 1 || canonical[0][1] != home {
+		t.Fatalf("expected one canonical link to %s, got %v", home, canonical)
+	}
+
+	sitemap, err := os.ReadFile(filepath.Join(root, "site", "sitemap.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published struct {
+		XMLName xml.Name `xml:"http://www.sitemaps.org/schemas/sitemap/0.9 urlset"`
+		URLs    []string `xml:"url>loc"`
+	}
+	if err := xml.Unmarshal(sitemap, &published); err != nil {
+		t.Fatal(err)
+	}
+	if len(published.URLs) != 1 || published.URLs[0] != home {
+		t.Errorf("expected only %s in the sitemap, got %v", home, published.URLs)
+	}
+
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(readme, []byte("]("+home+")")) {
+		t.Errorf("README is missing a link to %s", home)
 	}
 }

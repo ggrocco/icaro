@@ -8,7 +8,7 @@
 [![Documentation checks](https://github.com/ggrocco/icaro/actions/workflows/docs.yml/badge.svg)](https://github.com/ggrocco/icaro/actions/workflows/docs.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Get started](#get-started) · [UI tour](#see-ícaro-in-action) · [MCP and skills](#teach-your-agent-to-use-ícaro) · [Documentation](docs/README.md) · [Releases](https://github.com/ggrocco/icaro/releases)
+[Project website](https://ggrocco.github.io/icaro/) · [Get started](#get-started) · [UI tour](#see-ícaro-in-action) · [MCP and skills](#teach-your-agent-to-use-ícaro) · [Documentation](docs/README.md) · [Releases](https://github.com/ggrocco/icaro/releases)
 
 ## Why Ícaro?
 
