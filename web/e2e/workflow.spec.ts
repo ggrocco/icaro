@@ -59,6 +59,34 @@ test("an invalid edit shows inline issues and cannot be saved", async ({ page })
   await expect(page.getByLabel("Validation issues")).toContainText("/name");
 });
 
+test("step cards collapse to one line, flag their issues, and open from the graph", async ({ page }) => {
+  await login(page);
+  await page.getByRole("link", { name: "New workflow" }).click();
+  await page.getByRole("button", { name: "Add step" }).click();
+  await expect(page.getByLabel("Id", { exact: true })).toHaveCount(2);
+
+  const hello = page.getByRole("button", { name: /^Step hello/ });
+  await hello.click();
+  await expect(hello).toHaveAttribute("aria-expanded", "false");
+  await expect(hello).toContainText("alpine");
+  await expect(page.getByLabel("Id", { exact: true })).toHaveCount(1);
+
+  // An issue inside a collapsed step shows on its header.
+  await page.getByLabel("Id", { exact: true }).fill("Bad Id");
+  const second = page.getByRole("button", { name: /^Step Bad Id/ });
+  await second.click();
+  await expect(page.locator(".step-card.collapsed .badge.failed")).toHaveText("1 issue");
+
+  await page.getByRole("button", { name: "Expand all" }).click();
+  await expect(page.getByLabel("Id", { exact: true })).toHaveCount(2);
+  await page.getByRole("button", { name: "Collapse all" }).click();
+  await expect(page.getByLabel("Id", { exact: true })).toHaveCount(0);
+
+  // A click on a graph node opens that step.
+  await page.getByRole("figure", { name: "Workflow graph" }).getByLabel("hello", { exact: false }).first().click();
+  await expect(hello).toHaveAttribute("aria-expanded", "true");
+});
+
 test("cancel a running workflow", async ({ page }) => {
   await login(page);
   const yaml = [

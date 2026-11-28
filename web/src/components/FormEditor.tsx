@@ -1,6 +1,8 @@
-import { cloneElement, useId, useMemo } from "react";
+import { cloneElement, useEffect, useId, useMemo, useState } from "react";
 import type { ActionInfo, AgentProfileInfo, IntegrationInfo, WorkflowInfo } from "../api";
+import { stepSummary } from "../graph";
 import { getIn, parse, setIn, stepCount } from "../yamldoc";
+import { Icon } from "./icons";
 
 interface Props {
   yaml: string;
@@ -11,6 +13,17 @@ interface Props {
   // workflows are the stored workflows; call steps offer the callable
   // ones, with their trigger fields as inputs (ADR 0038).
   workflows?: WorkflowInfo[];
+  // issues are the daemon's validation issues; a collapsed step shows how
+  // many point into it.
+  issues?: { path: string }[];
+  // focus opens a step and scrolls to it (a click on the graph); seq makes
+  // a second click on the same step count.
+  focus?: { id: string; seq: number };
+}
+
+// stepIssues counts the issues whose JSON Pointer is inside step i.
+export function stepIssues(issues: { path: string }[], i: number): number {
+  return issues.filter((x) => x.path === `/steps/${i}` || x.path.startsWith(`/steps/${i}/`)).length;
 }
 
 type KV = Record<string, string>;
@@ -18,8 +31,22 @@ type KV = Record<string, string>;
 // FormEditor edits a workflow through the YAML Document, so unknown
 // fields and comments survive every edit (Phase 4: "a round-trip does not
 // lose unknown fields").
-export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], workflows = [] }: Props) {
+export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], workflows = [], issues = [], focus }: Props) {
   const doc = useMemo(() => parse(yaml), [yaml]);
+  // Collapsed steps, by id: a long workflow folds down to one line a step.
+  // A step's id only changes while it is open, so the key holds.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const uid = useId();
+  useEffect(() => {
+    if (!focus) return;
+    setCollapsed((c) => {
+      const next = new Set(c);
+      next.delete(focus.id);
+      return next;
+    });
+    const i = String(focus.id);
+    requestAnimationFrame(() => document.getElementById(`${uid}-step-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [focus, uid]);
   const actions = useMemo(() => {
     const m = new Map<string, ActionInfo>();
     for (const i of integrations) for (const a of Object.values(i.action_details ?? {})) m.set(a.ref, a);
@@ -48,6 +75,14 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
   const n = stepCount(doc);
   const ids = Array.from({ length: n }, (_, i) => String(getIn(doc, ["steps", i, "id"]) ?? ""));
   const triggers = (getIn<unknown[]>(doc, ["triggers"]) ?? []) as Record<string, string>[];
+  const keyOf = (i: number) => ids[i] || `#${i}`;
+  const toggle = (k: string) =>
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (!next.delete(k)) next.add(k);
+      return next;
+    });
+  const allCollapsed = n > 0 && ids.every((_, i) => collapsed.has(keyOf(i)));
 
   return (
     <form className="form" onSubmit={(e) => e.preventDefault()}>
@@ -127,6 +162,14 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
         </button>
       </fieldset>
 
+      {n > 1 && (
+        <div className="steps-head">
+          <h3 className="h4">Steps ({n})</h3>
+          <button type="button" className="ghost" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(ids.map((_, i) => keyOf(i))))}>
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </button>
+        </div>
+      )}
       {Array.from({ length: n }, (_, i) => {
         const p = (k: string) => ["steps", i, k];
         const uses = String(getIn(doc, p("uses")) ?? "");
@@ -149,211 +192,226 @@ export function FormEditor({ yaml, onChange, integrations, agentProfiles = [], w
         const awaitIntg = String(getIn(doc, aw("integration")) ?? "");
         const action = actions.get(uses);
         const needs = (getIn<string[]>(doc, p("needs")) ?? []) as string[];
+        const key = keyOf(i);
+        const closed = collapsed.has(key);
+        const body = `${uid}-body-${i}`;
+        const bad = stepIssues(issues, i);
         return (
-          <fieldset key={i}>
-            <legend>Step {ids[i] || i + 1}</legend>
-            <Field label="Id">
-              <input value={ids[i]} onChange={(e) => update(p("id"), e.target.value)} />
-            </Field>
-            <Field label="Kind">
-              <select
-                value={kind}
-                onChange={(e) =>
-                  mutate((d) => {
-                    // Each form has its own fields; switching drops the old ones.
-                    for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent", "call", "await", "repository"]) d.deleteIn(["steps", i, k]);
-                    if (e.target.value === "approval" || e.target.value === "wait" || e.target.value === "await") d.deleteIn(["steps", i, "retry"]);
-                    if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
-                    if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
-                    else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
-                    else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
-                    else if (e.target.value === "agent") d.setIn(["steps", i, "agent"], { prompt: "Describe the task for the agent." });
-                    else if (e.target.value === "call") d.setIn(["steps", i, "call"], { workflow: workflows.find((w) => w.callable)?.name ?? "" });
-                    else if (e.target.value === "await") {
-                      d.setIn(["steps", i, "await"], { integration: "github", event: "check_suite.completed", key: "", match: "event.head_sha" });
-                      if (!d.hasIn(["steps", i, "timeout"])) d.setIn(["steps", i, "timeout"], "2h");
-                    }
-                    else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
-                  })
-                }
-              >
-                <option value="image">image (container)</option>
-                <option value="agent">agent (an agent CLI does the task)</option>
-                <option value="uses">uses (integration action)</option>
-                <option value="call">call (run another workflow)</option>
-                <option value="approval">approval (a person decides)</option>
-                <option value="wait">wait (pause for a time)</option>
-                <option value="await">await (wait for an integration event)</option>
-              </select>
-            </Field>
-            {kind === "approval" ? (
-              <Field label="Message" hint="Shown to the approver; may use ${{ trigger.* }} and ${{ steps.*.outputs.* }}">
-                <textarea
-                  rows={2}
-                  value={String(getIn(doc, ["steps", i, "approval", "message"]) ?? "")}
-                  onChange={(e) => update(["steps", i, "approval", "message"], e.target.value || undefined)}
-                />
-              </Field>
-            ) : kind === "wait" ? (
-              <Field label="Duration" hint="e.g. 30m or 2h (at most 720h)">
-                <input value={String(getIn(doc, p("wait")) ?? "")} onChange={(e) => update(p("wait"), e.target.value)} />
-              </Field>
-            ) : kind === "agent" ? (
-              <AgentFields
-                profiles={agentProfiles}
-                profile={String(getIn(doc, ["steps", i, "agent", "profile"]) ?? "")}
-                prompt={String(getIn(doc, ["steps", i, "agent", "prompt"]) ?? "")}
-                params={(getIn<Record<string, unknown>>(doc, ["steps", i, "agent", "params"]) ?? {}) as Record<string, unknown>}
-                memory={getIn(doc, ["steps", i, "agent", "memory"]) !== false}
-                env={(getIn<KV>(doc, p("env")) ?? {}) as KV}
-                outputs={(getIn<KV>(doc, p("outputs")) ?? {}) as KV}
-                update={(k, v) => update(["steps", i, "agent", ...k], v)}
-                updateStep={(k, v) => update(p(k), v)}
-              />
-            ) : kind === "call" ? (
-              <CallFields
-                workflows={workflows}
-                self={String(getIn(doc, ["name"]) ?? "")}
-                workflow={String(getIn(doc, ["steps", i, "call", "workflow"]) ?? "")}
-                input={(getIn<Record<string, unknown>>(doc, ["steps", i, "call", "input"]) ?? {}) as Record<string, unknown>}
-                update={(k, v) => update(["steps", i, "call", ...k], v)}
-              />
-            ) : kind === "await" ? (
-              <>
-                <Field label="Integration">
+          <fieldset key={i} id={`${uid}-step-${key}`} className={closed ? "step-card collapsed" : "step-card"}>
+            <legend>
+              <button type="button" className="step-toggle" aria-expanded={!closed} aria-controls={body} onClick={() => toggle(key)}>
+                <Icon name="chevron" />
+                <span className="step-name">Step {ids[i] || i + 1}</span>
+                <span className="step-summary">{stepSummary(getIn(doc, ["steps", i]))}</span>
+              </button>
+              {bad > 0 && <span className="badge failed">{bad === 1 ? "1 issue" : `${bad} issues`}</span>}
+            </legend>
+            {!closed && (
+              <div id={body} className="step-body">
+                <Field label="Id">
+                  <input value={ids[i]} onChange={(e) => update(p("id"), e.target.value)} />
+                </Field>
+                <Field label="Kind">
                   <select
-                    value={awaitIntg}
+                    value={kind}
                     onChange={(e) =>
                       mutate((d) => {
-                        d.setIn(aw("integration"), e.target.value);
-                        d.setIn(aw("event"), "");
+                        // Each form has its own fields; switching drops the old ones.
+                        for (const k of ["image", "command", "env", "outputs", "uses", "input", "approval", "wait", "agent", "call", "await", "repository"]) d.deleteIn(["steps", i, k]);
+                        if (e.target.value === "approval" || e.target.value === "wait" || e.target.value === "await") d.deleteIn(["steps", i, "retry"]);
+                        if (e.target.value === "wait") d.deleteIn(["steps", i, "timeout"]);
+                        if (e.target.value === "uses") d.setIn(["steps", i, "uses"], [...actions.keys()][0] ?? "webhook.post");
+                        else if (e.target.value === "approval") d.setIn(["steps", i, "approval"], { message: "Continue?" });
+                        else if (e.target.value === "wait") d.setIn(["steps", i, "wait"], "10m");
+                        else if (e.target.value === "agent") d.setIn(["steps", i, "agent"], { prompt: "Describe the task for the agent." });
+                        else if (e.target.value === "call") d.setIn(["steps", i, "call"], { workflow: workflows.find((w) => w.callable)?.name ?? "" });
+                        else if (e.target.value === "await") {
+                          d.setIn(["steps", i, "await"], { integration: "github", event: "check_suite.completed", key: "", match: "event.head_sha" });
+                          if (!d.hasIn(["steps", i, "timeout"])) d.setIn(["steps", i, "timeout"], "2h");
+                        }
+                        else d.setIn(["steps", i, "image"], "mirror.gcr.io/library/alpine:3.24");
                       })
                     }
                   >
-                    {!integrations.some((x) => x.name === awaitIntg) && <option value={awaitIntg}>{awaitIntg || "choose…"}</option>}
-                    {integrations
-                      .filter((x) => Object.keys(x.event_details ?? {}).length)
-                      .map((x) => (
-                        <option key={x.name} value={x.name}>
-                          {x.name}
-                        </option>
+                    <option value="image">image (container)</option>
+                    <option value="agent">agent (an agent CLI does the task)</option>
+                    <option value="uses">uses (integration action)</option>
+                    <option value="call">call (run another workflow)</option>
+                    <option value="approval">approval (a person decides)</option>
+                    <option value="wait">wait (pause for a time)</option>
+                    <option value="await">await (wait for an integration event)</option>
+                  </select>
+                </Field>
+                {kind === "approval" ? (
+                  <Field label="Message" hint="Shown to the approver; may use ${{ trigger.* }} and ${{ steps.*.outputs.* }}">
+                    <textarea
+                      rows={2}
+                      value={String(getIn(doc, ["steps", i, "approval", "message"]) ?? "")}
+                      onChange={(e) => update(["steps", i, "approval", "message"], e.target.value || undefined)}
+                    />
+                  </Field>
+                ) : kind === "wait" ? (
+                  <Field label="Duration" hint="e.g. 30m or 2h (at most 720h)">
+                    <input value={String(getIn(doc, p("wait")) ?? "")} onChange={(e) => update(p("wait"), e.target.value)} />
+                  </Field>
+                ) : kind === "agent" ? (
+                  <AgentFields
+                    profiles={agentProfiles}
+                    profile={String(getIn(doc, ["steps", i, "agent", "profile"]) ?? "")}
+                    prompt={String(getIn(doc, ["steps", i, "agent", "prompt"]) ?? "")}
+                    params={(getIn<Record<string, unknown>>(doc, ["steps", i, "agent", "params"]) ?? {}) as Record<string, unknown>}
+                    memory={getIn(doc, ["steps", i, "agent", "memory"]) !== false}
+                    env={(getIn<KV>(doc, p("env")) ?? {}) as KV}
+                    outputs={(getIn<KV>(doc, p("outputs")) ?? {}) as KV}
+                    update={(k, v) => update(["steps", i, "agent", ...k], v)}
+                    updateStep={(k, v) => update(p(k), v)}
+                  />
+                ) : kind === "call" ? (
+                  <CallFields
+                    workflows={workflows}
+                    self={String(getIn(doc, ["name"]) ?? "")}
+                    workflow={String(getIn(doc, ["steps", i, "call", "workflow"]) ?? "")}
+                    input={(getIn<Record<string, unknown>>(doc, ["steps", i, "call", "input"]) ?? {}) as Record<string, unknown>}
+                    update={(k, v) => update(["steps", i, "call", ...k], v)}
+                  />
+                ) : kind === "await" ? (
+                  <>
+                    <Field label="Integration">
+                      <select
+                        value={awaitIntg}
+                        onChange={(e) =>
+                          mutate((d) => {
+                            d.setIn(aw("integration"), e.target.value);
+                            d.setIn(aw("event"), "");
+                          })
+                        }
+                      >
+                        {!integrations.some((x) => x.name === awaitIntg) && <option value={awaitIntg}>{awaitIntg || "choose…"}</option>}
+                        {integrations
+                          .filter((x) => Object.keys(x.event_details ?? {}).length)
+                          .map((x) => (
+                            <option key={x.name} value={x.name}>
+                              {x.name}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                    <Field label="Event">
+                      <select value={String(getIn(doc, aw("event")) ?? "")} onChange={(e) => update(aw("event"), e.target.value)}>
+                        <option value="">choose an event…</option>
+                        {Object.values(integrations.find((x) => x.name === awaitIntg)?.event_details ?? {}).map((ev) => (
+                          <option key={ev.event} value={ev.event} title={ev.description}>
+                            {ev.event}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Key" hint="Rendered when the step starts, e.g. ${{ steps.push.outputs.sha }}">
+                      <input value={String(getIn(doc, aw("key")) ?? "")} onChange={(e) => update(aw("key"), e.target.value)} />
+                    </Field>
+                    <Field label="Match" hint="Over the event; must equal the key, e.g. event.head_sha">
+                      <input value={String(getIn(doc, aw("match")) ?? "")} onChange={(e) => update(aw("match"), e.target.value)} />
+                    </Field>
+                    <Field label="Filter" hint="Optional, e.g. event.conclusion != 'neutral'">
+                      <input value={String(getIn(doc, aw("filter")) ?? "")} onChange={(e) => update(aw("filter"), e.target.value || undefined)} />
+                    </Field>
+                  </>
+                ) : isUses ? (
+                  <>
+                    <Field label="Action">
+                      <select value={uses} onChange={(e) => update(p("uses"), e.target.value)}>
+                        {!action && <option value={uses}>{uses || "choose…"}</option>}
+                        {[...actions.values()].map((a) => (
+                          <option key={a.ref} value={a.ref} title={a.description}>
+                            {a.ref}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    {action ? (
+                      Object.entries(action.inputs).map(([name, info]) => (
+                        <Field key={name} label={`${name}${info.required ? " *" : ""}`} hint={info.description}>
+                          <input
+                            value={toText(getIn(doc, ["steps", i, "input", name]))}
+                            placeholder={info.default !== undefined ? String(info.default) : info.type}
+                            onChange={(e) => update(["steps", i, "input", name], fromText(e.target.value, info.type))}
+                          />
+                        </Field>
+                      ))
+                    ) : (
+                      <p className="muted">Unknown action: install its integration to get a typed form.</p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Field label="Image">
+                      <input value={String(getIn(doc, p("image")) ?? "")} onChange={(e) => update(p("image"), e.target.value)} />
+                    </Field>
+                    <Field label="Command">
+                      <textarea rows={3} value={String(getIn(doc, p("command")) ?? "")} onChange={(e) => update(p("command"), e.target.value)} />
+                    </Field>
+                    <KVEditor label="Environment" value={(getIn<KV>(doc, p("env")) ?? {}) as KV} onChange={(v) => update(p("env"), Object.keys(v).length ? v : undefined)} />
+                    <KVEditor
+                      label="Outputs"
+                      hint="name → capture: json:<path>, stdout, stdout:last-line or file:<path>"
+                      value={(getIn<KV>(doc, p("outputs")) ?? {}) as KV}
+                      onChange={(v) => update(p("outputs"), Object.keys(v).length ? v : undefined)}
+                    />
+                  </>
+                )}
+                <Field label="Needs">
+                  <div className="chips" role="group" aria-label="Needs">
+                    {ids
+                      .filter((id, j) => j !== i && id)
+                      .map((id) => (
+                        <label key={id} className="chip">
+                          <input
+                            type="checkbox"
+                            checked={needs.includes(id)}
+                            onChange={(e) => update(p("needs"), e.target.checked ? [...needs, id] : needs.filter((x) => x !== id))}
+                          />
+                          {id}
+                        </label>
                       ))}
-                  </select>
+                  </div>
                 </Field>
-                <Field label="Event">
-                  <select value={String(getIn(doc, aw("event")) ?? "")} onChange={(e) => update(aw("event"), e.target.value)}>
-                    <option value="">choose an event…</option>
-                    {Object.values(integrations.find((x) => x.name === awaitIntg)?.event_details ?? {}).map((ev) => (
-                      <option key={ev.event} value={ev.event} title={ev.description}>
-                        {ev.event}
-                      </option>
-                    ))}
-                  </select>
+                <Field label="When" hint="e.g. steps.build.outputs.changed == true">
+                  <input value={String(getIn(doc, p("when")) ?? "")} onChange={(e) => update(p("when"), e.target.value)} />
                 </Field>
-                <Field label="Key" hint="Rendered when the step starts, e.g. ${{ steps.push.outputs.sha }}">
-                  <input value={String(getIn(doc, aw("key")) ?? "")} onChange={(e) => update(aw("key"), e.target.value)} />
-                </Field>
-                <Field label="Match" hint="Over the event; must equal the key, e.g. event.head_sha">
-                  <input value={String(getIn(doc, aw("match")) ?? "")} onChange={(e) => update(aw("match"), e.target.value)} />
-                </Field>
-                <Field label="Filter" hint="Optional, e.g. event.conclusion != 'neutral'">
-                  <input value={String(getIn(doc, aw("filter")) ?? "")} onChange={(e) => update(aw("filter"), e.target.value || undefined)} />
-                </Field>
-              </>
-            ) : isUses ? (
-              <>
-                <Field label="Action">
-                  <select value={uses} onChange={(e) => update(p("uses"), e.target.value)}>
-                    {!action && <option value={uses}>{uses || "choose…"}</option>}
-                    {[...actions.values()].map((a) => (
-                      <option key={a.ref} value={a.ref} title={a.description}>
-                        {a.ref}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                {action ? (
-                  Object.entries(action.inputs).map(([name, info]) => (
-                    <Field key={name} label={`${name}${info.required ? " *" : ""}`} hint={info.description}>
+                <div className="row">
+                  {kind !== "wait" && (
+                    <Field
+                      label={kind === "approval" || kind === "await" ? "Deadline" : "Timeout"}
+                      hint={
+                        kind === "approval"
+                          ? "undecided after this, it fails"
+                          : kind === "await"
+                            ? "required, at most 720h; with no event by then, it fails"
+                            : kind === "call"
+                              ? "the child run is cancelled after this"
+                              : undefined
+                      }
+                    >
+                      <input placeholder={kind === "approval" ? "24h" : kind === "await" ? "2h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
+                    </Field>
+                  )}
+                  {!pauses && (
+                    <Field label="Retry">
                       <input
-                        value={toText(getIn(doc, ["steps", i, "input", name]))}
-                        placeholder={info.default !== undefined ? String(info.default) : info.type}
-                        onChange={(e) => update(["steps", i, "input", name], fromText(e.target.value, info.type))}
+                        type="number"
+                        min={0}
+                        max={5}
+                        value={String(getIn(doc, p("retry")) ?? "")}
+                        onChange={(e) => update(p("retry"), e.target.value === "" ? undefined : Number(e.target.value))}
                       />
                     </Field>
-                  ))
-                ) : (
-                  <p className="muted">Unknown action: install its integration to get a typed form.</p>
-                )}
-              </>
-            ) : (
-              <>
-                <Field label="Image">
-                  <input value={String(getIn(doc, p("image")) ?? "")} onChange={(e) => update(p("image"), e.target.value)} />
-                </Field>
-                <Field label="Command">
-                  <textarea rows={3} value={String(getIn(doc, p("command")) ?? "")} onChange={(e) => update(p("command"), e.target.value)} />
-                </Field>
-                <KVEditor label="Environment" value={(getIn<KV>(doc, p("env")) ?? {}) as KV} onChange={(v) => update(p("env"), Object.keys(v).length ? v : undefined)} />
-                <KVEditor
-                  label="Outputs"
-                  hint="name → capture: json:<path>, stdout, stdout:last-line or file:<path>"
-                  value={(getIn<KV>(doc, p("outputs")) ?? {}) as KV}
-                  onChange={(v) => update(p("outputs"), Object.keys(v).length ? v : undefined)}
-                />
-              </>
-            )}
-            <Field label="Needs">
-              <div className="chips" role="group" aria-label="Needs">
-                {ids
-                  .filter((id, j) => j !== i && id)
-                  .map((id) => (
-                    <label key={id} className="chip">
-                      <input
-                        type="checkbox"
-                        checked={needs.includes(id)}
-                        onChange={(e) => update(p("needs"), e.target.checked ? [...needs, id] : needs.filter((x) => x !== id))}
-                      />
-                      {id}
-                    </label>
-                  ))}
+                  )}
+                </div>
+                <button type="button" className="ghost danger" onClick={() => mutate((d) => d.deleteIn(["steps", i]))}>
+                  Remove step
+                </button>
               </div>
-            </Field>
-            <Field label="When" hint="e.g. steps.build.outputs.changed == true">
-              <input value={String(getIn(doc, p("when")) ?? "")} onChange={(e) => update(p("when"), e.target.value)} />
-            </Field>
-            <div className="row">
-              {kind !== "wait" && (
-                <Field
-                  label={kind === "approval" || kind === "await" ? "Deadline" : "Timeout"}
-                  hint={
-                    kind === "approval"
-                      ? "undecided after this, it fails"
-                      : kind === "await"
-                        ? "required, at most 720h; with no event by then, it fails"
-                        : kind === "call"
-                          ? "the child run is cancelled after this"
-                          : undefined
-                  }
-                >
-                  <input placeholder={kind === "approval" ? "24h" : kind === "await" ? "2h" : "10m"} value={String(getIn(doc, p("timeout")) ?? "")} onChange={(e) => update(p("timeout"), e.target.value)} />
-                </Field>
-              )}
-              {!pauses && (
-                <Field label="Retry">
-                  <input
-                    type="number"
-                    min={0}
-                    max={5}
-                    value={String(getIn(doc, p("retry")) ?? "")}
-                    onChange={(e) => update(p("retry"), e.target.value === "" ? undefined : Number(e.target.value))}
-                  />
-                </Field>
-              )}
-            </div>
-            <button type="button" className="ghost danger" onClick={() => mutate((d) => d.deleteIn(["steps", i]))}>
-              Remove step
-            </button>
+            )}
           </fieldset>
         );
       })}

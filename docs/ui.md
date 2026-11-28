@@ -43,6 +43,7 @@ Signing in exchanges the link or token for an `HttpOnly`, `SameSite=Strict` sess
   - the daemon's validation issues shown inline at their JSON Pointer;
   - a canonical JSON view;
   - a graph of the steps, drawn top to bottom, that stays in view while the form scrolls;
+  - step cards that fold to one line (what the step runs and what it waits for, plus a count of its validation issues), with **Collapse all** and **Expand all**; clicking a step in the graph opens its card;
   - saving only once the document validates.
   
   `uses:` steps get a typed form built from the action's inputs, approval and wait steps get their message and duration fields, and integration triggers pick from the installed events.

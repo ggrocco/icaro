@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { diffLines } from "./diff";
-import { layout, stepsFromSpec } from "./graph";
+import { layout, shortLabel, stepSummary, stepsFromSpec } from "./graph";
+import { stepIssues } from "./components/FormEditor";
 import { canonicalJSON, parse, pointerToPath, rangeFor, setIn } from "./yamldoc";
 import { pathAtLine, propertiesAt } from "./schema";
 import { triggerFields } from "./pages/WorkflowDetail";
@@ -79,6 +80,17 @@ describe("graph", () => {
       ["call", "call"],
     ]);
   });
+  it("shortens pinned image references and keeps other labels", () => {
+    expect(shortLabel({ kind: "image", label: "mirror.gcr.io/library/alpine:3.24@sha256:" + "a".repeat(64) })).toBe("alpine:3.24");
+    expect(shortLabel({ kind: "uses", label: "github/create-issue" })).toBe("github/create-issue");
+    expect(shortLabel({ kind: "call", label: "call · run-tests" })).toBe("call · run-tests");
+  });
+  it("summarizes a step on one line", () => {
+    expect(stepSummary({ id: "lint", image: "alpine:3.24@sha256:" + "b".repeat(64), needs: ["prepare"] })).toBe("alpine:3.24 · after prepare");
+    expect(stepSummary({ id: "gate", approval: {}, needs: ["a", "b"] })).toBe("approval · after a, b");
+    expect(stepSummary({ id: "first", image: "alpine" })).toBe("alpine");
+    expect(stepSummary(null)).toBe("");
+  });
   it("survives cycles", () => {
     const placed = layout([
       { id: "a", needs: ["b"], kind: "image", label: "" },
@@ -111,6 +123,15 @@ describe("deadlinePrefix", () => {
   it("adds by only before a calendar date", () => {
     expect(deadlinePrefix(new Date(now.getTime() + 3 * 3600_000), now)).toBe("");
     expect(deadlinePrefix(new Date(now.getTime() + 30 * 86400_000), now)).toBe("by ");
+  });
+});
+
+describe("stepIssues", () => {
+  it("counts the issues inside one step only", () => {
+    const issues = [{ path: "/steps/1/image" }, { path: "/steps/1" }, { path: "/steps/10/id" }, { path: "/name" }];
+    expect(stepIssues(issues, 1)).toBe(2);
+    expect(stepIssues(issues, 10)).toBe(1);
+    expect(stepIssues(issues, 0)).toBe(0);
   });
 });
 

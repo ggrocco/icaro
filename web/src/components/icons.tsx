@@ -38,6 +38,7 @@ const paths: Record<string, React.ReactNode> = {
   ),
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  chevron: <path d="m9 6 6 6-6 6" />,
   play: <path d="M7 4.5v15l12-7.5z" />,
   refresh: (
     <>

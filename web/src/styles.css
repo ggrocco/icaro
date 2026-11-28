@@ -1197,6 +1197,78 @@ h1 .badge {
 .form legend + * {
   clear: both;
 }
+/* A step card's header is its toggle; collapsed, the card is one line. */
+.step-card > legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 0 6px;
+}
+.step-card.collapsed {
+  padding-bottom: 0;
+  margin-bottom: 8px;
+}
+.step-card.collapsed > legend {
+  margin-bottom: 0;
+  border-bottom: none;
+  border-radius: var(--r);
+}
+.step-toggle {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 10px 6px;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.step-toggle:hover:not(:disabled) {
+  background: none;
+}
+.step-toggle:hover .step-name {
+  color: var(--accent);
+}
+.step-toggle .icon {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.step-toggle[aria-expanded="true"] .icon {
+  transform: rotate(90deg);
+}
+.step-name {
+  flex: none;
+}
+.step-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font: 12px var(--font-mono);
+  font-weight: 400;
+}
+.step-card {
+  scroll-margin-top: 16px;
+}
+.steps-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 8px;
+}
+.steps-head .h4 {
+  margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-toggle .icon {
+    transition: none;
+  }
+}
 .form > button,
 .form .field > .ghost {
   border: 1px dashed var(--border-strong);

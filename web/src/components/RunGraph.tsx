@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { ReactFlow, Background, Controls, Position, useNodesInitialized, useReactFlow, useStore, type Edge, type FitViewOptions, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { StepInfo } from "../api";
-import { layout, stepsFromSpec } from "../graph";
+import { layout, shortLabel, stepsFromSpec } from "../graph";
 import { href } from "../router";
 
 interface Props {
@@ -44,8 +44,7 @@ export function RunGraph({ spec, steps, selected, onSelect, vertical }: Props) {
     const nodes: Node[] = placed.map((p) => {
       const st = status.get(p.id);
       const state = st?.status ?? (steps ? "pending" : "");
-      // Image references are pinned by digest; the tag is what reads.
-      const label = p.kind === "uses" || p.kind === "agent" || p.kind === "call" ? p.label : (p.label.split("/").pop() ?? "").replace(/@sha256:[0-9a-f]+$/, "");
+      const label = shortLabel(p);
       // A call step opens its child run's graph (ADR 0038).
       const child = p.kind === "call" ? st?.call?.run_id : undefined;
       return {

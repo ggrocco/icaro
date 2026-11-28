@@ -44,6 +44,8 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
   const seed = useRef<string | undefined>(initial);
   const [tab, setTab] = useState<"form" | "yaml" | "json">("form");
   const [issues, setIssues] = useState<Issue[]>([]);
+  // A click on the graph opens that step in the form.
+  const [focus, setFocus] = useState<{ id: string; seq: number } | undefined>();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<Error | undefined>();
   const [saved, setSaved] = useState(false);
@@ -151,14 +153,22 @@ export function Editor({ name, initial, onSaved, chat, onChatSettled }: Props) {
       <div className="split">
         <div className="pane">
           {tab === "form" && (
-            <FormEditor yaml={yaml} onChange={setYaml} integrations={integrations.data ?? []} agentProfiles={agentProfiles.data ?? []} workflows={workflows.data ?? []} />
+            <FormEditor
+              yaml={yaml}
+              onChange={setYaml}
+              integrations={integrations.data ?? []}
+              agentProfiles={agentProfiles.data ?? []}
+              workflows={workflows.data ?? []}
+              issues={issues}
+              focus={focus}
+            />
           )}
           {tab === "yaml" && <YamlEditor label="Workflow YAML" value={yaml} onChange={setYaml} issues={issues} schema={schema.data} />}
           {tab === "json" && <pre className="code">{doc.errors.length ? "(YAML does not parse)" : canonicalJSON(doc)}</pre>}
         </div>
         <div className="pane side">
           <h2 className="h3">Graph</h2>
-          {spec ? <RunGraph spec={spec} vertical /> : <p className="muted">Fix the YAML to see the graph.</p>}
+          {spec ? <RunGraph spec={spec} vertical onSelect={(id) => { setTab("form"); setFocus((f) => ({ id, seq: (f?.seq ?? 0) + 1 })); }} /> : <p className="muted">Fix the YAML to see the graph.</p>}
           <h2 className="h3">Issues</h2>
           {issues.length ? <Issues issues={issues} /> : <p className="muted">No issues.</p>}
         </div>

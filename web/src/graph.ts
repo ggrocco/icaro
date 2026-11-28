@@ -48,6 +48,21 @@ export function stepsFromSpec(spec: unknown): GraphStep[] {
     }));
 }
 
+// shortLabel is what a step shows at a glance: an image reference is
+// pinned by digest, so its last path segment and tag are what reads.
+export function shortLabel(step: Pick<GraphStep, "kind" | "label">): string {
+  if (step.kind !== "image") return step.label;
+  return (step.label.split("/").pop() ?? "").replace(/@sha256:[0-9a-f]+$/, "");
+}
+
+// stepSummary is the one line a collapsed step card shows: what the step
+// runs and what it waits for ("alpine:3.24 · after lint, test").
+export function stepSummary(step: unknown): string {
+  const [g] = stepsFromSpec({ steps: [step] });
+  if (!g) return "";
+  return [shortLabel(g), g.needs?.length ? `after ${g.needs.join(", ")}` : ""].filter(Boolean).join(" · ");
+}
+
 // callLabel names a call step by the workflow it calls (ADR 0038).
 export function callLabel(c: unknown): string {
   const w = c && typeof c === "object" ? (c as { workflow?: unknown }).workflow : undefined;
